@@ -32,6 +32,7 @@
 #include <stdarg.h>
 #include <sys/wait.h>
 #include <sys/types.h>
+#include <unwind.h>
 
 #include "sim_internal.h"
 
