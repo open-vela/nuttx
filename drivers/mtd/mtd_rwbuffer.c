@@ -43,6 +43,7 @@
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/drivers/rwbuffer.h>
+#include <nuttx/fs/fs.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/mtd/mtd.h>
 
