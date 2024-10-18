@@ -34,6 +34,10 @@ CHIP_CSRCS  = intel64_start.c intel64_handlers.c intel64_idle.c intel64_lowsetup
 CHIP_CSRCS += intel64_serial.c intel64_rng.c intel64_check_capability.c
 CHIP_CSRCS += intel64_cpu.c
 
+ifeq ($(CONFIG_BOARDCTL_POWEROFF),y)
+  CMN_CSRCS += intel64_systempoweroff.c
+endif
+
 ifeq ($(CONFIG_X86_64_UNWINDER_FRAME_POINTER),y)
   CMN_CSRCS += intel64_backtrace_fp.c
 endif

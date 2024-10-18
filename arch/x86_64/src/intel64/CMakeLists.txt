@@ -47,6 +47,10 @@ set(SRCS
     intel64_check_capability.c
     intel64_cpu.c)
 
+if(CONFIG_BOARDCTL_POWEROFF)
+  list(APPEND SRCS intel64_systempoweroff.c)
+endif()
+
 if(CONFIG_X86_64_UNWINDER_FRAME_POINTER)
   list(APPEND SRCS intel64_backtrace_fp.c)
 endif()
