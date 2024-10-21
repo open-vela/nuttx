@@ -129,6 +129,24 @@ config RPMSG_VIRTIO_IVSHMEM
 	---help---
 		This is rpmsg virtio driver based on pci ivshmem.
 
+config RPMSG_VIRTIO_PM
+	bool "rpmsg virtio power management"
+	depends on PM
+	default n
+	---help---
+		If TX/RX buffer is supplied and powered by each CPU.
+		And when one CPU in DEEP sleep, then it's buffer will
+		goto RAM-retention mode, can't access from another CPU.
+		So, we provide this method to resolve this.
+
+config RPMSG_VIRTIO_PM_AUTORELAX
+	bool "rpmsg virtio pm autorelax"
+	depends on RPMSG_VIRTIO_PM
+	default y
+	---help---
+		use wd_timer to auto relax pm
+
+
 if RPMSG_VIRTIO_IVSHMEM
 
 config RPMSG_VIRTIO_IVSHMEM_NAME
