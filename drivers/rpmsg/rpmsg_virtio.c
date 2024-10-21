@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <sys/param.h>
 
+#include <metal/cache.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/kthread.h>
 #include <nuttx/nuttx.h>
@@ -43,6 +44,12 @@
 
 #define RPMSG_VIRTIO_TIMEOUT_MS 20
 #define RPMSG_VIRTIO_NOTIFYID   0
+
+#ifdef CONFIG_OPENAMP_CACHE
+#  define RPMSG_VIRTIO_INVALIDATE(x) metal_cache_invalidate(&x, sizeof(x))
+#else
+#  define RPMSG_VIRTIO_INVALIDATE(x)
+#endif
 
 /****************************************************************************
  * Private Types
@@ -60,6 +67,7 @@ struct rpmsg_virtio_priv_s
   sem_t                         semtx;
   sem_t                         semrx;
   pid_t                         tid;
+  uint16_t                      headrx;
 };
 
 /****************************************************************************
@@ -115,6 +123,24 @@ static const struct virtio_dispatch g_rpmsg_virtio_dispatch =
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+static inline void
+rpmsg_virtio_update_rx(FAR struct rpmsg_virtio_priv_s *priv)
+{
+  FAR struct rpmsg_virtio_device *rvdev = &priv->rvdev;
+  FAR struct virtqueue *rvq = rvdev->rvq;
+
+  if (rpmsg_virtio_get_role(rvdev) == RPMSG_HOST)
+    {
+      RPMSG_VIRTIO_INVALIDATE(rvq->vq_ring.used->idx);
+      priv->headrx = rvq->vq_ring.used->idx;
+    }
+  else
+    {
+      RPMSG_VIRTIO_INVALIDATE(rvq->vq_ring.avail->idx);
+      priv->headrx = rvq->vq_ring.avail->idx;
+    }
+}
 
 static FAR struct rpmsg_virtio_priv_s *
 rpmsg_virtio_get_priv(FAR struct virtio_device *vdev)
@@ -358,6 +384,9 @@ static void rpmsg_virtio_dump(FAR struct rpmsg_s *rpmsg)
   FAR struct metal_list *node;
   bool needlock = true;
 
+  metal_log(METAL_LOG_EMERGENCY, "Remote: %s headrx %d\n",
+            RPMSG_VIRTIO_GET_CPUNAME(priv->dev), priv->headrx);
+
   if (!rvdev->vdev)
     {
       return;
@@ -477,6 +506,7 @@ static int rpmsg_virtio_callback(FAR void *arg, uint32_t vqid)
   if (vqid == RPMSG_VIRTIO_NOTIFY_ALL ||
       vqid == vdev->vrings_info[rvq->vq_queue_index].notifyid)
     {
+      rpmsg_virtio_update_rx(priv);
       rpmsg_virtio_wakeup_rx(priv);
     }
 
@@ -588,6 +618,7 @@ static int rpmsg_virtio_start(FAR struct rpmsg_virtio_priv_s *priv)
 
   RPMSG_VIRTIO_REGISTER_CALLBACK(priv->dev, rpmsg_virtio_callback, priv);
 
+  rpmsg_virtio_update_rx(priv);
   rpmsg_virtio_wakeup_rx(priv);
 
   /* Broadcast device_created to all registers */
