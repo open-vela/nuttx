@@ -31,12 +31,6 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* REVISIT:
- * XTENSA_IRQ_SYSCALL is used by _xtensa_syscall_handler, but
- *  (1) there is no use of syscall instruction to trigger the exception,
- *  (2) there is no handler attached to this IRQ.
- * It is a deprecated feature.
- */
 #define XTENSA_IRQ_SYSCALL          3  /* User interrupt w/EXCCAUSE=syscall */
 #define XTENSA_IRQ_SWINT            4  /* Software interrupt */
 
