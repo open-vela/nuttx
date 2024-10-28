@@ -102,7 +102,6 @@ sim_rptun_get_resource(struct rptun_dev_s *dev)
 {
   struct sim_rptun_dev_s *priv = container_of(dev,
                                  struct sim_rptun_dev_s, rptun);
-  struct rptun_cmd_s *cmd;
 
   priv->shmem = host_allocshmem(priv->shmemname,
                                 sizeof(*priv->shmem));
@@ -110,8 +109,6 @@ sim_rptun_get_resource(struct rptun_dev_s *dev)
     {
       return NULL;
     }
-
-  cmd = RPTUN_RSC2CMD(&priv->shmem->rsc);
 
   priv->raddrenv[0].da   = 0;
   priv->raddrenv[0].size = sizeof(*priv->shmem);
@@ -147,7 +144,6 @@ sim_rptun_get_resource(struct rptun_dev_s *dev)
       rsc->config.r2h_buf_size      = 0x800;
       rsc->config.h2r_buf_size      = 0x800;
 
-      cmd->cmd_slave                = 0;
       priv->shmem->base             = (uintptr_t)priv->shmem;
 
       /* The master notifies its slave when it starts again */
@@ -176,8 +172,6 @@ sim_rptun_get_resource(struct rptun_dev_s *dev)
         {
           usleep(1000);
         }
-
-      cmd->cmd_master       = 0;
 
       priv->raddrenv[0].pa  = (uintptr_t)priv->shmem->base;
 

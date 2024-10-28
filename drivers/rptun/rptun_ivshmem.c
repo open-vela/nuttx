@@ -194,7 +194,6 @@ rptun_ivshmem_get_resource(FAR struct rptun_dev_s *dev)
       rsc->config.h2r_buf_size      = CONFIG_RPTUN_IVSHMEM_BUFFSIZE;
 
       priv->shmem->rsc_size         = sizeof(struct rptun_rsc_s);
-      cmd->cmd_master               = 0;
       cmd->cmd_slave                = RPTUN_CMD(RPTUN_CMD_READY, 0);
 
       /* Wait untils master is ready, salve need use master base to
