@@ -44,6 +44,8 @@
 #define RPMSGIOC_PING               _RPMSGIOC(3)
 #define RPMSGIOC_TEST               _RPMSGIOC(4)
 
+#define RPMSG_SIGNAL_RUNNING        TIOCM_CD
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -80,6 +82,7 @@ struct rpmsg_ops_s
   CODE void (*dump)(FAR struct rpmsg_s *rpmsg);
   CODE FAR const char *(*get_local_cpuname)(FAR struct rpmsg_s *rpmsg);
   CODE FAR const char *(*get_cpuname)(FAR struct rpmsg_s *rpmsg);
+  CODE int (*get_signals)(FAR struct rpmsg_endpoint *ept);
 };
 
 CODE typedef void (*rpmsg_dev_cb_t)(FAR struct rpmsg_device *rdev,
@@ -103,11 +106,17 @@ extern "C"
 #define EXTERN extern
 #endif
 
+static inline_function bool rpmsg_is_running(FAR struct rpmsg_endpoint *ept)
+{
+  return rpmsg_get_signals(ept) & RPMSG_SIGNAL_RUNNING;
+}
+
 int rpmsg_wait(FAR struct rpmsg_endpoint *ept, FAR sem_t *sem);
 int rpmsg_post(FAR struct rpmsg_endpoint *ept, FAR sem_t *sem);
 
 FAR const char *rpmsg_get_local_cpuname(FAR struct rpmsg_device *rdev);
 FAR const char *rpmsg_get_cpuname(FAR struct rpmsg_device *rdev);
+int rpmsg_get_signals(FAR struct rpmsg_endpoint *ept);
 
 int rpmsg_register_callback(FAR void *priv,
                             rpmsg_dev_cb_t device_created,
