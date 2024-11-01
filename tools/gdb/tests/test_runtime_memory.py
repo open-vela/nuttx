@@ -18,6 +18,7 @@
 #
 ############################################################################
 
+import re
 import unittest
 
 import gdb
@@ -31,9 +32,9 @@ class TestMemory(unittest.TestCase):
     def setUpClass(cls):
         pass
 
-    def check_output(self, out, expect="Total Blks  Total Size"):
-        if expect not in out:
-            self.fail(f"Got: {out}")
+    def check_output(self, out, expect=r"Total \d+ blks, \d+ bytes"):
+        if not re.compile(expect).search(out):
+            self.fail(f"Got: \n{out}")
 
     def test_memdump(self):
         out = gdb.execute("memdump", to_string=True)
@@ -46,15 +47,15 @@ class TestMemory(unittest.TestCase):
     def test_memdump_addr(self):
         heap_start = gdb.parse_and_eval("g_mmheap")["mm_heapstart"][0]
         out = gdb.execute(f"memdump -a {hex(heap_start)}", to_string=True)
-        self.check_output(out, expect="found belongs to")
+        self.check_output(out, expect=r"found belongs to")
 
-    def test_memdump_used(self):
-        out = gdb.execute("memdump --used", to_string=True)
+    def test_memdump_free(self):
+        out = gdb.execute("memdump --free", to_string=True)
         self.check_output(out)
 
     def test_memleak(self):
         out = gdb.execute("memleak", to_string=True)
-        self.check_output(out, expect="total leak memory is")
+        self.check_output(out, expect=r"Leaked \d+ blks, \d+ bytes")
 
     # memmap may stuck because of huge 2GB memory qemu provides.
     # def test_memmap(self):
@@ -62,10 +63,13 @@ class TestMemory(unittest.TestCase):
 
     def test_memfrag(self):
         out = gdb.execute("memfrag", to_string=True)
-        self.check_output(out, expect="memory fragmentation rate")
+        self.check_output(out, expect=r"fragmentation rate")
 
     def test_mempool(self):
         out = gdb.execute("mempool", to_string=True)
-        self.check_output(
-            out, expect="total    bsize    nused    nfree   nifree  nwaiter"
-        )
+        self.check_output(out, expect=r"Total \d+ pools")
+
+    def test_mm_heap(self):
+        out = gdb.execute("mm heap", to_string=True)
+        # Umem@0x41977b78, 1regions, 94304.1kB - has 1408 nodes, regions:0x41977f78~0x4758ffd0
+        self.check_output(out, expect=r"Umem@0x[0-9a-f]+, \d+regions, \d+\.\d+kB")
