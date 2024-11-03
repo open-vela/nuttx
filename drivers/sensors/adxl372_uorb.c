@@ -29,9 +29,9 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
-
 #include <sys/param.h>
 
+#include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/kthread.h>
 #include <nuttx/signal.h>
