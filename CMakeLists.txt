@@ -59,6 +59,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# default install path is from the original Makefile staging.
+set(CMAKE_INSTALL_PREFIX
+    ${CMAKE_BINARY_DIR}/staging
+    CACHE PATH "Global install prefix" FORCE)
+
 # Setup build type (Debug Release RelWithDebInfo MinSizeRel Coverage). Default
 # to minimum size release
 
