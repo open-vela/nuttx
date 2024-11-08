@@ -18,6 +18,8 @@
 #
 ############################################################################
 
+from __future__ import annotations
+
 import argparse
 import importlib
 import json
@@ -38,26 +40,85 @@ g_macro_ctx = None
 
 
 class Value(gdb.Value):
-    def __init__(self, obj: gdb.Value):
+    def __init__(self, obj: Union[gdb.Value, Value]):
         super().__init__(obj)
+
+    def __isabstractmethod__(self):
+        # Added to avoid getting error using __getattr__
+        return False
 
     def __getattr__(self, key):
         if hasattr(super(), key):
-            return Value(super().__getattribute__(key))
+            value = super().__getattribute__(key)
         else:
-            return Value(super().__getitem__(key))
+            value = super().__getitem__(key)
+
+        return Value(value) if not isinstance(value, Value) else value
 
     def __getitem__(self, key):
-        return Value(super().__getitem__(key))
+        value = super().__getitem__(key)
+        return Value(value) if not isinstance(value, Value) else value
+
+    def __format__(self, format_spec: str) -> str:
+        try:
+            return super().__format__(format_spec)
+        except TypeError:
+            # Convert GDB value to python value, and then format it
+            type_code_map = {
+                gdb.TYPE_CODE_INT: int,
+                gdb.TYPE_CODE_PTR: int,
+                gdb.TYPE_CODE_ENUM: int,
+                gdb.TYPE_CODE_FUNC: hex,
+                gdb.TYPE_CODE_BOOL: bool,
+                gdb.TYPE_CODE_FLT: float,
+                gdb.TYPE_CODE_STRING: str,
+                gdb.TYPE_CODE_CHAR: lambda x: chr(int(x)),
+            }
+
+            t = self.type
+            while t.code == gdb.TYPE_CODE_TYPEDEF:
+                t = t.target()
+
+            type_code = t.code
+            try:
+                converter = type_code_map[type_code]
+                return f"{converter(self):{format_spec}}"
+            except KeyError:
+                raise TypeError(
+                    f"Unsupported type: {self.type}, {self.type.code} {self}"
+                )
+
+    @property
+    def address(self) -> Value:
+        value = super().address
+        return value and Value(value)
 
     def cast(self, type: str | gdb.Type, ptr: bool = False) -> Optional["Value"]:
         try:
-            gdb_type = gdb.lookup_type(type) if isinstance(type, str) else type
+            gdb_type = lookup_type(type) if isinstance(type, str) else type
             if ptr:
                 gdb_type = gdb_type.pointer()
             return Value(super().cast(gdb_type))
         except gdb.error:
             return None
+
+    def dereference(self) -> Value:
+        return Value(super().dereference())
+
+    def reference_value(self) -> Value:
+        return Value(super().reference_value())
+
+    def referenced_value(self) -> Value:
+        return Value(super().referenced_value())
+
+    def rvalue_reference_value(self) -> Value:
+        return Value(super().rvalue_reference_value())
+
+    def const_value(self) -> Value:
+        return Value(super().const_value())
+
+    def dynamic_cast(self, type: gdb.Type) -> Value:
+        return Value(super().dynamic_cast(type))
 
 
 class Backtrace:
