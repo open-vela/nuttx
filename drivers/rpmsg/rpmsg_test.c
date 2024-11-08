@@ -198,6 +198,7 @@ static int rpmsg_test_hold_rx(FAR struct rpmsg_test_priv_s *priv)
   FAR struct rpmsg_test_msg_s *msg;
   FAR struct rpmsg_test_msg_s *nmsg;
   uint32_t space;
+  uint32_t nspace;
   int num = 0;
   int ret;
 
@@ -215,7 +216,7 @@ static int rpmsg_test_hold_rx(FAR struct rpmsg_test_priv_s *priv)
 
   for (; ; )
     {
-      nmsg = rpmsg_get_tx_payload_buffer(ept, &space, false);
+      nmsg = rpmsg_get_tx_payload_buffer(ept, &nspace, false);
       num++;
       msg->cmd = nmsg ? RPMSG_TEST_CMD_HOLD_RX :
                         RPMSG_TEST_CMD_HOLD_RX_END;
@@ -229,6 +230,7 @@ static int rpmsg_test_hold_rx(FAR struct rpmsg_test_priv_s *priv)
         }
 
       msg = nmsg;
+      space = nspace;
     }
 
   syslog(LOG_EMERG, "Rpmsg Test: tx buffer num=%d space=%" PRIu32 "\n",
