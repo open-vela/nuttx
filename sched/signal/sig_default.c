@@ -30,10 +30,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <signal.h>
 #include <assert.h>
 
-#include <nuttx/pthread.h>
 #include <nuttx/sched.h>
 #include <nuttx/spinlock.h>
 #include <nuttx/signal.h>
@@ -225,8 +225,6 @@ static void nxsig_abnormal_termination(int signo)
   group_kill_children(rtcb);
 #endif
 
-  tls_cleanup_popall(tls_get_info());
-
 #ifndef CONFIG_DISABLE_PTHREAD
   /* Check if the currently running task is actually a pthread */
 
@@ -237,7 +235,7 @@ static void nxsig_abnormal_termination(int signo)
        * REVISIT:  This will not work if HAVE_GROUP_MEMBERS is not set.
        */
 
-      nx_pthread_exit(NULL);
+      pthread_exit(NULL);
     }
   else
 #endif
