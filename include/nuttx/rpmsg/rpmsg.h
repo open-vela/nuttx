@@ -109,6 +109,11 @@ int rpmsg_post(FAR struct rpmsg_endpoint *ept, FAR sem_t *sem);
 FAR const char *rpmsg_get_local_cpuname(FAR struct rpmsg_device *rdev);
 FAR const char *rpmsg_get_cpuname(FAR struct rpmsg_device *rdev);
 
+static inline_function bool rpmsg_is_running(FAR struct rpmsg_endpoint *ept)
+{
+  return rpmsg_get_signals(ept) & RPMSG_SIGNAL_RUNNING;
+}
+
 int rpmsg_register_callback(FAR void *priv,
                             rpmsg_dev_cb_t device_created,
                             rpmsg_dev_cb_t device_destroy,
