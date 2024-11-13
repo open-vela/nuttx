@@ -147,9 +147,7 @@ static void pthread_start(void)
   /* The thread has returned (should never happen) */
 
   DEBUGPANIC();
-
-  tls_cleanup_popall(tls_get_info());
-  nx_pthread_exit(NULL);
+  pthread_exit(NULL);
 }
 
 /****************************************************************************
