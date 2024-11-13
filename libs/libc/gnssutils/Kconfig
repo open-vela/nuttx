@@ -12,3 +12,15 @@ config GNSSUTILS_MINMEA_LIB
 		NOTE: This library depends on having some version of math.h
 		at include/nuttx.  There are some different ways to accomplish
 		this.  See the discussion in the top-level nuttx/README.txt file.
+
+if GNSSUTILS_MINMEA_LIB
+
+config GNSSUTILS_MINMEA_VERSION_4_10
+	bool "MINMEAD NMEA version 4.10"
+	default n
+	---help---
+		Enable support for nmea version 4.10.
+		NOTE: This library depends on gps gnssutils/minmea.
+		Open when get nmea data with version 4.10
+
+endif
