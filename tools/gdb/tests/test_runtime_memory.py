@@ -71,5 +71,6 @@ class TestMemory(unittest.TestCase):
 
     def test_mm_heap(self):
         out = gdb.execute("mm heap", to_string=True)
-        # Umem@0x41977b78, 1regions, 94304.1kB - has 1408 nodes, regions:0x41977f78~0x4758ffd0
-        self.check_output(out, expect=r"Umem@0x[0-9a-f]+, \d+regions, \d+\.\d+kB")
+        # Umem@0x21023230, 2101106.4kB 2regions: 0x21023638~0x213fffd0,0x60000000~0xdfffffd0
+        #  - has 21 nodes, regions:0x21023638~0x213fffd0 0x60000000~0xdfffffd0
+        self.check_output(out, expect=r"Umem@0x[0-9a-f]+, \d+\.\d+kB \d+regions")
