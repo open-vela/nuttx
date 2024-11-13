@@ -39,6 +39,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
 from os import path
 
@@ -133,7 +134,7 @@ def fetch_macro_info(file):
 
     macros = {}
     p = re.compile(r".*macro[ ]*:[ ]*([\S]+\(.*?\)|[\w]+)[ ]*(.*)")
-    cache = path.join(path.dirname(path.abspath(file)), f"{hash}.json")
+    cache = path.join(tempfile.gettempdir(), f"{hash}.json")
     print(f"Load macro: {cache}")
     if not path.isfile(cache):
         t = time.time()
