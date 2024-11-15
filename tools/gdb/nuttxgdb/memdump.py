@@ -301,6 +301,48 @@ def check_node_alive(node) -> bool:
         tcb = get_tcb(node["pid"])
         return tcb is not None
 
+def print_node(node: MMNodeDump, alive, count=1, formatter=None, no_backtrace=False):
+    formatter = (
+        formatter or "{:>1} {:>4} {:>12} {:>12} {:>12} {:>9} {:>14} {:>18} {:}\n"
+    )
+    gdb.write(
+        formatter.format(
+            "\x1b[33;1m*\x1b[m" if not alive else "",
+            "P" if node.from_pool else "H",
+            count,
+            node.pid,
+            node.nodesize,
+            node.overhead,
+            node.seqno,
+            hex(node.address),
+            "",
+        )
+    )
+
+    if mm.CONFIG_MM_BACKTRACE and not no_backtrace:
+        leading = formatter.format("", "", "", "", "", "", "", "", "")[:-1]
+        btformat = leading + "{1:<48}{2}\n"
+        if node.backtrace and node.backtrace[0]:
+            gdb.write(f"{utils.Backtrace(node.backtrace, formatter=btformat)}\n")
+
+
+def print_header(formatter=None):
+    formatter = (
+        formatter or "{:>1} {:>4} {:>12} {:>12} {:>12} {:>9} {:>14} {:>18} {:}\n"
+    )
+    head = (
+        "",
+        "Pool",
+        "CNT",
+        "PID",
+        "Size",
+        "Overhead",
+        "Seqno",
+        "Address",
+        "Backtrace",
+    )
+    gdb.write(formatter.format(*head))
+
 
 class HeapNode:
     def __init__(self, gdb_node, nextfree=False):
