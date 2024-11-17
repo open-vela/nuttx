@@ -78,7 +78,7 @@ static void save_and_replace_init_funcs(int argc, const char *argv[],
   init_func_t *fp;
   unsigned int nfuncs = &mod_init_func_end - &mod_init_func_start;
 
-  ASSERT(nfuncs > 0);
+  assert(nfuncs > 0);
   g_num_saved_init_funcs = nfuncs - 1;
   if (g_num_saved_init_funcs == 0)
     {
@@ -102,7 +102,7 @@ static void save_and_replace_init_funcs(int argc, const char *argv[],
     {
       if (*fp == save_and_replace_init_funcs)
         {
-          ASSERT(i == 0);
+          assert(i == 0);
         }
       else
         {
