@@ -88,6 +88,8 @@ function setup_environment()
       "g++-multilib" \
       "gettext" \
       "mtools" \
+      "libunwind-dev" \
+      "libunwind-dev:i386" \
       )
 
   for (( i = 0; i < ${#PACKAGES[*]}; i++)); do
