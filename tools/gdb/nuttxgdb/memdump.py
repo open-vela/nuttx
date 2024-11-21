@@ -462,7 +462,6 @@ class MMfrag(gdb.Command):
             type=str,
             default=None,
             help="Which heap to inspect",
->>>>>>> 5615c252f0 (gdb/memdump: reorganize the memdump parameters)
         )
 
     gdb.write("\n")
