@@ -33,8 +33,8 @@ from enum import Enum
 from typing import List, Optional, Tuple, Union
 
 import gdb
+from nxelf.macros import fetch_macro_info, try_expand
 
-from .macros import fetch_macro_info, try_expand
 from .protocols.thread import Tcb
 
 g_symbol_cache = {}

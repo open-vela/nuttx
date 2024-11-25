@@ -1,5 +1,5 @@
 ############################################################################
-# tools/pynuttx/nxgdb/macros.py
+# tools/pynuttx/nxelf/macros.py
 #
 # SPDX-License-Identifier: Apache-2.0
 #
