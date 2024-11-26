@@ -80,7 +80,6 @@ function setup_environment()
       "nasm" \
       "yasm" \
       "libdivsufsort-dev" \
-      "libc++-dev" \
       "libc++abi-dev" \
       "libprotobuf-dev" \
       "protobuf-compiler" \
