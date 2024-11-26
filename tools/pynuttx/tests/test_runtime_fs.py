@@ -49,7 +49,7 @@ class TestFs(unittest.TestCase):
 
     def test_foreach_inode(self):
         out = gdb.execute("foreach inode", to_string=True)
-        self.check_output(out, expect="[console],")
+        self.check_output(out, expect=" console ")
 
     def test_foreach_inode_addr(self):
         pass
