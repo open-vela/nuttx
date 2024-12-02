@@ -1,6 +1,8 @@
 ############################################################################
 # tools/pynuttx/nxgdb/memdump.py
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.  The
@@ -354,10 +356,10 @@ class MMDump(gdb.Command):
                 printnode(node, 1)
                 print(f"{addr: #x} found belongs to {source} - {node}")
 
-            if node.prevnode:
-                print(f"prevnode: {node.prevnode}")
-            if node.nextnode:
-                print(f"nextnode: {node.nextnode}")
+                if node.prevnode:
+                    print(f"prevnode: {node.prevnode}")
+                if node.nextnode:
+                    print(f"nextnode: {node.nextnode}")
             return
 
         filters = {
