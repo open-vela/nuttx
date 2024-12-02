@@ -41,8 +41,11 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define RPMSG_VIRTIO_TIMEOUT_MS 20
-#define RPMSG_VIRTIO_NOTIFYID   0
+#define RPMSG_VIRTIO_TIMEOUT_MS      20
+
+#define RPMSG_VIRTIO_VDEV_NOTIFYID   0
+#define RPMSG_VIRTIO_VRING0_NOTIFYID 1
+#define RPMSG_VIRTIO_VRING1_NOTIFYID 2
 
 /****************************************************************************
  * Private Types
@@ -203,7 +206,13 @@ static void rpmsg_virtio_notify(FAR struct virtqueue *vq)
   FAR struct virtio_device *vdev = vq->vq_dev;
   FAR struct rpmsg_virtio_priv_s *priv = rpmsg_virtio_get_priv(vdev);
 
-  RPMSG_VIRTIO_NOTIFY(priv->dev, vdev->vrings_info->notifyid);
+  if (priv->rvdev.svq == vq)
+    {
+      rpmsg_virtio_pm_action(priv, true);
+    }
+
+  RPMSG_VIRTIO_NOTIFY(priv->dev,
+                      vdev->vrings_info[vq->vq_queue_index].notifyid);
 }
 
 static bool rpmsg_virtio_is_recursive(FAR struct rpmsg_virtio_priv_s *priv)
@@ -527,7 +536,7 @@ static int rpmsg_virtio_start(FAR struct rpmsg_virtio_priv_s *priv)
 
   priv->rsc = rsc;
 
-  vdev->notifyid = RPMSG_VIRTIO_NOTIFYID;
+  vdev->notifyid = RPMSG_VIRTIO_VDEV_NOTIFYID;
   vdev->vrings_num = rsc->rpmsg_vdev.num_of_vrings;
   vdev->role = RPMSG_VIRTIO_IS_MASTER(priv->dev) ? RPMSG_HOST : RPMSG_REMOTE;
   vdev->func = &g_rpmsg_virtio_dispatch;
@@ -547,6 +556,7 @@ static int rpmsg_virtio_start(FAR struct rpmsg_virtio_priv_s *priv)
   rvrings[0].info.vaddr = (FAR char *)rsc + tbsz;
   rvrings[0].info.num_descs = rsc->rpmsg_vring0.num;
   rvrings[0].info.align = rsc->rpmsg_vring0.align;
+  rvrings[0].notifyid = RPMSG_VIRTIO_VRING0_NOTIFYID;
   rvrings[0].vq = virtqueue_allocate(rsc->rpmsg_vring0.num);
   if (rvrings[0].vq == NULL)
     {
@@ -557,6 +567,7 @@ static int rpmsg_virtio_start(FAR struct rpmsg_virtio_priv_s *priv)
   rvrings[1].info.vaddr = (FAR char *)rsc + tbsz + v0sz;
   rvrings[1].info.num_descs = rsc->rpmsg_vring1.num;
   rvrings[1].info.align = rsc->rpmsg_vring1.align;
+  rvrings[1].notifyid = RPMSG_VIRTIO_VRING1_NOTIFYID;
   rvrings[1].vq = virtqueue_allocate(rsc->rpmsg_vring1.num);
   if (rvrings[1].vq == NULL)
     {
