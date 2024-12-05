@@ -166,7 +166,7 @@ class SetRegs(gdb.Command):
          setregs tcb->xcp.regs
          setregs g_pidhash[0]->xcp.regs
 
-    Default regs is tcbinfo_current_regs(),if regs is NULL, it will not set registers.
+    Default regs is tcbinfo_running_regs(),if regs is NULL, it will not set registers.
     """
 
     def __init__(self):
@@ -181,7 +181,7 @@ class SetRegs(gdb.Command):
             "regs",
             nargs="?",
             default="",
-            help="The registers to set, use tcbinfo_current_regs() if not specified",
+            help="The registers to set, use tcbinfo_running_regs() if not specified",
         )
 
         try:
@@ -194,7 +194,7 @@ class SetRegs(gdb.Command):
                 utils.lookup_type("char").pointer()
             )
         else:
-            current_regs = gdb.parse_and_eval("tcbinfo_current_regs()")
+            current_regs = gdb.parse_and_eval("tcbinfo_running_regs()")
             regs = current_regs.cast(utils.lookup_type("char").pointer())
 
         if regs == 0:
