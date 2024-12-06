@@ -22,7 +22,7 @@
 
 import argparse
 import enum
-from typing import Generator, Tuple
+from typing import Generator, Tuple, Union
 
 import gdb
 
@@ -73,7 +73,7 @@ class InodeType(enum.Enum):
 
 
 class Inode(utils.Value, p.Inode):
-    def __init__(self, obj: gdb.Value | utils.Value):
+    def __init__(self, obj: Union[gdb.Value, utils.Value]):
         super().__init__(obj)
 
     def __str__(self) -> str:

@@ -21,7 +21,7 @@
 ############################################################################
 
 import argparse
-from typing import Generator
+from typing import Generator, Union
 
 import gdb
 
@@ -31,7 +31,7 @@ from .protocols import circbuf as p
 
 class CircBuf(utils.Value, p.CircBuf):
     def __init__(
-        self, obj: gdb.Value | utils.Value, datatype: gdb.Type | None = None
+        self, obj: Union[gdb.Value, utils.Value], datatype: gdb.Type = None
     ) -> None:
         circbuf_s = utils.lookup_type("struct circbuf_s")
         if obj.type.code == gdb.TYPE_CODE_INT:
