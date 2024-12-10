@@ -174,7 +174,7 @@ static int create_spgtables(arch_addrenv_t *addrenv)
 
   /* Flush the data cache, so the changes are committed to memory */
 
-  __DMB();
+  UP_DMB();
 
   return i;
 }
@@ -310,7 +310,7 @@ static int create_region(arch_addrenv_t *addrenv, uintptr_t vaddr,
 
   /* Flush the data cache, so the changes are committed to memory */
 
-  __DMB();
+  UP_DMB();
 
   return npages;
 }
@@ -484,8 +484,8 @@ int up_addrenv_create(size_t textsize, size_t datasize, size_t heapsize,
 
   /* When all is set and done, flush the data caches */
 
-  __ISB();
-  __DMB();
+  UP_ISB();
+  UP_DMB();
 
   return OK;
 
@@ -526,8 +526,8 @@ int up_addrenv_destroy(arch_addrenv_t *addrenv)
 
   /* Make sure the caches are flushed before doing this */
 
-  __ISB();
-  __DMB();
+  UP_ISB();
+  UP_DMB();
 
   /* Things start from the beginning of the user virtual memory */
 
@@ -581,8 +581,8 @@ int up_addrenv_destroy(arch_addrenv_t *addrenv)
 
   /* When all is set and done, flush the caches */
 
-  __ISB();
-  __DMB();
+  UP_ISB();
+  UP_DMB();
 
   memset(addrenv, 0, sizeof(arch_addrenv_t));
   return OK;
