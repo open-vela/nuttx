@@ -66,8 +66,9 @@
 #include <nuttx/irq.h>
 #include <nuttx/pgalloc.h>
 
+#include <arch/barriers.h>
+
 #include "addrenv.h"
-#include "barriers.h"
 #include "pgalloc.h"
 #include "arm64_mmu.h"
 
@@ -177,8 +178,7 @@ static int create_spgtables(arch_addrenv_t *addrenv)
 
   /* Synchronize data and instruction pipelines */
 
-  ARM64_DSB();
-  ARM64_ISB();
+  UP_MB();
 
   return i;
 }
@@ -335,8 +335,7 @@ static int create_region(arch_addrenv_t *addrenv, uintptr_t vaddr,
 
   /* Synchronize data and instruction pipelines */
 
-  ARM64_DSB();
-  ARM64_ISB();
+  UP_MB();
 
   return npages;
 }
@@ -512,8 +511,7 @@ int up_addrenv_create(size_t textsize, size_t datasize, size_t heapsize,
 
   /* Synchronize data and instruction pipelines */
 
-  ARM64_DSB();
-  ARM64_ISB();
+  UP_MB();
 
   return OK;
 
@@ -601,8 +599,7 @@ int up_addrenv_destroy(arch_addrenv_t *addrenv)
 
   /* Synchronize data and instruction pipelines */
 
-  ARM64_DSB();
-  ARM64_ISB();
+  UP_MB();
 
   memset(addrenv, 0, sizeof(arch_addrenv_t));
   return OK;

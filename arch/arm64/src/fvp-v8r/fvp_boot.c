@@ -28,6 +28,7 @@
 #include <assert.h>
 #include <debug.h>
 
+#include <arch/barriers.h>
 #include <arch/chip/chip.h>
 
 #ifdef CONFIG_SMP
@@ -111,7 +112,7 @@ void arm64_el_init(void)
 {
   write_sysreg(CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC, cntfrq_el0);
 
-  ARM64_ISB();
+  UP_ISB();
 }
 
 #ifdef CONFIG_SMP

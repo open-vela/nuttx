@@ -28,6 +28,7 @@
 #include <assert.h>
 #include <debug.h>
 
+#include <arch/barriers.h>
 #include <arch/chip/chip.h>
 
 #ifdef CONFIG_SMP
@@ -112,7 +113,7 @@ void arm64_el_init(void)
 
   write_sysreg(CONFIG_SYS_COUNT_CLK_FREQ, cntfrq_el0);
 
-  ARM64_ISB();
+  UP_ISB();
 
   reg = read_sysreg(s3_0_c15_c0_5);
   reg |= 0x3;

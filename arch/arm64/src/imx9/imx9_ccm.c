@@ -30,7 +30,7 @@
 #include <sys/param.h>
 #include <sys/types.h>
 
-#include "barriers.h"
+#include <arch/barriers.h>
 
 #include "arm64_internal.h"
 #include "imx9_ccm.h"
@@ -40,14 +40,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define mb()       \
-  do               \
-    {              \
-      ARM64_DSB(); \
-      ARM64_ISB(); \
-    }              \
-  while (0)
 
 /****************************************************************************
  * Private Functions
@@ -300,7 +292,7 @@ int imx9_ccm_configure_root_clock(int root, int src, uint32_t div)
 
   value = CCM_CR_CTRL_MUX_SRCSEL(i) | CCM_CR_CTRL_DIV(div);
   putreg32(value, IMX9_CCM_CR_CTRL(root));
-  mb();
+  UP_MB();
 
   /* Wait for the clock state change */
 
@@ -341,7 +333,7 @@ int imx9_ccm_root_clock_on(int root, bool enabled)
       putreg32(CCM_CR_CTRL_OFF, IMX9_CCM_CR_CTRL_SET(root));
     }
 
-  mb();
+  UP_MB();
 
   /* Wait for the clock state change */
 
@@ -382,12 +374,12 @@ int imx9_ccm_gate_on(int gate, bool enabled)
     {
       value &= ~CCM_LPCG_AUTH_CPULPM;
       putreg32(value, IMX9_CCM_LPCG_AUTH(gate));
-      mb();
+      UP_MB();
     }
 
   value = enabled ? 1 : 0;
   putreg32(value, IMX9_CCM_LPCG_DIR(gate));
-  mb();
+  UP_MB();
 
   /* Wait for the clock state change */
 

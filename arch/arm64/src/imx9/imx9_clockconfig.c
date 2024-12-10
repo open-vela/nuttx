@@ -30,9 +30,8 @@
 #include <sys/param.h>
 #include <sys/types.h>
 
+#include <arch/barriers.h>
 #include <arch/board/board.h>
-
-#include "barriers.h"
 
 #include "arm64_internal.h"
 #include "imx9_ccm.h"
@@ -47,16 +46,6 @@
 /* The base oscillator frequency is 24MHz */
 
 #define XTAL_FREQ 24000000u
-
-/* Common barrier */
-
-#define mb()       \
-  do               \
-    {              \
-      ARM64_DSB(); \
-      ARM64_ISB(); \
-    }              \
-  while (0)
 
 /****************************************************************************
  * Private Functions
@@ -101,7 +90,7 @@ static int pll_init(uintptr_t reg, bool frac, struct pll_parms_s *parm)
   /* Power it back up and wait for lock */
 
   putreg32(PLL_CTRL_POWERUP, PLL_SET(PLL_CTRL(reg)));
-  mb();
+  UP_MB();
 
   while (!(getreg32(PLL_PLL_STATUS(reg)) & PLL_PLL_STATUS_PLL_LOCK));
 
@@ -109,7 +98,7 @@ static int pll_init(uintptr_t reg, bool frac, struct pll_parms_s *parm)
 
   putreg32(PLL_CTRL_CLKMUX_EN, PLL_SET(PLL_CTRL(reg)));
   putreg32(PLL_CTRL_CLKMUX_BYPASS, PLL_CLR(PLL_CTRL(reg)));
-  mb();
+  UP_MB();
 
   return OK;
 }
@@ -169,7 +158,7 @@ static int pll_pfd_init(uintptr_t reg, int pfd, struct pfd_parms_s *pfdparm)
   /* Enable DFS and wait for lock */
 
   putreg32(PLL_DFS_ENABLE, PLL_SET(ctrl));
-  mb();
+  UP_MB();
 
   /* Wait until the clock output is valid */
 
@@ -178,7 +167,7 @@ static int pll_pfd_init(uintptr_t reg, int pfd, struct pfd_parms_s *pfdparm)
   /* Then disable bypass */
 
   putreg32(PLL_DFS_BYPASS_EN, PLL_CLR(ctrl));
-  mb();
+  UP_MB();
 
   return OK;
 }

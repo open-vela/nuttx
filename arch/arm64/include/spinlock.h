@@ -29,6 +29,8 @@
 #  include <stdint.h>
 #endif /* __ASSEMBLY__ */
 
+#include <arch/barriers.h>
+
 /****************************************************************************
  * Pre-processor Prototypes
  ****************************************************************************/
@@ -58,9 +60,6 @@
  *   dsb sy - Data synchronization barrier.  Assures that the CPU waits until
  *            all memory accesses are complete
  */
-
-#define UP_DSB() __asm__ __volatile__ ("dsb sy" : : : "memory")
-#define UP_DMB() __asm__ __volatile__ ("dmb st" : : : "memory")
 
 #define UP_WFE() __asm__ __volatile__ ("wfe" : : : "memory")
 #define UP_SEV() __asm__ __volatile__ ("sev" : : : "memory")
