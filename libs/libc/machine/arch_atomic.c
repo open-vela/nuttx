@@ -761,8 +761,8 @@ SYNC_VAL_CMP_SWAP(8, uint64_t)
 
 void weak_function __sync_synchronize(void)
 {
-#ifdef SP_DMB
-  SP_DMB();
+#ifdef UP_DMB
+  UP_DMB();
 #endif
 }
 

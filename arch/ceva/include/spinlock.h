@@ -61,8 +61,8 @@
  *
  */
 
-#define SP_DSB() up_dsb()
-#define SP_DMB() up_dmb()
+#define UP_DSB() up_dsb()
+#define UP_DMB() up_dmb()
 
 /****************************************************************************
  * Public Types
