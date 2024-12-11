@@ -27,10 +27,10 @@
 
 #include <nuttx/cache.h>
 #include <nuttx/init.h>
+#include <arch/barriers.h>
 #include <arch/board/board.h>
 
 #include "arm_internal.h"
-#include "barriers.h"
 #include "nvic.h"
 #include "mps_irq.h"
 #include "mps_userspace.h"
@@ -75,8 +75,7 @@ static inline void mps_tcmenable(void)
 {
   uint32_t regval;
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 
   /* Enabled/disabled ITCM */
 
@@ -98,8 +97,7 @@ static inline void mps_tcmenable(void)
 #endif
   putreg32(regval, NVIC_DTCMCR);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 
 /****************************************************************************
@@ -163,7 +161,7 @@ void __start(void)
 #ifdef CONFIG_ARMV7M_DCACHE
   /* Memory barrier */
 
-  ARM_DMB();
+  UP_DMB();
 
 #endif
 

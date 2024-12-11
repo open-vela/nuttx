@@ -28,9 +28,9 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/progmem.h>
+#include <arch/barriers.h>
 
 #include "arm_internal.h"
-#include "barriers.h"
 
 #include "hardware/nrf91_ficr.h"
 #include "hardware/nrf91_nvmc.h"
@@ -38,8 +38,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define MEMORY_SYNC() ARM_ISB(); ARM_DSB()
 
 /* Sizes and masks */
 
@@ -218,7 +216,7 @@ ssize_t up_progmem_eraseblock(size_t block)
 
   /* Memory sync */
 
-  MEMORY_SYNC();
+  UP_MB();
 
   /* Erase the page by writting 0xffffffff into the first 32-bit word of
    * the flash page
@@ -238,7 +236,7 @@ ssize_t up_progmem_eraseblock(size_t block)
 
   /* Memory sync */
 
-  MEMORY_SYNC();
+  UP_MB();
 
   /* Verify */
 
@@ -354,7 +352,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
 
       /* Memory sync */
 
-      MEMORY_SYNC();
+      UP_MB();
 
       /* Write the word */
 
@@ -372,7 +370,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
 
       /* Memory sync */
 
-      MEMORY_SYNC();
+      UP_MB();
 
       /* Verify */
 

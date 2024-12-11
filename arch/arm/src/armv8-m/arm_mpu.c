@@ -28,10 +28,10 @@
 #include <assert.h>
 #include <debug.h>
 #include <sys/param.h>
+#include <arch/barriers.h>
 
 #include "mpu.h"
 #include "arm_internal.h"
-#include "barriers.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -86,8 +86,7 @@ static void mpu_reset_internal(void)
 
   putreg32(0, MPU_CTRL);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif
 
@@ -144,8 +143,7 @@ void mpu_freeregion(unsigned int region)
   putreg32(0, MPU_RLAR);
   putreg32(0, MPU_RBAR);
   g_mpu_region &= ~(1 << region);
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 
 /****************************************************************************
@@ -198,8 +196,7 @@ void mpu_control(bool enable, bool hfnmiena, bool privdefena)
 
   /* Ensure MPU setting take effects */
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 
 /****************************************************************************
@@ -252,8 +249,7 @@ void mpu_modify_region(unsigned int region, uintptr_t base, size_t size,
 
   /* Ensure MPU setting take effects */
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 
 /****************************************************************************

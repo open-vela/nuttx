@@ -27,12 +27,12 @@
 #include <assert.h>
 
 #include <nuttx/arch.h>
+#include <arch/barriers.h>
 #include <arch/irq.h>
 #include <arch/chip/chip.h>
 #include <sched/sched.h>
 
 #include "arm_internal.h"
-#include "barriers.h"
 #include "arm_gic.h"
 
 /***************************************************************************
@@ -303,7 +303,7 @@ void arm_gic_eoi(unsigned int intid)
    * DEVICE nGnRnE attribute.
    */
 
-  ARM_DSB();
+  UP_DSB();
 
   /* (AP -> Pending) Or (Active -> Inactive) or (AP to AP) nested case */
 
@@ -329,9 +329,9 @@ static int arm_gic_send_sgi(unsigned int sgi_id, uint64_t target_aff,
   sgi_val = GICV3_SGIR_VALUE(aff3, aff2, aff1, sgi_id, SGIR_IRM_TO_AFF,
                              target_list);
 
-  ARM_DSB();
+  UP_DSB();
   CP15_SET64(ICC_SGI1R, sgi_val);
-  ARM_ISB();
+  UP_ISB();
 
   return 0;
 }

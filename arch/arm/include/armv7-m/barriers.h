@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/arm/src/armv7-a/barriers.h
+ * arch/arm/include/armv7-m/barriers.h
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,8 +18,8 @@
  *
  ****************************************************************************/
 
-#ifndef __ARCH_ARM_SRC_ARMV7_A_BARRIERS_H
-#define __ARCH_ARM_SRC_ARMV7_A_BARRIERS_H
+#ifndef __ARCH_ARM_INCLUDE_ARMV7_M_BARRIERS_H
+#define __ARCH_ARM_INCLUDE_ARMV7_M_BARRIERS_H
 
 /****************************************************************************
  * Included Files
@@ -29,18 +29,14 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* ARMv7-A memory barriers */
+/* ARMv7-M memory barriers */
 
-#define arm_dsb(n) __asm__ __volatile__ ("dsb " #n : : : "memory")
-#define arm_dmb(n) __asm__ __volatile__ ("dmb " #n : : : "memory")
+#define arm_dsb()  __asm__ __volatile__ ("dsb " : : : "memory")
 #define arm_isb()  __asm__ __volatile__ ("isb " : : : "memory")
-#define arm_nop()  __asm__ __volatile__ ("nop\n")
-#define arm_sev()  __asm__ __volatile__ ("sev\n")
+#define arm_dmb()  __asm__ __volatile__ ("dmb " : : : "memory")
 
-#define ARM_DSB()  arm_dsb(15)
-#define ARM_DMB()  arm_dmb(15)
-#define ARM_ISB()  arm_isb()
-#define ARM_NOP()  arm_nop()
-#define ARM_SEV()  arm_sev()
+#define UP_DSB()  arm_dsb()
+#define UP_ISB()  arm_isb()
+#define UP_DMB()  arm_dmb()
 
-#endif /* __ARCH_ARM_SRC_ARMV7_A_BARRIERS_H */
+#endif /* __ARCH_ARM_INCLUDE_ARMV7_M_BARRIERS_H */

@@ -33,6 +33,7 @@
 #include <assert.h>
 #include <debug.h>
 
+#include <arch/barriers.h>
 #include <arch/board/board.h>
 
 #include <nuttx/arch.h>
@@ -42,7 +43,6 @@
 #include <nuttx/mutex.h>
 
 #include "arm_internal.h"
-#include "barriers.h"
 
 #include "imxrt_gpio.h"
 #include "imxrt_periphclks.h"

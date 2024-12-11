@@ -45,9 +45,9 @@
 
 #include <nuttx/config.h>
 #include <nuttx/cache.h>
+#include <arch/barriers.h>
 
 #include "arm_internal.h"
-#include "barriers.h"
 #include "nvic.h"
 
 /****************************************************************************
@@ -271,8 +271,7 @@ void up_enable_icache(void)
 {
   uint32_t regval;
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 
   /* Invalidate the entire I-Cache */
 
@@ -284,8 +283,7 @@ void up_enable_icache(void)
   regval |= NVIC_CFGCON_IC;
   putreg32(regval, NVIC_CFGCON);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif
 
@@ -308,8 +306,7 @@ void up_disable_icache(void)
 {
   uint32_t regval;
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 
   /* Disable the I-Cache */
 
@@ -321,8 +318,7 @@ void up_disable_icache(void)
 
   putreg32(0, NVIC_ICIALLU);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif
 
@@ -353,7 +349,7 @@ void up_invalidate_icache(uintptr_t start, uintptr_t end)
    *   (ssize - 1)  = 0x007f : Mask of the set field
    */
 
-  ARM_DSB();
+  UP_DSB();
 
   if ((start & (ssize - 1)) != 0)
     {
@@ -383,8 +379,7 @@ void up_invalidate_icache(uintptr_t start, uintptr_t end)
       putreg32(start, NVIC_ICIMVAU);
     }
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif /* CONFIG_ARMV7M_ICACHE */
 
@@ -405,15 +400,13 @@ void up_invalidate_icache(uintptr_t start, uintptr_t end)
 #ifdef CONFIG_ARMV7M_ICACHE
 void up_invalidate_icache_all(void)
 {
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 
   /* Invalidate the entire I-Cache */
 
   putreg32(0, NVIC_ICIALLU);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif
 
@@ -526,7 +519,7 @@ void up_enable_dcache(void)
 
   /* Invalidate the entire D-Cache */
 
-  ARM_DSB();
+  UP_DSB();
   do
     {
       int32_t tmpways = ways;
@@ -540,7 +533,7 @@ void up_enable_dcache(void)
     }
   while (sets--);
 
-  ARM_DSB();
+  UP_DSB();
 
 #ifdef CONFIG_ARMV7M_DCACHE_WRITETHROUGH
   ccr = getreg32(NVIC_CACR);
@@ -554,8 +547,7 @@ void up_enable_dcache(void)
   ccr |= NVIC_CFGCON_DC;
   putreg32(ccr, NVIC_CFGCON);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif /* CONFIG_ARMV7M_DCACHE */
 
@@ -604,7 +596,7 @@ void up_disable_dcache(void)
 
   wshift = arm_clz(ways) & 0x1f;
 
-  ARM_DSB();
+  UP_DSB();
 
   /* Disable the D-Cache */
 
@@ -627,8 +619,7 @@ void up_disable_dcache(void)
     }
   while (sets--);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif /* CONFIG_ARMV7M_DCACHE */
 
@@ -668,7 +659,7 @@ void up_invalidate_dcache(uintptr_t start, uintptr_t end)
    *   (ssize - 1)  = 0x007f : Mask of the set field
    */
 
-  ARM_DSB();
+  UP_DSB();
 
   if ((start & (ssize - 1)) != 0)
     {
@@ -698,8 +689,7 @@ void up_invalidate_dcache(uintptr_t start, uintptr_t end)
       putreg32(start, NVIC_DCCIMVAC);
     }
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif /* CONFIG_ARMV7M_DCACHE */
 
@@ -747,7 +737,7 @@ void up_invalidate_dcache_all(void)
 
   wshift = arm_clz(ways) & 0x1f;
 
-  ARM_DSB();
+  UP_DSB();
 
   /* Invalidate the entire D-Cache */
 
@@ -764,8 +754,7 @@ void up_invalidate_dcache_all(void)
     }
   while (sets--);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif /* CONFIG_ARMV7M_DCACHE */
 
@@ -822,7 +811,7 @@ void up_clean_dcache(uintptr_t start, uintptr_t end)
 #endif
 
   start &= ~(ssize - 1);
-  ARM_DSB();
+  UP_DSB();
 
   do
     {
@@ -842,8 +831,7 @@ void up_clean_dcache(uintptr_t start, uintptr_t end)
   while (start < end);
 #endif /* !CONFIG_ARMV7M_DCACHE_WRITETHROUGH */
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif /* CONFIG_ARMV7M_DCACHE */
 
@@ -901,7 +889,7 @@ void up_clean_dcache_all(void)
 
   wshift = arm_clz(ways) & 0x1f;
 
-  ARM_DSB();
+  UP_DSB();
 
   /* Clean the entire D-Cache */
 
@@ -919,8 +907,7 @@ void up_clean_dcache_all(void)
   while (sets--);
 #endif /* !CONFIG_ARMV7M_DCACHE_WRITETHROUGH */
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 }
 #endif /* CONFIG_ARMV7M_DCACHE */
 
@@ -977,7 +964,7 @@ void up_flush_dcache(uintptr_t start, uintptr_t end)
 #endif
 
   start &= ~(ssize - 1);
-  ARM_DSB();
+  UP_DSB();
 
   do
     {
@@ -996,8 +983,7 @@ void up_flush_dcache(uintptr_t start, uintptr_t end)
     }
   while (start < end);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 #else
   up_invalidate_dcache(start, end);
 #endif /* !CONFIG_ARMV7M_DCACHE_WRITETHROUGH */
@@ -1057,7 +1043,7 @@ void up_flush_dcache_all(void)
 
   wshift = arm_clz(ways) & 0x1f;
 
-  ARM_DSB();
+  UP_DSB();
 
   /* Clean and invalidate the entire D-Cache */
 
@@ -1074,8 +1060,7 @@ void up_flush_dcache_all(void)
     }
   while (sets--);
 
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
 #else
   up_invalidate_dcache_all();
 #endif /* !CONFIG_ARMV7M_DCACHE_WRITETHROUGH */

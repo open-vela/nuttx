@@ -46,8 +46,9 @@
 #include <nuttx/config.h>
 #include <stdbool.h>
 
+#include <arch/barriers.h>
+
 #include "arm_internal.h"
-#include "barriers.h"
 
 #include "hardware/nrf52_ficr.h"
 #include "hardware/nrf52_nvmc.h"
@@ -102,8 +103,7 @@ static inline void wait_for_flash_ready(void)
 
 static inline void nrf_mem_barrier(void)
 {
-  ARM_ISB();
-  ARM_DSB();
+  UP_MB();
 }
 
 /****************************************************************************

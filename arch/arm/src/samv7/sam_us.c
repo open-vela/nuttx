@@ -28,10 +28,10 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/mutex.h>
+#include <arch/barriers.h>
 #include <arch/samv7/chip.h>
 
 #include "arm_internal.h"
-#include "barriers.h"
 
 #include "hardware/sam_memorymap.h"
 
@@ -124,7 +124,7 @@ int sam_write_user_signature(void *buffer, size_t buflen)
       *dest++ = g_page_buffer[i];
 
 #ifdef CONFIG_ARMV7M_DCACHE_WRITETHROUGH
-      ARM_DMB();
+      UP_DMB();
 #endif
     }
 

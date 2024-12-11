@@ -36,9 +36,9 @@
 #include <debug.h>
 
 #include <nuttx/irq.h>
+#include <arch/barriers.h>
 
 #include "arm_internal.h"
-#include "barriers.h"
 #include "l2cc.h"
 #include "l2cc_pl310.h"
 
@@ -388,8 +388,7 @@ void arm_l2ccinitialize(void)
 
       l2cc_invalidate_all();
       putreg32(L2CC_CR_L2CEN, L2CC_CR);
-      ARM_DSB();
-      ARM_ISB();
+      UP_MB();
     }
 
   sinfo("(%d ways) * (%d bytes/way) = %d bytes\n",
@@ -464,8 +463,7 @@ void l2cc_enable(void)
 
   l2cc_invalidate_all();
   putreg32(L2CC_CR_L2CEN, L2CC_CR);
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
   leave_critical_section(flags);
 }
 
@@ -495,8 +493,7 @@ void l2cc_disable(void)
   /* Disable the L2CC-P310 L2 cache by clearing the Control Register (CR) */
 
   putreg32(0, L2CC_CR);
-  ARM_DSB();
-  ARM_ISB();
+  UP_MB();
   leave_critical_section(flags);
 }
 

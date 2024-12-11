@@ -24,8 +24,9 @@
 
 #include <nuttx/config.h>
 
+#include <arch/barriers.h>
+
 #include "arm_internal.h"
-#include "barriers.h"
 
 #include "hardware/nrf91_memorymap.h"
 #include "hardware/nrf91_regulators.h"
@@ -36,8 +37,6 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
-
-#define MEMORY_SYNC() ARM_ISB(); ARM_DSB()
 
 /****************************************************************************
  * Private Functions
@@ -85,7 +84,7 @@ void nrf91_uicr_recover(void)
 
   /* Memory sync */
 
-  MEMORY_SYNC();
+  UP_MB();
 
   /* Write HFXOSRC */
 
@@ -102,7 +101,7 @@ void nrf91_uicr_recover(void)
 
   /* Memory sync */
 
-  MEMORY_SYNC();
+  UP_MB();
 
   /* Write HFXOCNT */
 
@@ -119,7 +118,7 @@ void nrf91_uicr_recover(void)
 
   /* Memory sync */
 
-  MEMORY_SYNC();
+  UP_MB();
 
   /* Read only access */
 

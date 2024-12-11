@@ -59,12 +59,11 @@
 #include <nuttx/config.h>
 #include <nuttx/arch.h>
 #include <nuttx/mutex.h>
+#include <arch/barriers.h>
 
 #include <stdbool.h>
 #include <assert.h>
 #include <errno.h>
-
-#include "barriers.h"
 
 #include "hardware/stm32_flash.h"
 #include "arm_internal.h"
@@ -402,7 +401,7 @@ static int stm32h7_wait_for_last_operation(struct stm32h7_flash_priv_s
   int i;
   bool timeout = true;
 
-  ARM_DSB();
+  UP_DSB();
 
   for (i = 0; i < FLASH_TIMEOUT_VALUE; i++)
     {
@@ -883,8 +882,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
       fp = (uint32_t *)faddr;
       rp = ll;
 
-      ARM_DSB();
-      ARM_ISB();
+      UP_MB();
 
       /* Write 8 32 bit word and wait to complete */
 
@@ -902,8 +900,7 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
        * optimization).
        */
 
-      ARM_DSB();
-      ARM_ISB();
+      UP_MB();
 
       if (stm32h7_wait_for_last_operation(priv))
         {
