@@ -962,7 +962,12 @@ def enum(t: Union[str, gdb.Type], name=None):
 
     names = {f.name[len(prefix) :]: f.enumval for f in t.fields()}
 
-    name = name or prefix[:-1] if prefix[-1] == "_" else prefix
+    if not name:
+        if prefix:
+            name = prefix[:-1] if prefix[-1] == "_" else prefix
+        else:
+            name = "Enum"
+
     return Enum(name, names)
 
 
