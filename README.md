@@ -34,7 +34,7 @@ The old NuttX documentation is still available in the [Apache wiki](https://cwik
 
 ## Supported Boards
 NuttX supports a wide variety of platforms. See the full list on the [Supported Platforms](https://nuttx.apache.org/docs/latest/platforms/index.html) page.
-
+ 
 ## Contributing
 If you wish to contribute to the NuttX project, read the [Contributing](https://nuttx.apache.org/docs/latest/contributing/index.html) guidelines for information on Git usage, coding standard, workflow and the NuttX principles.
 
