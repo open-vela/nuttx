@@ -40,3 +40,4 @@ If you wish to contribute to the NuttX project, read the [Contributing](https://
 
 ## License
 The code in this repository is under either the Apache 2 license, or a license compatible with the Apache 2 license. See the [License Page](https://nuttx.apache.org/docs/latest/introduction/licensing.html) for more information.
+ 
