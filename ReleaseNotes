@@ -6,7 +6,7 @@ for every release. The text is just as was written at the time of release
 (with perhaps some corrected typos). Over the course of time, NuttX has
 used several different repositories: CVS, two SVN repositories, and
 currently a GIT repository. Therefore, revision information specific to an
-older repository may not be meaningful today.
+older repository may not be meaningful today. 
 
 To make it easier to track there older versions in the current GIT
 repository, a GIT lightweight tag has been applied for each release. The
