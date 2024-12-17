@@ -35,6 +35,12 @@
  * Pre-processor definitions
  ****************************************************************************/
 
+#if CONFIG_PATH_MAX > CONFIG_LINE_MAX
+#  define PATH_MAX_SIZE CONFIG_PATH_MAX
+#else
+#  define PATH_MAX_SIZE CONFIG_LINE_MAX
+#endif
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -43,7 +49,7 @@ struct pathbuffer_s
 {
   spinlock_t lock;           /* Lock for the buffer */
   unsigned long free_bitmap; /* Bitmap of free buffer */
-  char buffer[CONFIG_LIBC_MAX_PATHBUFFER][PATH_MAX];
+  char buffer[CONFIG_LIBC_MAX_PATHBUFFER][PATH_MAX_SIZE];
 };
 
 /****************************************************************************
@@ -103,7 +109,7 @@ FAR char *lib_get_pathbuffer(void)
    */
 
 #ifdef CONFIG_LIBC_PATHBUFFER_MALLOC
-  return lib_malloc(PATH_MAX);
+  return lib_malloc(PATH_MAX_SIZE);
 #else
   return NULL;
 #endif
@@ -128,7 +134,7 @@ void lib_put_pathbuffer(FAR char *buffer)
   irqstate_t flags;
   int index;
 
-  index = (buffer - &g_pathbuffer.buffer[0][0]) / PATH_MAX;
+  index = (buffer - &g_pathbuffer.buffer[0][0]) / PATH_MAX_SIZE;
   if (index >= 0 && index < CONFIG_LIBC_MAX_PATHBUFFER)
     {
       /* Mark the corresponding bit as free */
