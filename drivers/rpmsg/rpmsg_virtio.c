@@ -134,8 +134,18 @@ static int rpmsg_virtio_buffer_nused(FAR struct rpmsg_virtio_device *rvdev,
 {
   FAR struct virtqueue *vq = rx ? rvdev->rvq : rvdev->svq;
   uint16_t nused = vq->vq_ring.avail->idx - vq->vq_ring.used->idx;
+  bool is_host = rpmsg_virtio_get_role(rvdev) == RPMSG_HOST;
 
-  if ((rpmsg_virtio_get_role(rvdev) == RPMSG_HOST) ^ rx)
+  if (is_host)
+    {
+      RPMSG_VIRTIO_INVALIDATE(vq->vq_ring.used->idx);
+    }
+  else
+    {
+      RPMSG_VIRTIO_INVALIDATE(vq->vq_ring.avail->idx);
+    }
+
+  if (is_host ^ rx)
     {
       return nused;
     }
