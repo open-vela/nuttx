@@ -33,7 +33,7 @@ from .utils import Value
 
 CONFIG_MM_BACKTRACE = utils.get_symbol_value("CONFIG_MM_BACKTRACE")
 CONFIG_MM_BACKTRACE = -1 if CONFIG_MM_BACKTRACE is None else int(CONFIG_MM_BACKTRACE)
-
+CONFIG_MM_BACKTRACE_SEQNO = utils.get_symbol_value("CONFIG_MM_BACKTRACE_SEQNO")
 
 PID_MM_INVALID = -100
 PID_MM_MEMPOOL = -1
@@ -106,7 +106,7 @@ class MemPoolBlock:
     @property
     def seqno(self) -> int:
         if not self._seqno:
-            self._seqno = int(self.blk["seqno"]) if CONFIG_MM_BACKTRACE >= 0 else -100
+            self._seqno = int(self.blk["seqno"]) if CONFIG_MM_BACKTRACE_SEQNO else -100
         return self._seqno
 
     @property
@@ -458,7 +458,7 @@ class MMNode(gdb.Value, p.MMFreeNode):
 
     @property
     def seqno(self) -> int:
-        return int(self["seqno"]) if CONFIG_MM_BACKTRACE >= 0 else -1
+        return int(self["seqno"]) if CONFIG_MM_BACKTRACE_SEQNO else -1
 
     @property
     def backtrace(self) -> List[Tuple[int, str, str]]:
