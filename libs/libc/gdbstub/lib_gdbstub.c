@@ -409,6 +409,19 @@ static int gdb_send_packet(FAR struct gdb_state_s *state)
       size_t count = gdb_count_repeat(&buf[i], len - i);
 
       i += count;
+
+      /* GDB cannot process repeated special characters. */
+
+      if (c == '*' || c == '}' || c == '#' || c == '$')
+        {
+          while (count--)
+            {
+              gdb_escapechar(state, c, &csum);
+            }
+
+          continue;
+        }
+
       if (count <= 3)
         {
           while (count-- > 0)
