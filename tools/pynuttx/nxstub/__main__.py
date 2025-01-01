@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-# tools/gdbserver.py
-#
-# SPDX-License-Identifier: Apache-2.0
+############################################################################
+# tools/pynuttx/nxstub/__main__.py
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -18,13 +16,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 #
+############################################################################
 
-import os
-import sys
+from . import main
 
-here = os.path.dirname(os.path.realpath(__file__))
-sys.path.insert(0, (os.path.join(here, "pynuttx")))
-
-import nxstub  # noqa: E402
-
-nxstub.main()
+if __name__ == "__main__":
+    main()
