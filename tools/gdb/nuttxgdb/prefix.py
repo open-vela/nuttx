@@ -33,3 +33,10 @@ class MMPrefixCommand(gdb.Command):
 
     def __init__(self):
         super().__init__("mm", gdb.COMMAND_USER, prefix=True)
+
+
+class UVDumpPrefix(gdb.Command):
+    """UV Dump related commands prefix"""
+
+    def __init__(self):
+        super().__init__("uv", gdb.COMMAND_USER, prefix=True)
