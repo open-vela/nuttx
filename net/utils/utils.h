@@ -94,7 +94,7 @@
       pool##_buffer[0], \
       prealloc, \
       dynalloc, \
-      -nodesize, \
+      -(int)(nodesize), \
       SEM_INITIALIZER(NET_BUFPOOL_MAX(prealloc, dynalloc, maxalloc)), \
       { NULL, NULL } \
     };
