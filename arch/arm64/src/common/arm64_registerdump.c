@@ -99,10 +99,14 @@ void up_dump_register(void *dumpregs)
   _alert("x30:  0x%-16"PRIx64"\n", regs[REG_X30]);
 
   _alert("\n");
+
+  /* Use ELR as PC for script to parse */
+
   _alert("STATUS Registers:\n");
+  _alert("PC:        0x%-16"PRIx64"\n", regs[REG_ELR]);
   _alert("SPSR:      0x%-16"PRIx64"\n", regs[REG_SPSR]);
   _alert("ELR:       0x%-16"PRIx64"\n", regs[REG_ELR]);
   _alert("SP_EL0:    0x%-16"PRIx64"\n", regs[REG_SP_EL0]);
-  _alert("SP_ELX:    0x%-16"PRIx64"\n", regs[REG_SP_ELX]);
+  _alert("SP:        0x%-16"PRIx64"\n", regs[REG_SP_ELX]);
   _alert("EXE_DEPTH: 0x%-16"PRIx64"\n", regs[REG_EXE_DEPTH]);
 }
