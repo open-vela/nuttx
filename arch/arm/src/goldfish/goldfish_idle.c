@@ -27,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/power/pm.h>
 #include "arm_internal.h"
 
 /****************************************************************************
@@ -46,6 +47,93 @@
  *
  ****************************************************************************/
 
+#ifdef CONFIG_PM
+
+#  ifdef CONFIG_SMP
+static bool pm_idle_handler(int cpu,
+                            enum pm_state_e cpu_state,
+                            enum pm_state_e system_state)
+{
+  bool first = false;
+  switch (cpu_state)
+    {
+      case PM_NORMAL:
+      case PM_IDLE:
+      case PM_STANDBY:
+      case PM_SLEEP:
+
+        /* do cpu domain pm enter operations */
+
+        asm("NOP");
+
+        if (system_state >= PM_NORMAL)
+          {
+            switch (system_state)
+              {
+                case PM_NORMAL:
+                case PM_IDLE:
+                case PM_STANDBY:
+                case PM_SLEEP:
+
+                  /* do system domain pm enter operations */
+
+                  asm("NOP");
+
+                  break;
+                default:
+                  break;
+              }
+          }
+
+        pm_idle_unlock();
+
+        /* do no cross-core relative operations */
+
+        if (cpu_state > PM_NORMAL)
+          {
+            asm("WFI");
+          }
+
+        first = pm_idle_lock(cpu);
+        if (first)
+          {
+            /* do system domain pm leave operations */
+
+            asm("NOP");
+          }
+
+        /* do cpu domain pm leave operations */
+
+        asm("NOP");
+
+        break;
+      default:
+        break;
+    }
+
+  return first;
+}
+#  else
+
+static void pm_idle_handler(enum pm_state_e state)
+{
+  switch (state)
+    {
+      case PM_NORMAL:
+        break;
+
+      case PM_IDLE:
+      case PM_STANDBY:
+      case PM_SLEEP:
+      default:
+        asm("WFI");
+        break;
+    }
+}
+#  endif
+
+#endif /* CONFIG_PM */
+
 void up_idle(void)
 {
 #if defined(CONFIG_SUPPRESS_INTERRUPTS) || defined(CONFIG_SUPPRESS_TIMER_INTS)
@@ -58,6 +146,11 @@ void up_idle(void)
 
   /* Sleep until an interrupt occurs to save power */
 
+#ifdef CONFIG_PM
+  pm_idle(pm_idle_handler);
+#else
   asm("WFI");
+#endif /* CONFIG_PM */
+
 #endif
 }

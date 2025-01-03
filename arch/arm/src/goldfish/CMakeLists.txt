@@ -28,4 +28,8 @@ if(CONFIG_ARCH_IDLE_CUSTOM)
   list(APPEND SRCS goldfish_idle.c)
 endif()
 
+if(CONFIG_PM)
+  list(APPEND SRCS goldfish_pminitialize.c)
+endif()
+
 target_sources(arch PRIVATE ${SRCS})
