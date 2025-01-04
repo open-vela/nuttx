@@ -26,6 +26,7 @@ import traceback
 from binascii import hexlify, unhexlify
 from typing import Union
 
+from . import utils
 from .target import Target
 
 
@@ -34,7 +35,9 @@ class GDBStub:
         self,
         target: Target,
         port=1234,
+        proxymode=False,
     ):
+        self.proxymode = proxymode
         self.threads = target.update_threads()
         self.registers = target.switch_thread()
         self.target = target
@@ -50,12 +53,19 @@ class GDBStub:
 
         while not self.exiting:
             try:
-                packet = self.get_packet()
+                packet = utils.get_packet(self.socket)
+                if packet in b"+-":
+                    continue
+
+                self.socket.send(b"+")
                 if packet is None:
                     self.logger.info("Connection closed")
                     return
 
-                self.process_packet(packet)
+                if self.proxymode:
+                    self.forward_packet(packet)
+                else:
+                    self.process_packet(packet)
 
             except Exception as e:
                 self.logger.error(f"Error in stub thread: {e} {traceback.format_exc()}")
@@ -82,50 +92,6 @@ class GDBStub:
         listener.close()
         return client
 
-    def get_packet(self) -> Union[bytes, None]:
-        buffer = bytearray()
-        started = False
-        escaping = False
-        checksum = 0
-        while True:
-            c = self.socket.recv(1)
-            if not started:
-                if c == b"\x03":
-                    return b"\x03"
-                if c == b"$":
-                    started = True
-                continue
-
-            if escaping:
-                c ^= 0x20
-                escaping = False
-            elif c == b"}":
-                escaping = True
-                checksum += ord(c)
-                continue
-
-            if c == b"#":
-                expected = self.socket.recv(2)
-                expected = int(expected.decode("ascii"), 16)
-                if expected != checksum & 0xFF:
-                    self.logger.error(
-                        f"checksum error: {expected:#x} != {checksum & 0xFF:#x}"
-                    )
-                    self.socket.send(b"-")  # No ack
-                    checksum = 0
-                    started = False
-                    buffer = bytearray()
-                    continue
-                else:
-                    self.socket.send(b"+")
-                    break
-            else:
-                checksum += ord(c)
-                buffer.append(ord(c))
-
-        self.logger.debug(f"Received packet: {buffer}")
-        return bytes(buffer)
-
     def send_raw_packet(self, data: bytes, nowait=False) -> bool:
         checksum = sum(data) & 0xFF
         self.socket.send(b"$")
@@ -142,13 +108,8 @@ class GDBStub:
         if isinstance(packet, str):
             packet = packet.encode("ascii")
 
-        output = list()
-        for c in packet:
-            if c in b"$#*}":
-                output.append(ord("}"))
-                c ^= 0x20
-            output.append(c)
-        return self.send_raw_packet(bytes(output), nowait)
+        output = utils.encode_packet(packet)
+        return self.send_raw_packet(output, nowait)
 
     def send_unsupported(self):
         self.send_packet("")
@@ -172,6 +133,28 @@ class GDBStub:
         except Exception as e:
             self.logger.error(f"Error packet{packet}: {e}\n {traceback.format_exc()}")
             self.send_packet("EF1")
+
+    def forward_packet(self, packet: bytes):
+        packet_type = packet[0]
+        if packet_type in b"iIzZsSmMxX":
+            try:
+                self.logger.debug(f"Forwarding packet: {packet[:20]}...")
+                response = self.target.send_packet(packet)
+                self.logger.debug(f"Received response: {response and response[:20]}...")
+            except Exception as e:
+                self.logger.error(f"Error forwarding packet: {e}")
+                return
+
+            if response:
+                # The response is the raw packet received via RSP, excluding start, end and checksum
+                self.send_raw_packet(response, nowait=True)
+            else:
+                self.send_packet("")
+        elif packet_type in b"?vqgpPTHc\x03D":
+            self.process_packet(packet)
+        else:
+            self.logger.debug(f"Ignore packet: {packet}")
+            self.send_unsupported()
 
     def handle_q(self, packet: bytes):
         packet = packet.decode("ascii")
@@ -202,22 +185,15 @@ class GDBStub:
             self.send_unsupported()
 
     def handle_questionmark(self, packet: bytes):
-        self.send_packet("S05")
+        running = next((t for t in self.threads if t.state == "Running"), None)
+        if running:
+            self.registers = self.target.switch_thread(running.pid)
+            self.send_packet(f"T02thread:{running.pid:x};")
+        else:
+            self.send_packet("S05")
 
     def handle_g(self, packet: bytes):
-        reply = b""
-        offset = 0
-        for reg in self.registers:
-            if reg.offset and reg.offset != offset:
-                reply += b"xx" * (reg.offset - offset)
-
-            if not reg.has_value:
-                reply += b"xx" * reg.size
-            else:
-                reply += hexlify(bytes(reg))
-
-            offset += reg.offset + reg.size
-        self.send_packet(reply)
+        self.send_packet(self.registers.to_g())
 
     def handle_p(self, packet: bytes):
         packet = packet.decode("ascii")
@@ -248,9 +224,11 @@ class GDBStub:
         self.send_packet("OK" if ok else "")
 
     def handle_etx(self, packet: bytes):
-        # FIXME no reply needed
-        self.send_packet("S00")
         self.logger.info("Ctrl-C received")
+        if self.proxymode:
+            self.target.stop()
+        else:
+            self.send_packet("S00")
 
     def handle_k(self, packet: bytes):
         self.exiting = True
@@ -267,3 +245,16 @@ class GDBStub:
             return
         self.registers = registers
         self.send_packet("OK")
+
+    def handle_c(self, packet):
+        if hasattr(self.target, "cont"):
+
+            def stopped(stopreason):
+                # FIXME callback from another thread
+                self.logger.info(f"Target stopped: {stopreason}")
+                self.handle_questionmark(None)
+
+            # Notify the stub when it's stopped
+            self.target.cont(stopped)
+        else:
+            self.send_unsupported()

@@ -212,3 +212,51 @@ def uint16_t(data: bytes) -> int:
 
 def uint8_t(data: bytes) -> int:
     return Int8ul.parse(data)
+
+
+def get_packet(sock) -> bytes:
+    buffer = bytearray()
+    started = False
+    escaping = False
+    checksum = 0
+    while True:
+        c = sock.recv(1)
+        if not started:
+            if c in (b"\x03", b"+", b"-"):  # Special packets
+                return c
+            if c == b"$":
+                started = True
+            continue
+
+        if escaping:
+            c = chr(ord(c) ^ 0x20)
+            escaping = False
+        elif c == b"}":
+            escaping = True
+            checksum += ord(c)
+            continue
+
+        if c == b"#":
+            expected = sock.recv(2)
+            expected = int(expected.decode("ascii"), 16)
+            if expected != checksum & 0xFF:
+                checksum = 0
+                started = False
+                buffer = bytearray()
+                continue
+            else:
+                break
+        else:
+            checksum += ord(c)
+            buffer.append(ord(c))
+    return buffer
+
+
+def encode_packet(packet: bytes) -> bytes:
+    output = list()
+    for c in packet:
+        if c in b"$#*}":
+            output.append(ord("}"))
+            c ^= 0x20
+        output.append(c)
+    return bytes(output)

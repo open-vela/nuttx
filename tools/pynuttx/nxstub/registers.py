@@ -21,7 +21,8 @@
 ############################################################################
 
 import logging
-from typing import Union
+from binascii import hexlify
+from typing import List, Union
 
 from . import utils
 
@@ -280,7 +281,7 @@ class Registers:
 
         self.logger = logging.getLogger(__name__)
         self.arch = arch
-        self._registers = []
+        self._registers: List[Register] = []
         regsize = utils.get_pointer_size(elf)
         reginfo = utils.get_reginfo(elf)
         layouts = g_reg_table.get(self.arch, {}).get("registers", [])
@@ -345,6 +346,33 @@ class Registers:
             raise ValueError("No valid source to load register values")
 
         return self  # allow to build and use Register().load() directly
+
+    def to_g(self):
+        """Return GDB RSP g packet"""
+        reply = b""
+        offset = 0
+        for reg in self._registers:
+            if reg.offset and reg.offset != offset:
+                reply += b"xx" * (reg.offset - offset)
+
+            if not reg.has_value:
+                reply += b"xx" * reg.size
+            else:
+                reply += hexlify(bytes(reg))
+
+            offset += reg.offset + reg.size
+        return reply
+
+    def from_g(self, data: bytes):
+        """Parse GDB RSP G packet"""
+        offset = 0
+        for reg in self._registers:
+            offset = reg.offset if reg.offset else offset
+            self.logger.debug(
+                f"Parse {reg.name}({reg.regnum}) from {offset}, data: {data[offset:offset+reg.size]}"
+            )
+            reg.value = data[offset : offset + reg.size]
+            offset += reg.size
 
     def __iter__(self):
         return iter(self._registers)

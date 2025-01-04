@@ -31,6 +31,7 @@ from typing import List
 
 from . import utils
 from .gdbstub import GDBStub, Target
+from .proxy import TargetProxy
 from .registers import Registers, g_reg_table
 from .target import RawMemory
 
@@ -133,9 +134,14 @@ def gdbstub_start(args):
     memories.extend(mem)
 
     core = utils.parse_elf(args.core) if args.core else None
-    target = Target(elf, args.arch, registers, memories, core)
 
-    stub = GDBStub(target=target, port=args.port)
+    if args.proxy is not None:
+        print(f"Try proxying localhost:{args.proxy}...")
+        target = TargetProxy(elf, args.arch, args.proxy)
+    else:
+        target = Target(elf, args.arch, registers, memories, core)
+
+    stub = GDBStub(target=target, port=args.port, proxymode=args.proxy is not None)
 
     print(f"Start GDB server on port {args.port}...")
     stub.run()
@@ -187,6 +193,12 @@ def parse_args(args=None):
         help="The GDB server port.",
     )
     parser.add_argument(
+        "--proxy",
+        type=int,
+        default=None,
+        help="The original GDB server port for proxy.",
+    )
+    parser.add_argument(
         "-r",
         "--rawfile",
         type=str,
@@ -232,7 +244,9 @@ def main(args=None):
 
     gdb = None
     if args.debug:
-        logging.basicConfig()
+        logging.basicConfig(
+            format="%(asctime)s:%(levelname)s:%(name)s:%(message)s",
+        )
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.DEBUG if args.debug else logging.INFO)
 
