@@ -210,8 +210,6 @@ class Nxinfothreads(gdb.Command):
 
     def __init__(self):
         super().__init__("info nxthreads", gdb.COMMAND_USER)
-        if not is_thread_command_supported():
-            gdb.execute("define info threads\n info nxthreads \n end\n")
 
     def invoke(self, args, from_tty):
         npidhash = gdb.parse_and_eval("g_npidhash")
@@ -301,10 +299,7 @@ class Nxthread(gdb.Command):
     """Switch to a specified thread"""
 
     def __init__(self):
-        if not is_thread_command_supported():
-            super().__init__("thread", gdb.COMMAND_USER)
-        else:
-            super().__init__("nxthread", gdb.COMMAND_USER)
+        super().__init__("nxthread", gdb.COMMAND_USER)
 
     def invoke(self, args, from_tty):
         npidhash = gdb.parse_and_eval("g_npidhash")
