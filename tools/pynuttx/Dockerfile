@@ -2,6 +2,7 @@ FROM alpine:latest
 
 RUN apk update && apk add --no-cache \
     python3 \
+    py3-elftools \
     py3-pip \
     gdb-multiarch \
     build-base \
@@ -17,3 +18,6 @@ RUN rm -rf /var/cache/apk/* \
     && rm -rf /root/.cache
 
 CMD ["/bin/sh"]
+
+# docker build -t pynuttx-alphine .
+# docker image save pynuttx-alphine | xz -zc -> pynuttx-alphine.tar.xz
