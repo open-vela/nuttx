@@ -163,8 +163,6 @@ function setup_environment()
     fi
   done
 
-  echo " sudo apt-get install -y software-properties-common"
-  echo " sudo add-apt-repository ppa:ubuntu-toolchain-r/test"
   echo " sudo apt-get update"
   echo " sudo apt-get install -y ${INSTALLS[@]}"
   echo ""
@@ -232,6 +230,9 @@ function setup_toolchain()
         export PATH=${ROOTDIR}/prebuilts/${TOOLCHAIN[$j]}/${SYSTEM}-${SYS_ARCH}/${ARCH[$i]}/bin:$PATH
       elif [ -d ${ROOTDIR}/prebuilts/${TOOLCHAIN[$j]}/${SYSTEM}/${ARCH[$i]}/bin ]; then
         export PATH=${ROOTDIR}/prebuilts/${TOOLCHAIN[$j]}/${SYSTEM}/${ARCH[$i]}/bin:$PATH
+      fi
+      if [ -d ${ROOTDIR}/prebuilts/${TOOLCHAIN[$j]}/${SYSTEM}-${SYS_ARCH}/${ARCH[$i]}-none-linux-gnu/bin ]; then
+        export PATH=${ROOTDIR}/prebuilts/${TOOLCHAIN[$j]}/${SYSTEM}-${SYS_ARCH}/${ARCH[$i]}-none-linux-gnu/bin:$PATH
       fi
     done
   done
