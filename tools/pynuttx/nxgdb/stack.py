@@ -26,9 +26,12 @@ import gdb
 
 from . import utils
 
-STACK_COLORATION_PATTERN = utils.get_symbol_value(
-    "STACK_COLOR", locspec="up_create_stack"
-)
+try:
+    STACK_COLORATION_PATTERN = utils.get_symbol_value(
+        "STACK_COLOR", locspec="up_create_stack"
+    )
+except gdb.error:
+    STACK_COLORATION_PATTERN = 0xDEADBEEF
 
 
 class Stack(object):
