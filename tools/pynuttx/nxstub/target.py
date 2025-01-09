@@ -118,7 +118,11 @@ class Target:
             pointer = utils.get_pointer_type(self.elf)
             tcbsize = utils.get_tcb_size(self.elf)
             tcbinfo = utils.get_tcbinfo(self.elf)
-            states = utils.get_statenames(self.elf)
+            try:
+                states = utils.get_statenames(self.elf)
+            except Exception:
+                # Fallback to pure number. Don't bother to parse value of NUM_TASK_STATES, 256 is enough.
+                states = [str(i) for i in range(256)]
 
             g_npidhash, sym = self._read_int("g_npidhash")
             self.logger.debug(f"g_npidhash: {g_npidhash}@{sym.value:#x}")
