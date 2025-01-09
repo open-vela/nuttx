@@ -32,7 +32,7 @@ class TestStack(unittest.TestCase):
     """
 
     def test_stack_init_badsize(self):
-        with self.assertRaises(gdb.GdbError):
+        with self.assertWarns(RuntimeWarning):
             name = "test_thread"
             entry = hex(0xABCD)
             base = 0x2000
@@ -43,7 +43,7 @@ class TestStack(unittest.TestCase):
             Stack(name, entry, base, alloc, size, cursp, align)
 
     def test_stack_init_bad_allocaddr(self):
-        with self.assertRaises(gdb.GdbError):
+        with self.assertWarns(RuntimeWarning):
             name = "test_thread"
             entry = hex(0xABCD)
             alloc = 0x1000
@@ -54,7 +54,7 @@ class TestStack(unittest.TestCase):
             Stack(name, entry, base, alloc, size, cursp, align)
 
     def test_stack_init_bad_sp(self):
-        with self.assertRaises(gdb.GdbError):
+        with self.assertWarns(RuntimeWarning):
             name = "test_thread"
             entry = hex(0xABCD)
             base = 0x2000
@@ -64,7 +64,7 @@ class TestStack(unittest.TestCase):
             align = 4
             Stack(name, entry, base, alloc, size, cursp, align)
 
-        with self.assertRaises(gdb.GdbError):
+        with self.assertWarns(RuntimeWarning):
             name = "test_thread"
             entry = hex(0xABCD)
             base = 0x2000
