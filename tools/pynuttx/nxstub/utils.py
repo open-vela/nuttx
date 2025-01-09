@@ -62,28 +62,39 @@ def parse_elf(elf_file: str) -> lief.Binary:
         logging.error(f"Failed to parse ELF file: {elf_file}")
         return None
 
-    return elf.abstract
+    return elf
 
 
 def get_architecture(elf: lief.Binary):
-    return elf.header.architecture
+    return elf.abstract.header.architecture
 
 
 def get_endian(elf: lief.Binary) -> str:
-    return "l" if elf.header.endianness == lief.Header.ENDIANNESS.LITTLE else "b"
+    return (
+        "l" if elf.abstract.header.endianness == lief.Header.ENDIANNESS.LITTLE else "b"
+    )
 
 
 def read_from(elf: lief.Binary, addr, len=1) -> memoryview:
-    # For xtensa elf, read directly returns wrong value, manually parse the section in this case.
-
     for section in elf.sections:
         if section.type == lief.ELF.Section.TYPE.PROGBITS:
-            if section.virtual_address <= addr < section.virtual_address + section.size:
-                off = addr - section.virtual_address
+            off = addr - section.virtual_address
+            if (
+                section.virtual_address <= addr < section.virtual_address + section.size
+                and section.size - off >= len
+            ):
                 return section.content[off : off + len]
 
-    if data := elf.get_content_from_virtual_address(addr, len):
-        return data
+    for segment in elf.segments:
+        if segment.type == lief.ELF.Segment.TYPE.LOAD:
+            off = addr - segment.virtual_address
+            if (
+                segment.virtual_address
+                <= addr
+                < segment.virtual_address + segment.virtual_size
+                and segment.virtual_size - off >= len
+            ):
+                return segment.content[off : off + len]
 
     return None
 
@@ -121,7 +132,7 @@ def read_string(elf: lief.Binary, addr):
 
 def get_inttype(elf: lief.Binary) -> Construct:
     endian = get_endian(elf)
-    bits = 64 if elf.header.is_64 else 32
+    bits = 64 if elf.abstract.header.is_64 else 32
     return {
         "32l": Int32sl,
         "32b": Int32sb,
@@ -132,7 +143,7 @@ def get_inttype(elf: lief.Binary) -> Construct:
 
 def get_pointer_type(elf: lief.Binary) -> Construct:
     endian = get_endian(elf)
-    bits = 64 if elf.header.is_64 else 32
+    bits = 64 if elf.abstract.header.is_64 else 32
     return {
         "32l": Int32ul,
         "32b": Int32ub,
@@ -142,7 +153,7 @@ def get_pointer_type(elf: lief.Binary) -> Construct:
 
 
 def get_pointer_size(elf: lief.Binary):
-    return 8 if elf.header.is_64 else 4
+    return 8 if elf.abstract.header.is_64 else 4
 
 
 def get_ncpus(elf: lief.Binary) -> int:
@@ -186,7 +197,7 @@ def get_tcb_size(elf: lief.Binary) -> int:
 
 
 def get_reginfo(elf: lief.Binary) -> List[RegInfo]:
-    bits = 64 if elf.header.is_64 else 32
+    bits = 64 if elf.abstract.header.is_64 else 32
 
     # Now get register offset in TCB
     _, data = read_symbol(elf, "g_reg_offs")
