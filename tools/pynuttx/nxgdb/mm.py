@@ -31,9 +31,18 @@ from . import lists, utils
 from .protocols import mm as p
 from .utils import Value
 
-CONFIG_MM_BACKTRACE = utils.get_symbol_value("CONFIG_MM_BACKTRACE")
-CONFIG_MM_BACKTRACE = -1 if CONFIG_MM_BACKTRACE is None else int(CONFIG_MM_BACKTRACE)
-CONFIG_MM_BACKTRACE_SEQNO = utils.get_symbol_value("CONFIG_MM_BACKTRACE_SEQNO")
+# Note we use mm_freenode_s to check if CONFIG_MM_BACKTRACE is enabled instead
+# of utils.get_symbol_value("CONFIG_MM_BACKTRACE") because the latter may report
+# wrong value on some platforms.
+
+mm_freenode_s = utils.lookup_type("struct mm_freenode_s")
+
+if "backtrace" in utils.get_fieldnames(mm_freenode_s):
+    CONFIG_MM_BACKTRACE = utils.nitems(mm_freenode_s["backtrace"])
+else:
+    CONFIG_MM_BACKTRACE = -1
+
+CONFIG_MM_BACKTRACE_SEQNO = "seqno" in utils.get_fieldnames(mm_freenode_s)
 
 PID_MM_INVALID = -100
 PID_MM_MEMPOOL = -1

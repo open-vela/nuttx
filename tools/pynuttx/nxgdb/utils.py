@@ -240,6 +240,14 @@ def lookup_type(name, block=None) -> gdb.Type:
     return g_type_cache[key]
 
 
+def get_fieldnames(t: gdb.Type) -> List[str]:
+    """Return the field names of a type"""
+    if isinstance(t, str):
+        t = lookup_type(t)
+
+    return [f.name for f in t.fields()]
+
+
 long_type = lookup_type("long")
 
 # Common Helper Functions
