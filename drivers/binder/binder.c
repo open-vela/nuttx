@@ -295,7 +295,6 @@ static int binder_flush(FAR struct file *filp)
     {
       wait_wake_up(&thread->wait, 0);
       wake_count++;
-      thread->looper_need_return = false;
     }
   }
 
@@ -421,7 +420,7 @@ static int binder_ioctl(FAR struct file *filp, int cmd, unsigned long arg)
       break;
     }
 
-    case BIOC_FLUSH:
+    case BINDER_FLUSH:
     {
       ret = binder_flush(filp);
       break;
