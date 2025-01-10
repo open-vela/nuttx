@@ -161,7 +161,7 @@ class GDBStub:
         if packet.startswith("qSupported"):
             self.send_packet("PacketSize=FFFF")
         elif packet.startswith("qC"):
-            pid = next((t.pid for t in self.threads if t.state == "Running"), 0)
+            pid = self.target.current_thread()
             self.logger.debug(f"Current thread: {pid}")
             self.send_packet(f"QC{pid:x}")
         elif packet.startswith("qfThreadInfo"):
@@ -186,6 +186,8 @@ class GDBStub:
 
     def handle_questionmark(self, packet: bytes):
         running = next((t for t in self.threads if t.state == "Running"), None)
+        # FIXME t.state may be a number when g_statesnames gets optimized out.
+        # That's fine for now since we can identify the running thread manually.
         if running:
             self.registers = self.target.switch_thread(running.pid)
             self.send_packet(f"T02thread:{running.pid:x};")

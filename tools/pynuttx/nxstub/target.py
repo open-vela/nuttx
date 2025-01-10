@@ -81,7 +81,7 @@ class Target:
         self.registers = registers or Registers(elf, arch=arch)
         self.memories = []
         self.arch = arch
-        self.pid = 0  # Current thread PID
+        self.pid = self.PID0_ID  # Current thread PID
 
         for mem in memories or []:
             # Go through the write process to merge overlapping memory regions
@@ -175,6 +175,9 @@ class Target:
                 self.pid = pid
                 self.registers = t.registers
                 return self.registers
+
+    def current_thread(self) -> int:
+        return self.pid
 
     def memory_read(self, address: int, length: int) -> bytes:
         self.logger.debug(f"Read: {address:#x} {length}Bytes")
