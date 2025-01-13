@@ -42,6 +42,12 @@ class Target(gdb.Command):
         if "-a" not in args and "--arch" not in args:
             args += f" -a {gdb.selected_inferior().architecture().name().lower()}"
 
+        args = gdb.string_to_argv(args)
+        try:
+            parsed = nxstub.parse_args(args)
+        except SystemExit:
+            return
+
         # If currently has connection to target, disconnect it
         inferior = gdb.selected_inferior()
         if inferior and inferior.connection and inferior.connection.is_valid():
@@ -61,7 +67,6 @@ class Target(gdb.Command):
 
             kill()
 
-        args = gdb.string_to_argv(args)
         process = multiprocessing.Process(target=nxstub.main, args=(args,))
         process.start()
         self.process = process
@@ -70,9 +75,4 @@ class Target(gdb.Command):
         print("")
 
         # Wait server to start
-        try:
-            parsed = nxstub.parse_args(args)
-        except SystemExit:
-            return
-
         gdb.execute(f"target remote :{parsed.port}", from_tty=True)
