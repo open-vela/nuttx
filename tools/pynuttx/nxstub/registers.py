@@ -190,7 +190,7 @@ g_reg_table = {
             ("fs", 22, 0),
         ],
     },
-    "xtensa": {
+    "esp32s3": {
         "architecture": "xtensa",  # Use xtensa-esp32s3-elf-gdb
         "feature": "",
         "registers": [
@@ -214,6 +214,32 @@ g_reg_table = {
             ("a15", 16, 0),
             ("windowbase", 69, 276, 0),
             ("windowstart", 70, 280, 1),
+        ],
+    },
+    "xtensa": {
+        "architecture": "xtensa",  # Use xt-gdb
+        "feature": "",
+        "registers": [
+            ("pc", 32, 0),
+            ("ps", 742, 472, 0x40000),
+            ("a0", 256, 4),
+            ("a1", 257, 0),
+            ("a2", 258, 0),
+            ("a3", 259, 0),
+            ("a4", 260, 0),
+            ("a5", 261, 0),
+            ("a6", 262, 0),
+            ("a7", 263, 0),
+            ("a8", 264, 0),
+            ("a9", 265, 0),
+            ("a10", 266, 0),
+            ("a11", 267, 0),
+            ("a12", 268, 0),
+            ("a13", 269, 0),
+            ("a14", 270, 0),
+            ("a15", 271, 0),
+            ("windowbase", 584, 308, 0),
+            ("windowstart", 585, 312, 1),
         ],
     },
 }
