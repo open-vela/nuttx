@@ -189,7 +189,14 @@ class Target:
         Return the registers for the thread
         """
         self.logger.debug(f"Switch to thread {pid}")
-        pid = pid if pid is not None and pid > 0 else self.PID0_ID
+        if pid == -1 or pid == 0:
+            # -1: all threads, 0: current thread. No need to switch for both cases
+            # See https://sourceware.org/gdb/current/onlinedocs/gdb.html/Packets.html#Packets
+            return self.registers
+
+        if pid is None:
+            # None is only used during our initial setup, not of GDB RSP protocol
+            pid = self.PID0_ID
 
         for t in self.threads:
             if pid == t.pid:
