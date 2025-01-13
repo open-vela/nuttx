@@ -115,6 +115,7 @@ class GDBStub:
         self.send_packet("")
 
     def process_packet(self, packet: bytes):
+        self.logger.debug(f"Process packet: {packet}")
         attribute = "handle_" + chr(packet[0])
         handler = {
             "handle_?": self.handle_questionmark,
@@ -175,6 +176,22 @@ class GDBStub:
             info = next((t for t in self.threads if t.pid == pid), None)
             info = f"{info.name},{info.state}" if info else f"Invalid PID {pid}"
             self.send_packet(hexlify(info.encode("ascii")))
+        elif packet.startswith("qRcmd"):
+            try:
+                _, command = packet.split(",")
+                command = unhexlify(command)
+                response = self.target.monitor_command(command)
+                if response is None:
+                    self.send_unsupported()
+                    return
+            except Exception as e:
+                self.logger.error(f"Error executing monitor command: {e}")
+                # Note that older GDB may treat it as normal output instead of error, but nothing hurts.
+                response = f"E.{e}\n"
+
+            if isinstance(response, str):
+                response = response.encode("ascii")
+            self.send_packet(hexlify(response))
         else:
             self.send_unsupported()
 

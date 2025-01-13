@@ -82,7 +82,7 @@ class Target:
         self.elf = elf
         self.core = core
         self.registers = registers or Registers(elf, arch=arch)
-        self.memories = []
+        self.memories: List[RawMemory] = []
         self.arch = arch
         self.pid = self.PID0_ID  # Current thread PID
         self.remap = remap or []
@@ -272,3 +272,28 @@ class Target:
 
                 memories.remove(m2)
                 m.data += m2.data[end - m2.address :]
+
+    def monitor_command(self, command: bytes) -> str:
+        """Handle monitor command"""
+        self.logger.debug(f"Monitor command: {command}")
+        if command.startswith(b"setregs"):
+            command = command.decode("ascii")
+            _, address = command.split(" ")
+            try:
+                address = (
+                    int(address, 16)
+                    if "0x" in address or "0X" in address
+                    else int(address)
+                )
+            except ValueError:
+                # try if it's a symbol, note that expression is not supported.
+                address = utils.get_symbol(self.elf, address).value
+
+            self.registers.load(self.memory_read(address, utils.get_regsize(self.elf)))
+            return f"Loaded registers from {address:#x}\n"
+        elif command.startswith(b"help"):
+            return (
+                "setregs <address|symbol>: Load registers from address or symbol.\n"
+                "\tNeed to execute `maint flush register-cache` to see latest registers\n"
+                "help: Show this help message\n"
+            )
