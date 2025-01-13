@@ -133,21 +133,39 @@ class Target:
                 self.logger.error(f"No threads info found: {g_npidhash}")
                 return self.threads
 
+            ncpus = utils.get_ncpus(self.elf)
+            regsize = utils.get_regsize(self.elf)
+
+            data, sym = self._read_symbol("g_running_tasks")  # an array of pointers
+            g_running_tasks = utils.parse_array(data, pointer, ncpus)
+            self.logger.debug(f"g_running_tasks: {g_running_tasks}@{sym.value:#x}")
+
+            data, _ = self._read_symbol("g_last_regs")  # an array of uintptr_t
+            assert len(data) % regsize == 0
+            g_last_regs = [data[i * regsize : (i + 1) * regsize] for i in range(ncpus)]
+
             def parse_tcb(address: int) -> ThreadInfo:
                 data = self.memory_read(address, tcbsize)
                 if tcbinfo.name_off == 0:
                     name = "<noname>"
                 else:
                     name = self._read_str(address + tcbinfo.name_off)
-                self.logger.debug(f"loading thread: {name}")
+                self.logger.debug(f"loading thread: {name}, tcb@{address:#x}")
                 pid = utils.uint16_t(data[tcbinfo.pid_off : tcbinfo.pid_off + 2])
                 pid = pid if pid != 0 else self.PID0_ID
                 state = utils.uint8_t(data[tcbinfo.state_off : tcbinfo.state_off + 1])
                 state = states[state] if state < len(states) else "Unknown"
                 registers = Registers(self.elf, arch=self.arch)
-                xcpregs = data[tcbinfo.regs_off : tcbinfo.regs_off + pointer.sizeof()]
-                xcpregs = pointer.parse(xcpregs)
-                xcpregs = self.memory_read(xcpregs, utils.get_regsize(self.elf))
+
+                if address in g_running_tasks:
+                    # Running task registers is not in memory, best chance is the registers
+                    # stored in g_last_regs when assert happened.
+                    xcpregs = g_last_regs[g_running_tasks.index(address)]
+                else:
+                    off = tcbinfo.regs_off
+                    xcpregs = data[off : off + pointer.sizeof()]
+                    xcpregs = pointer.parse(xcpregs)
+                    xcpregs = self.memory_read(xcpregs, regsize)
                 registers.load(xcpregs=xcpregs)
                 self.logger.debug(f"Parse TCB: {name}({pid},{state})")
                 return ThreadInfo(name, pid, state, registers)
