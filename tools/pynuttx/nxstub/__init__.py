@@ -135,11 +135,17 @@ def gdbstub_start(args):
 
     core = utils.parse_elf(args.core) if args.core else None
 
+    memremap = []
+    if args.remap:
+        for remap in args.remap:
+            fromaddr, toaddr, length = map(lambda x: int(x, 16), remap.split(","))
+            memremap.append((fromaddr, toaddr, length))
+
     if args.proxy is not None:
         print(f"Try proxying localhost:{args.proxy}...")
         target = TargetProxy(elf, args.arch, args.proxy)
     else:
-        target = Target(elf, args.arch, registers, memories, core)
+        target = Target(elf, args.arch, registers, memories, memremap, core)
 
     stub = GDBStub(target=target, port=args.port, proxymode=args.proxy is not None)
 
@@ -210,6 +216,12 @@ def parse_args(args=None):
         "--core",
         type=str,
         help="The core dump file.",
+    )
+    parser.add_argument(
+        "--remap",
+        type=str,
+        nargs="*",
+        help="Remap the memory to another address, argument in format of 'from,to,length'.",
     )
     parser.add_argument(
         "-l",

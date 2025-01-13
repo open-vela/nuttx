@@ -66,14 +66,17 @@ class Target:
         arch=None,
         registers: Registers = None,
         memories: List[RawMemory] = None,
+        remap=None,
         core=None,
     ):
         """
         The target that GDB stub operations on.
         :param elf: The ELF file path.
+        :param arch: The architecture of the target, e.g. "arm", "riscv", "mips", etc.
         :param registers: The optional initial register value, normally used for crash log analysis.
         :param memories: The optional initial memory regions, normally used for raw memory dump.
-        :param arch: The architecture of the target, e.g. "arm", "riscv", "mips", etc.
+        :param remap: The optional memory remap table, used to remap memory regions. A list of tuple (from, to, length).
+        :param core: The optional core dump file path.
         """
         self.logger = logging.getLogger(__name__)
         self.elf = elf
@@ -82,7 +85,7 @@ class Target:
         self.memories = []
         self.arch = arch
         self.pid = self.PID0_ID  # Current thread PID
-
+        self.remap = remap or []
         for mem in memories or []:
             # Go through the write process to merge overlapping memory regions
             self.memory_write(mem.address, mem.data)
@@ -181,6 +184,17 @@ class Target:
 
     def memory_read(self, address: int, length: int) -> bytes:
         self.logger.debug(f"Read: {address:#x} {length}Bytes")
+
+        # Check the real address from remap table
+        for fromaddr, toaddr, total in self.remap:
+            if toaddr <= address < toaddr + total:
+                address = fromaddr + (address - toaddr)
+                if address + length > fromaddr + total:
+                    # Do not support cross region read
+                    length = fromaddr + total - address
+                self.logger.debug(f"Remap to: {address:#x} {length}Bytes")
+                break
+
         # Try cached memory
         for mem in self.memories:
             if mem.address <= address < mem.address + len(mem):
