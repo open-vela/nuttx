@@ -35,15 +35,12 @@ from .utils import Value
 # of utils.get_symbol_value("CONFIG_MM_BACKTRACE") because the latter may report
 # wrong value on some platforms.
 
-mm_freenode_s = utils.lookup_type("struct mm_freenode_s")
-
-if "backtrace" in utils.get_fieldnames(mm_freenode_s):
-    CONFIG_MM_BACKTRACE = utils.nitems(mm_freenode_s["backtrace"])
-else:
+CONFIG_MM_BACKTRACE = utils.get_field_nitems("struct mm_freenode_s", "backtrace")
+if CONFIG_MM_BACKTRACE is None:
     CONFIG_MM_BACKTRACE = -1
 
-CONFIG_MM_BACKTRACE_PID = "pid" in utils.get_fieldnames(mm_freenode_s)
-CONFIG_MM_BACKTRACE_SEQNO = "seqno" in utils.get_fieldnames(mm_freenode_s)
+CONFIG_MM_BACKTRACE_PID = utils.has_field("struct mm_freenode_s", "pid")
+CONFIG_MM_BACKTRACE_SEQNO = utils.has_field("struct mm_freenode_s", "seqno")
 
 PID_MM_INVALID = -100
 PID_MM_MEMPOOL = -1

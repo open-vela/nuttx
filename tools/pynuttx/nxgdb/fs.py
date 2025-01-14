@@ -30,16 +30,23 @@ from . import utils
 from .protocols import fs as p
 from .protocols.thread import Tcb
 
-FSNODEFLAG_TYPE_MASK = utils.get_symbol_value("FSNODEFLAG_TYPE_MASK")
+FSNODEFLAG_TYPE_MASK = 0x0000000F
 
 CONFIG_PSEUDOFS_FILE = utils.get_symbol_value("CONFIG_PSEUDOFS_FILE")
 CONFIG_PSEUDOFS_ATTRIBUTES = utils.get_symbol_value("CONFIG_PSEUDOFS_ATTRIBUTES")
 
-CONFIG_FS_BACKTRACE = utils.get_symbol_value("CONFIG_FS_BACKTRACE")
-CONFIG_NFILE_DESCRIPTORS_PER_BLOCK = int(
-    utils.get_symbol_value("CONFIG_NFILE_DESCRIPTORS_PER_BLOCK")
-)
+CONFIG_FS_BACKTRACE = utils.get_field_nitems("struct file", "f_backtrace")
 CONFIG_FS_SHMFS = utils.get_symbol_value("CONFIG_FS_SHMFS")
+
+CONFIG_NFILE_DESCRIPTORS_PER_BLOCK = utils.get_field_nitems(
+    "struct filelist", "fl_prefiles"
+)
+
+if CONFIG_NFILE_DESCRIPTORS_PER_BLOCK is None:
+    # For some branches, this field does not exist
+    CONFIG_NFILE_DESCRIPTORS_PER_BLOCK = (
+        utils.gdb_eval_or_none("CONFIG_NFILE_DESCRIPTORS_PER_BLOCK") or 8
+    )
 
 g_special_inodes = {}  # Map of the special inodes including epoll, inotify, etc.
 
