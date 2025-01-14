@@ -145,7 +145,12 @@ class Target:
             g_last_regs = [data[i * regsize : (i + 1) * regsize] for i in range(ncpus)]
 
             def parse_tcb(address: int) -> ThreadInfo:
+                registers = Registers(self.elf, arch=self.arch)
                 data = self.memory_read(address, tcbsize)
+                if not data or len(data) != tcbsize:
+                    self.logger.error(f"Invalid TCB size: {len(data)} != {tcbsize}")
+                    return ThreadInfo("<invalid>", 0, "Invalid", registers)
+
                 if tcbinfo.name_off == 0:
                     name = "<noname>"
                 else:
@@ -155,7 +160,6 @@ class Target:
                 pid = pid if pid != 0 else self.PID0_ID
                 state = utils.uint8_t(data[tcbinfo.state_off : tcbinfo.state_off + 1])
                 state = states[state] if state < len(states) else "Unknown"
-                registers = Registers(self.elf, arch=self.arch)
 
                 if address in g_running_tasks:
                     # Running task registers is not in memory, best chance is the registers
@@ -166,7 +170,12 @@ class Target:
                     xcpregs = data[off : off + pointer.sizeof()]
                     xcpregs = pointer.parse(xcpregs)
                     xcpregs = self.memory_read(xcpregs, regsize)
-                registers.load(xcpregs=xcpregs)
+
+                try:
+                    registers.load(xcpregs=xcpregs)
+                except ValueError as e:
+                    self.logger.error(f"Failed to load registers: {e}")
+
                 self.logger.debug(f"Parse TCB: {name}({pid},{state})")
                 return ThreadInfo(name, pid, state, registers)
 
