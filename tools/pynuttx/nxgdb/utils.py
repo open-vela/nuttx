@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import math
 import os
 import re
 import shlex
@@ -546,6 +547,14 @@ def sizeof(t: Union[str, gdb.Type]):
         t = gdb.lookup_type(t)
 
     return t.sizeof
+
+
+def log2ceil(n):
+    return int(math.ceil(math.log2(n)))
+
+
+def log2floor(n):
+    return int(math.floor(math.log2(n)))
 
 
 # Machine Specific Helper Functions
