@@ -42,6 +42,7 @@ if "backtrace" in utils.get_fieldnames(mm_freenode_s):
 else:
     CONFIG_MM_BACKTRACE = -1
 
+CONFIG_MM_BACKTRACE_PID = "pid" in utils.get_fieldnames(mm_freenode_s)
 CONFIG_MM_BACKTRACE_SEQNO = "seqno" in utils.get_fieldnames(mm_freenode_s)
 
 PID_MM_INVALID = -100
@@ -115,14 +116,16 @@ class MemPoolBlock:
     @property
     def seqno(self) -> int:
         if not self._seqno:
-            self._seqno = int(self.blk["seqno"]) if CONFIG_MM_BACKTRACE_SEQNO else -100
+            self._seqno = (
+                int(self.blk["seqno"]) if CONFIG_MM_BACKTRACE_SEQNO else PID_MM_INVALID
+            )
         return self._seqno
 
     @property
     def pid(self) -> int:
         if not self._pid:
             self._pid = (
-                int(self.blk["pid"]) if CONFIG_MM_BACKTRACE >= 0 else PID_MM_INVALID
+                int(self.blk["pid"]) if CONFIG_MM_BACKTRACE_PID else PID_MM_INVALID
             )
         return self._pid
 
@@ -460,8 +463,7 @@ class MMNode(gdb.Value, p.MMFreeNode):
 
     @property
     def pid(self) -> int:
-        # Only available when CONFIG_MM_BACKTRACE >= 0
-        if CONFIG_MM_BACKTRACE >= 0:
+        if CONFIG_MM_BACKTRACE_PID:
             return int(self["pid"])
         return PID_MM_INVALID
 
