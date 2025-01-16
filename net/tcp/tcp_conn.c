@@ -142,7 +142,8 @@ static FAR struct tcp_conn_s *
           if (domain == PF_INET)
 #endif /* CONFIG_NET_IPv6 */
             {
-              if (net_ipv4addr_cmp(conn->u.ipv4.laddr, ipaddr->ipv4) ||
+              if (net_ipv4addr_cmp(ipaddr->ipv4, INADDR_ANY) ||
+                  net_ipv4addr_cmp(conn->u.ipv4.laddr, ipaddr->ipv4) ||
                   net_ipv4addr_cmp(conn->u.ipv4.laddr, INADDR_ANY))
                 {
                   /* The port number is in use, return the connection */
@@ -157,7 +158,8 @@ static FAR struct tcp_conn_s *
           else
 #endif /* CONFIG_NET_IPv4 */
             {
-              if (net_ipv6addr_cmp(conn->u.ipv6.laddr, ipaddr->ipv6) ||
+              if (net_ipv6addr_cmp(ipaddr->ipv6, g_ipv6_unspecaddr) ||
+                  net_ipv6addr_cmp(conn->u.ipv6.laddr, ipaddr->ipv6) ||
                   net_ipv6addr_cmp(conn->u.ipv6.laddr, g_ipv6_unspecaddr))
                 {
                   /* The port number is in use, return the connection */
