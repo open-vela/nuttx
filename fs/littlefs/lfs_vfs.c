@@ -80,6 +80,7 @@ struct littlefs_mountpt_s
   struct mtd_geometry_s geo;
   struct lfs_config     cfg;
   struct lfs            lfs;
+  bool                  readonly;
 };
 
 struct littlefs_attr_s
@@ -1131,6 +1132,11 @@ static int littlefs_write_block(FAR const struct lfs_config *c,
   FAR struct inode *drv = fs->drv;
   int ret;
 
+  if (fs->readonly)
+    {
+      return -EACCES;
+    }
+
   block = (block * c->block_size + off) / geo->blocksize;
   size  = size / geo->blocksize;
 
@@ -1157,6 +1163,11 @@ static int littlefs_erase_block(FAR const struct lfs_config *c,
   FAR struct inode *drv = fs->drv;
   int ret = OK;
 
+  if (fs->readonly)
+    {
+      return -EACCES;
+    }
+
   if (INODE_IS_MTD(drv))
     {
       FAR struct mtd_geometry_s *geo = &fs->geo;
@@ -1178,6 +1189,11 @@ static int littlefs_sync_block(FAR const struct lfs_config *c)
   FAR struct littlefs_mountpt_s *fs = c->context;
   FAR struct inode *drv = fs->drv;
   int ret;
+
+  if (fs->readonly)
+    {
+      return -EACCES;
+    }
 
   if (INODE_IS_MTD(drv))
     {
@@ -1326,6 +1342,11 @@ static int littlefs_bind(FAR struct inode *driver, FAR const void *data,
         {
           goto errout_with_fs;
         }
+    }
+
+  if (data && strstr(data, "ro"))
+    {
+      fs->readonly = true;
     }
 
   ret = littlefs_convert_result(lfs_mount(&fs->lfs, &fs->cfg));
