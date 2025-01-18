@@ -36,11 +36,15 @@ from .utils import Value
 # wrong value on some platforms.
 
 CONFIG_MM_BACKTRACE = utils.get_field_nitems("struct mm_freenode_s", "backtrace")
-if CONFIG_MM_BACKTRACE is None:
-    CONFIG_MM_BACKTRACE = -1
-
 CONFIG_MM_BACKTRACE_PID = utils.has_field("struct mm_freenode_s", "pid")
 CONFIG_MM_BACKTRACE_SEQNO = utils.has_field("struct mm_freenode_s", "seqno")
+
+if CONFIG_MM_BACKTRACE is None:
+    # For backward compatibility, use 0 to indicate backtrace is disabled
+    # but pid, seqno is used
+    CONFIG_MM_BACKTRACE = (
+        0 if CONFIG_MM_BACKTRACE_PID or CONFIG_MM_BACKTRACE_SEQNO else -1
+    )
 
 PID_MM_INVALID = -100
 PID_MM_MEMPOOL = -1
@@ -211,8 +215,7 @@ class MemPool(Value, p.MemPool):
         """Real block size including backtrace overhead"""
         if not self._blksize:
             blksize = self["blocksize"]
-            backtrace = utils.get_symbol_value("CONFIG_MM_BACKTRACE")
-            if CONFIG_MM_BACKTRACE is not None and backtrace >= 0:
+            if CONFIG_MM_BACKTRACE >= 0:
                 mempool_backtrace_s = utils.lookup_type("struct mempool_backtrace_s")
                 size_t = utils.lookup_type("size_t")
                 align = (
