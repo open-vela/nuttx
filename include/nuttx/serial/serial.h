@@ -297,7 +297,7 @@ struct uart_dev_s
 {
   /* State data */
 
-  uint8_t              open_count;   /* Number of times the device has been opened */
+  uint16_t             open_count;   /* Number of times the device has been opened */
   uint8_t              escape;       /* Number of the character to be escaped */
 #ifdef CONFIG_SERIAL_REMOVABLE
   volatile bool        disconnected; /* true: Removable device is not connected */
