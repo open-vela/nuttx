@@ -172,10 +172,10 @@ class RPMsgDump(gdb.Command):
             )
         gdb.write("\n".join(output) + "\n")
 
-    def dump_rpmsg(self, transport):
+    def dump_rpmsg(self, transport_only):
         for rpmsg in NxList(gdb.parse_and_eval("g_rpmsg"), "struct rpmsg_s", "node"):
             gdb.write(f"Rpmsg Device: rpmsg:{rpmsg} rdev:{rpmsg['rdev']}\n")
-            if not transport:
+            if not transport_only:
                 self.dump_rdev(rpmsg["rdev"])
             self.dump_rpmsg_virtio(rpmsg["rdev"])
 
@@ -183,6 +183,6 @@ class RPMsgDump(gdb.Command):
         if not (args := self.parse_args(args)):
             return
 
-        if not args.transport:
+        if not args.transport_only:
             self.dump_rpmsg_cb()
-        self.dump_rpmsg(args.transport)
+        self.dump_rpmsg(args.transport_only)
