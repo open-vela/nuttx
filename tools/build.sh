@@ -40,57 +40,92 @@ function setup_environment()
       "autoconf" \
       "automake" \
       "bison" \
-      "build-essential" \
       "dfu-util" \
-      "genromfs" \
       "flex" \
+      "genromfs" \
+      "gettext" \
       "git" \
       "gperf" \
-      "libncurses5" \
-      "lib32ncurses5-dev" \
-      "libc6-dev-i386" \
-      "libx11-dev" \
-      "libx11-dev:i386" \
-      "libxext-dev" \
-      "libxext-dev:i386" \
-      "net-tools" \
-      "pkgconf" \
-      "unionfs-fuse" \
-      "zlib1g-dev" \
       "kconfig-frontends" \
-      "g++-11" \
-      "g++-11-multilib" \
-      "libpulse-dev:i386" \
+      "make" \
+      "mtools" \
+      "nasm" \
+      "net-tools" \
+      "nodejs" \
+      "npm" \
+      "pkgconf" \
+      "protobuf-c-compiler" \
+      "protobuf-compiler" \
+      "xxd" \
+      "yasm" \
+      )
+
+  SIM_X86_PACKAGES=( \
       "libasound2-dev:i386" \
       "libasound2-plugins:i386" \
-      "libusb-1.0-0-dev" \
-      "libusb-1.0-0-dev:i386" \
-      "libv4l-dev" \
-      "libv4l-dev:i386" \
-      "libuv1-dev" \
-      "libmp3lame-dev:i386" \
+      "libc6-dev-i386" \
       "libmad0-dev:i386" \
+      "libmp3lame-dev:i386" \
+      "libpulse-dev:i386" \
+      "libusb-1.0-0-dev:i386" \
       "libv4l-dev:i386" \
-      "npm" \
-      "nodejs" \
-      "xxd" \
+      "libx11-dev:i386" \
+      "libxext-dev:i386" \
+  )
+
+  SIM_X86_64_PACKAGES=( \
+      "libasound2-dev" \
+      "libasound2-plugins" \
+      "libc6-dev" \
+      "libc++abi-dev" \
+      "libc++-dev" \
+      "libdivsufsort-dev" \
+      "libncurses5" \
+      "libprotobuf-dev" \
+      "libusb-1.0-0-dev" \
+      "libuv1-dev" \
+      "libv4l-dev" \
+      "libx11-dev" \
+      "libxext-dev" \
+      "zlib1g-dev" \
+  )
+
+  QEMU_PACKAGES=( \
       "qemu-system-arm" \
       "qemu-efi-aarch64" \
       "qemu-utils" \
-      "nasm" \
-      "yasm" \
-      "libdivsufsort-dev" \
-      "libc++abi-dev" \
-      "libprotobuf-dev" \
-      "protobuf-compiler" \
-      "protobuf-c-compiler" \
-      "gcc-multilib" \
-      "g++-multilib" \
-      "gettext" \
-      "mtools" \
-      "libunwind-dev" \
-      "libunwind-dev:i386" \
-      )
+  )
+
+  local boardconfig=$1
+  if [ -f ${ROOTDIR}/${boardconfig}/defconfig ]; then
+    dconfig=${ROOTDIR}/${boardconfig}/defconfig
+  else
+    configdir=`echo ${boardconfig} | cut -s -d':' -f2`
+    if [ -z "${configdir}" ]; then
+      boarddir=`echo ${boardconfig} | cut -d'/' -f1`
+      configdir=`echo ${boardconfig} | cut -d'/' -f2`
+    else
+      boarddir=`echo ${boardconfig} | cut -d':' -f1`
+    fi
+    configpath=${NUTTXDIR}/boards/*/*/${boarddir}/configs/${configdir}
+    dconfig=${configpath}/defconfig
+  fi
+
+  if [ ! -r ${dconfig} ]; then
+    echo "File ${dconfig} does not exist"
+    exit 5
+  fi
+
+  if grep -q "CONFIG_ARCH_SIM" $dconfig >/dev/null; then
+      if grep -q "CONFIG_SIM_M32" $dconfig >/dev/null; then
+          PACKAGES+=("${SIM_X86_PACKAGES[@]}")
+      else
+          PACKAGES+=("${SIM_X86_64_PACKAGES[@]}")
+      fi
+  fi
+  if grep -q "CONFIG_ARCH_CHIP_QEMU" $dconfig >/dev/null; then
+      PACKAGES+=("${QEMU_PACKAGES[@]}")
+  fi
 
   for (( i = 0; i < ${#PACKAGES[*]}; i++)); do
     dpkg -l ${PACKAGES[$i]} > /dev/null 2>&1
@@ -111,7 +146,13 @@ function setup_environment()
   echo "*************************************************************************************"
   echo "The environment of Vela depends on above tools, Run the following command to install:"
   echo ""
-  echo " sudo dpkg --add-architecture i386"
+
+  for (( i = 0; i < ${#INSTALLS[*]}; i++)); do
+    if [[ "${INSTALLS[$i]}" == *":i386" ]]; then
+      echo " sudo dpkg --add-architecture i386"
+      break
+    fi
+  done
 
   for (( i = 0; i < ${#INSTALLS[*]}; i++)); do
     result=`apt-cache search ${INSTALLS[$i]}`
@@ -408,8 +449,6 @@ fi
 ROOTDIR=$(dirname $(readlink -f ${0}))
 ROOTDIR=$(realpath ${ROOTDIR}/../..)
 
-setup_environment
-
 CONFIGPATH=$2
 
 if [ $1 == "-m" ]; then
@@ -444,6 +483,8 @@ fi
 TOOLSDIR=${NUTTXDIR}/tools
 board_config=$1
 shift
+
+setup_environment $board_config
 
 EXTRA_FLAGS="-Wno-cpp"
 while [[ "$1" == "-e" ]]; do
