@@ -62,10 +62,9 @@ class Registers:
             for line in lines.splitlines()[1:]:
                 if not line:
                     continue
-
                 # Name         Nr  Rel Offset    Size  Type            Rmt Nr  g/G Offset
                 match = re.match(
-                    r"\s(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+(\d+)\s+(\d+))?",
+                    r".*?(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+(\d+)\s+(\d+))?.*?",
                     line,
                 )
                 if not match:
