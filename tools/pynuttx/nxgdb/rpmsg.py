@@ -124,6 +124,56 @@ class RPMsgDump(gdb.Command):
 
         gdb.write("\n")
 
+    def rpmsg_get_ept_from_addr(self, rdev, addr):
+        endpoints = rdev["endpoints"]
+        for endpoint in NxList(endpoints, "struct rpmsg_endpoint", "node"):
+            ept_addr = endpoint["addr"]
+            if ept_addr == addr:
+                return endpoint
+        return None
+
+    def rpmsg_port_node_to_buf(self, queue, node):
+        node_offset = int(node) - int(queue["node"])
+        buf_addr = queue["buf"] + (node_offset * queue["len"])
+        return buf_addr
+
+    def dump_rpmsg_port_buffer(self, rdev, queue, label):
+        buffer_list = []
+        head = queue["ready"]["head"]
+
+        for node in NxList(head):
+            hdr = self.rpmsg_port_node_to_buf(queue, node)
+            if not hdr or not hdr["buf"]:
+                continue
+
+            rphdr = hdr["buf"].cast(utils.lookup_type("struct rpmsg_hdr").pointer())
+            ept_addr = rphdr["dst"] if label == "RX" else rphdr["src"]
+            ept = self.rpmsg_get_ept_from_addr(rdev, ept_addr)
+            if ept:
+                ept_name = ept["name"].string().split("\0", 1)[0]
+                buffer_list.append(f"{label} buffer:{rphdr} held by {ept_name}\n")
+
+        return buffer_list
+
+    def dump_rpmsg_port(self, rdev):
+        real_addr = hex(
+            gdb.lookup_symbol("rpmsg_port_get_tx_payload_buffer")[0].value().address
+        )
+        ops_addr = hex(int(utils.Value(rdev["ops"]["get_tx_payload_buffer"])) & ~1)
+        if real_addr != ops_addr:
+            return
+        port = rdev.cast(utils.lookup_type("struct rpmsg_port_s").pointer())
+
+        gdb.write(f"rxq nused:{port['rxq']['ready']['num']}\n")
+        gdb.write(f"rxq navail:{port['rxq']['free']['num']}\n")
+        gdb.write(f"txq nused:{port['txq']['ready']['num']}\n")
+        gdb.write(f"txq navail:{port['txq']['free']['num']}\n")
+
+        rx_buffers = self.dump_rpmsg_port_buffer(rdev, port["rxq"], "RX")
+        tx_buffers = self.dump_rpmsg_port_buffer(rdev, port["txq"], "TX")
+        for buffer in rx_buffers + tx_buffers:
+            gdb.write(buffer + "\n")
+
     def print_headers(self, headers, formatter):
         gdb.write(formatter.format(*headers) + "\n")
         gdb.write(formatter.format(*["-" * len(header) for header in headers]) + "\n")
@@ -178,6 +228,7 @@ class RPMsgDump(gdb.Command):
             if not transport_only:
                 self.dump_rdev(rpmsg["rdev"])
             self.dump_rpmsg_virtio(rpmsg["rdev"])
+            self.dump_rpmsg_port(rpmsg["rdev"])
 
     def invoke(self, args, from_tty):
         if not (args := self.parse_args(args)):
