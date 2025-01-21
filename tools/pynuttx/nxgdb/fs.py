@@ -45,7 +45,7 @@ CONFIG_NFILE_DESCRIPTORS_PER_BLOCK = utils.get_field_nitems(
 if CONFIG_NFILE_DESCRIPTORS_PER_BLOCK is None:
     # For some branches, this field does not exist
     CONFIG_NFILE_DESCRIPTORS_PER_BLOCK = (
-        utils.gdb_eval_or_none("CONFIG_NFILE_DESCRIPTORS_PER_BLOCK") or 8
+        int(utils.gdb_eval_or_none("CONFIG_NFILE_DESCRIPTORS_PER_BLOCK")) or 8
     )
 
 g_special_inodes = {}  # Map of the special inodes including epoll, inotify, etc.
