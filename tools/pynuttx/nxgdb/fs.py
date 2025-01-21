@@ -47,6 +47,7 @@ if CONFIG_NFILE_DESCRIPTORS_PER_BLOCK is None:
     CONFIG_NFILE_DESCRIPTORS_PER_BLOCK = (
         int(utils.gdb_eval_or_none("CONFIG_NFILE_DESCRIPTORS_PER_BLOCK")) or 8
     )
+    CONFIG_NFILE_DESCRIPTORS_PER_BLOCK = int(CONFIG_NFILE_DESCRIPTORS_PER_BLOCK)
 
 g_special_inodes = {}  # Map of the special inodes including epoll, inotify, etc.
 
