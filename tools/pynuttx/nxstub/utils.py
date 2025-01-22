@@ -100,13 +100,15 @@ def read_from(elf: lief.Binary, addr, len=1) -> memoryview:
 
 
 def get_symbol(elf: lief.Binary, symbol) -> lief.Symbol:
-    return elf.get_symbol(symbol)
+    for sym in elf.symbols:
+        if sym.name.split(".")[0] == symbol:
+            return sym
 
 
 def read_symbol(
     elf: lief.Binary, symbol, struct: Construct = None
 ) -> Tuple[lief.Symbol, memoryview]:
-    sym = elf.get_symbol(symbol)
+    sym = get_symbol(elf, symbol)
     if sym is None:
         return None
 
