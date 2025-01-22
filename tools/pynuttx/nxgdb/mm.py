@@ -383,7 +383,8 @@ class MMNode(gdb.Value, p.MMFreeNode):
     MM_PREVFREE_BIT = 0x2
     MM_MASK_BIT = MM_ALLOC_BIT | MM_PREVFREE_BIT
     MM_SIZEOF_ALLOCNODE = utils.sizeof("struct mm_allocnode_s")
-    MM_ALLOCNODE_OVERHEAD = MM_SIZEOF_ALLOCNODE - utils.sizeof("mmsize_t")
+    # Although preceding can locates in the previous node, we still count it as overhead
+    MM_ALLOCNODE_OVERHEAD = MM_SIZEOF_ALLOCNODE
     MM_MIN_SHIFT = utils.log2ceil(utils.sizeof("struct mm_freenode_s"))
     MM_MIN_CHUNK = 1 << MM_MIN_SHIFT
 
@@ -416,12 +417,8 @@ class MMNode(gdb.Value, p.MMFreeNode):
         )
 
     def contains(self, address):
-        """Check if the address is in node's range, excluding oeprhead"""
-        return (
-            self.address + self.overhead
-            <= address
-            < self.address + self.nodesize - MMNode.MM_ALLOCNODE_OVERHEAD
-        )
+        """Check if the address is in node's range, excluding overhead"""
+        return self.address + self.overhead <= address < self.address + self.nodesize
 
     def read_memory(self):
         addr = int(self.address) + MMNode.MM_ALLOCNODE_OVERHEAD
