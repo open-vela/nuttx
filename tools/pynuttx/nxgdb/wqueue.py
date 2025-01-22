@@ -42,7 +42,7 @@ class Work(Value, p.Work):
         return WorkQueue(self.wq)
 
     def __repr__(self) -> str:
-        return f"work_s@{self.address:#x}: {self.worker.format_string(styling=True)} arg={self.arg}"
+        return f"(struct work_s *){self.address:#x}: {self.worker.format_string(styling=True)} arg={self.arg}"
 
     def __str__(self) -> str:
         return self.__repr__()
@@ -71,7 +71,7 @@ class KWorker(Value, p.KWorker):
         return utils.get_task_name(utils.get_tcb(self.pid))
 
     def __repr__(self):
-        return f"kworker_s@{self.address:#x} {self.work or 'idle'}"
+        return f"(struct kworker_s *){self.address:#x} {self.work or 'idle'}"
 
     def __str__(self):
         return self.__repr__()
@@ -114,7 +114,10 @@ class WorkQueue(Value, p.KWorkQueue):
 
     def __repr__(self):
         state = "running" if self.is_running else "idle"
-        return f"{self.name}@{self.address:#x}, {state}, {self.nthreads} threads, {len(self.workers)} work"
+        return (
+            f"{self.name} (struct kwork_wqueue_s *){self.address:#x}, {state}, "
+            f"{self.nthreads} threads, {len(self.workers)} work"
+        )
 
     def __str__(self):
         return self.__repr__()
