@@ -308,7 +308,7 @@ class Registers:
         self.logger = logging.getLogger(__name__)
         self.arch = arch
         self._registers: List[Register] = []
-        regsize = utils.get_pointer_size(elf)
+        regsize = elf.get_pointer_size()
         reginfo = utils.get_reginfo(elf)
         layouts = g_reg_table.get(self.arch, {}).get("registers", [])
         regoffsets = [r.tcb_offset for r in reginfo if r.tcb_offset != UINT16_MAX]

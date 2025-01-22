@@ -38,7 +38,6 @@ try:
 except ImportError:
     print('Package missing, please do "pip install lief construct"')
 
-import logging
 from typing import List, Tuple
 
 
@@ -55,125 +54,110 @@ class RegInfo:
         return f"REG({self.name}, {self.size}, {self.tcb_offset})"
 
 
-def parse_elf(elf_file: str) -> lief.Binary:
-    elf = lief.parse(elf_file)
+class LiefELF:
+    def __init__(self, filename):
+        self.elf = lief.parse(filename)
+        if not self.elf:
+            raise BaseException(f"Failed to parse ELF file: {filename}")
 
-    if not elf:
-        logging.error(f"Failed to parse ELF file: {elf_file}")
+        self.symbols = {sym.name.split(".")[0]: sym for sym in self.elf.symbols}
+        self.endian = (
+            "l"
+            if self.elf.abstract.header.endianness == lief.Header.ENDIANNESS.LITTLE
+            else "b"
+        )
+        self.architecture = self.elf.abstract.header.architecture
+        self.bits = 64 if self.elf.abstract.header.is_64 else 32
+
+    def get_symbol(self, symbol):
+        return self.symbols.get(symbol)
+
+    def read_symbol(
+        self, symbol, struct: Construct = None
+    ) -> Tuple[lief.Symbol, memoryview]:
+        sym = self.get_symbol(symbol)
+        if sym is None:
+            return None
+
+        data = self.read_from(sym.value, sym.size)
+        if struct:
+            data = struct.parse(data)
+        return sym, data
+
+    def read_from(self, addr, len=1) -> memoryview:
+        for section in self.elf.sections:
+            if section.type == lief.ELF.Section.TYPE.PROGBITS:
+                off = addr - section.virtual_address
+                if (
+                    section.virtual_address
+                    <= addr
+                    < section.virtual_address + section.size
+                    and section.size - off >= len
+                ):
+                    return section.content[off : off + len]
+
+        for segment in self.elf.segments:
+            if segment.type == lief.ELF.Segment.TYPE.LOAD:
+                off = addr - segment.virtual_address
+                if (
+                    segment.virtual_address
+                    <= addr
+                    < segment.virtual_address + segment.virtual_size
+                    and segment.virtual_size - off >= len
+                ):
+                    return segment.content[off : off + len]
+
         return None
 
-    return elf
+    def read_string(self, addr) -> str:
+        """Read const string from ELF file"""
+        output = b""
+        while True:
+            c = self.read_from(addr, 1)
+            if c == b"\0":
+                break
+
+            output += c.tobytes()
+            addr += 1
+
+        return output.decode("utf-8")
+
+    def get_inttype(self) -> Construct:
+        return {
+            "32l": Int32sl,
+            "32b": Int32sb,
+            "64l": Int64sl,
+            "64b": Int64sb,
+        }.get(f"{self.bits}{self.endian}", Int32sl)
+
+    def get_pointer_type(self) -> Construct:
+        return {
+            "32l": Int32ul,
+            "32b": Int32ub,
+            "64l": Int64ul,
+            "64b": Int64ub,
+        }.get(f"{self.bits}{self.endian}", Int32ul)
+
+    def get_pointer_size(self):
+        return 8 if self.elf.abstract.header.is_64 else 4
 
 
-def get_architecture(elf: lief.Binary):
-    return elf.abstract.header.architecture
-
-
-def get_endian(elf: lief.Binary) -> str:
-    return (
-        "l" if elf.abstract.header.endianness == lief.Header.ENDIANNESS.LITTLE else "b"
-    )
-
-
-def read_from(elf: lief.Binary, addr, len=1) -> memoryview:
-    for section in elf.sections:
-        if section.type == lief.ELF.Section.TYPE.PROGBITS:
-            off = addr - section.virtual_address
-            if (
-                section.virtual_address <= addr < section.virtual_address + section.size
-                and section.size - off >= len
-            ):
-                return section.content[off : off + len]
-
-    for segment in elf.segments:
-        if segment.type == lief.ELF.Segment.TYPE.LOAD:
-            off = addr - segment.virtual_address
-            if (
-                segment.virtual_address
-                <= addr
-                < segment.virtual_address + segment.virtual_size
-                and segment.virtual_size - off >= len
-            ):
-                return segment.content[off : off + len]
-
-    return None
-
-
-def get_symbol(elf: lief.Binary, symbol) -> lief.Symbol:
-    for sym in elf.symbols:
-        if sym.name.split(".")[0] == symbol:
-            return sym
-
-
-def read_symbol(
-    elf: lief.Binary, symbol, struct: Construct = None
-) -> Tuple[lief.Symbol, memoryview]:
-    sym = get_symbol(elf, symbol)
-    if sym is None:
-        return None
-
-    data = read_from(elf, sym.value, sym.size)
-    if struct:
-        data = struct.parse(data)
-    return sym, data
-
-
-def read_string(elf: lief.Binary, addr):
-    """Read const string from ELF file"""
-    output = b""
-    while True:
-        c = read_from(elf, addr, 1)
-        if c == b"\0":
-            break
-
-        output += c.tobytes()
-        addr += 1
-
-    return output.decode("utf-8")
-
-
-def get_inttype(elf: lief.Binary) -> Construct:
-    endian = get_endian(elf)
-    bits = 64 if elf.abstract.header.is_64 else 32
-    return {
-        "32l": Int32sl,
-        "32b": Int32sb,
-        "64l": Int64sl,
-        "64b": Int64sb,
-    }.get(f"{bits}{endian}", Int32sl)
-
-
-def get_pointer_type(elf: lief.Binary) -> Construct:
-    endian = get_endian(elf)
-    bits = 64 if elf.abstract.header.is_64 else 32
-    return {
-        "32l": Int32ul,
-        "32b": Int32ub,
-        "64l": Int64ul,
-        "64b": Int64ub,
-    }.get(f"{bits}{endian}", Int32ul)
-
-
-def get_pointer_size(elf: lief.Binary):
-    return 8 if elf.abstract.header.is_64 else 4
-
-
-def get_ncpus(elf: lief.Binary) -> int:
+def get_ncpus(elf: LiefELF) -> int:
     # FAR struct tcb_s *g_running_tasks[CONFIG_SMP_NCPUS];
     #
     # g_running_tasks is an pointer array in length of ncpu
     g_running_tasks = elf.get_symbol("g_running_tasks")
 
-    return g_running_tasks.size // get_pointer_size(elf)
+    return g_running_tasks.size // elf.get_pointer_size()
 
 
-def get_regsize(elf: lief.Binary) -> int:
+def get_regsize(elf: LiefELF) -> int:
     """Register size in context"""
     sym = elf.get_symbol("g_last_regs")
     return sym.size // get_ncpus(elf)
 
 
-def get_tcbinfo(elf: lief.Binary):
+def get_tcbinfo(elf: LiefELF):
     tcbinfo_s = Struct(
         "pid_off" / Int16ul,  # FIXME: only little endian supported
         "state_off" / Int16ul,
@@ -185,11 +169,11 @@ def get_tcbinfo(elf: lief.Binary):
         "regs_num" / Int16ul,
     )
 
-    _, data = read_symbol(elf, "g_tcbinfo")
+    _, data = elf.read_symbol("g_tcbinfo")
     return tcbinfo_s.parse(data)
 
 
-def get_tcb_size(elf: lief.Binary) -> int:
+def get_tcb_size(elf: LiefELF) -> int:
     # static struct tcb_s g_idletcb[CONFIG_SMP_NCPUS];
     # Idle TCB happen to be an array of tcb_s
 
@@ -198,24 +182,22 @@ def get_tcb_size(elf: lief.Binary) -> int:
     return g_idletcb.size // ncpus
 
 
-def get_reginfo(elf: lief.Binary) -> List[RegInfo]:
-    bits = 64 if elf.abstract.header.is_64 else 32
-
+def get_reginfo(elf: LiefELF) -> List[RegInfo]:
     # Now get register offset in TCB
-    _, data = read_symbol(elf, "g_reg_offs")
+    _, data = elf.read_symbol("g_reg_offs")
     reg_offs = Array(len(data) // 2, Int16ul).parse(data)
-    return [RegInfo("", bits // 8, off) for off in reg_offs]
+    return [RegInfo("", elf.bits // 8, off) for off in reg_offs]
 
 
 def parse_array(data, type_, narray):
     return Array(narray, type_).parse(data)
 
 
-def get_statenames(elf: lief.Binary) -> List[str]:
-    pointer = get_pointer_type(elf)
-    sym, addr = read_symbol(elf, "g_statenames")
+def get_statenames(elf: LiefELF) -> List[str]:
+    pointer = elf.get_pointer_type()
+    sym, addr = elf.read_symbol("g_statenames")
     names = parse_array(addr, pointer, sym.size // pointer.sizeof())
-    names = [read_string(elf, name) for name in names]
+    names = [elf.read_string(name) for name in names]
     return names
 
 

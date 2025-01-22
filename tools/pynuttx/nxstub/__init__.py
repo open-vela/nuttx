@@ -129,11 +129,11 @@ def gdbstub_start(args):
             memories.append(RawMemory(address, f.read()))
             print(f"Add memory dump: {memories[-1]}")
 
-    elf = utils.parse_elf(args.elffile)
+    elf = utils.LiefELF(args.elffile)
     registers, mem = parse_log(elf, args.arch, args.log)
     memories.extend(mem)
 
-    core = utils.parse_elf(args.core) if args.core else None
+    core = utils.LiefELF(args.core) if args.core else None
 
     memremap = []
     if args.remap:

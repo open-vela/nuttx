@@ -79,8 +79,8 @@ class Target:
         :param core: The optional core dump file path.
         """
         self.logger = logging.getLogger(__name__)
-        self.elf = elf
-        self.core = core
+        self.elf: utils.LiefELF = elf
+        self.core: utils.LiefELF = core
         self.registers = registers or Registers(elf, arch=arch)
         self.memories: List[RawMemory] = []
         self.arch = arch
@@ -93,12 +93,12 @@ class Target:
         self.logger.debug(f"Memory regions: {self.memories}")
 
     def _read_symbol(self, symbol: str, length: int = 0) -> bytes:
-        sym = utils.get_symbol(self.elf, symbol)
+        sym = self.elf.get_symbol(symbol)
         data = self.memory_read(sym.value, length or sym.size)
         return data, sym
 
     def _read_int(self, symbol: str) -> int:
-        inttype = utils.get_inttype(self.elf)
+        inttype = self.elf.get_inttype()
         data, sym = self._read_symbol(symbol, inttype.sizeof())
         if not data:
             return None, sym
@@ -118,7 +118,7 @@ class Target:
         self.threads = (ThreadInfo("main", self.PID0_ID, "Running", self.registers),)
 
         try:
-            pointer = utils.get_pointer_type(self.elf)
+            pointer = self.elf.get_pointer_type()
             tcbsize = utils.get_tcb_size(self.elf)
             tcbinfo = utils.get_tcbinfo(self.elf)
             try:
@@ -238,11 +238,11 @@ class Target:
                 return mem.data[offset : offset + length]
 
         # Try core
-        if self.core and (value := utils.read_from(self.core, address, length)):
+        if self.core and (value := self.core.read_from(address, length)):
             return bytes(value)
 
         # Try elf
-        return bytes(utils.read_from(self.elf, address, length) or [])
+        return bytes(self.elf.read_from(address, length) or [])
 
     def memory_write(self, address, data):
         memories = self.memories
@@ -296,7 +296,7 @@ class Target:
                 )
             except ValueError:
                 # try if it's a symbol, note that expression is not supported.
-                address = utils.get_symbol(self.elf, address).value
+                address = self.elf.get_symbol(address).value
 
             self.registers.load(self.memory_read(address, utils.get_regsize(self.elf)))
             return f"Loaded registers from {address:#x}\n"
