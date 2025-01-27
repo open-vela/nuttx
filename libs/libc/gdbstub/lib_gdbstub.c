@@ -88,8 +88,7 @@ struct gdb_state_s
   char pkt_buf[BUFSIZE];                  /* Packet buffer */
   size_t pkt_len;                         /* Packet send and receive length */
   FAR uint8_t *running_regs;              /* Registers of running thread */
-  size_t size;                            /* Size of registers */
-  uintptr_t registers[0];                 /* Registers of other threads */
+  FAR void *xcpregs;                      /* Pointer to the registers in context. */
 };
 
 struct gdb_debugpoint_s
@@ -1005,7 +1004,6 @@ static void gdb_update_regcache(FAR struct gdb_state_s *state)
 {
   FAR struct tcb_s *tcb = nxsched_get_tcb(state->pid);
   FAR uint8_t *reg;
-  int i;
 
   reg = (FAR uint8_t *)tcb->xcp.regs;
   if (state->pid == _SCHED_GETTID())
@@ -1021,18 +1019,22 @@ static void gdb_update_regcache(FAR struct gdb_state_s *state)
         }
     }
 
-  for (i = 0; i < state->size / sizeof(uintptr_t); i++)
+  state->xcpregs = reg;
+}
+
+static FAR const struct reginfo_s * gdb_find_reginfo(int regnum)
+{
+  size_t i;
+  for (i = 0; i < g_tcbinfo.regs_num; i++)
     {
-      if (g_tcbinfo.reg_off.p[i] == UINT16_MAX)
+      if (g_tcbinfo.u.reginfo[i].regnum == regnum  &&
+          g_tcbinfo.u.reginfo[i].goffset != REGINFO_OFFSET_INVALID)
         {
-          state->registers[i] = 0;
-        }
-      else
-        {
-          state->registers[i] =
-            *(FAR uintptr_t *)(reg + g_tcbinfo.reg_off.p[i]);
+          return &g_tcbinfo.u.reginfo[i];
         }
     }
+
+  return NULL;
 }
 
 /****************************************************************************
@@ -1054,18 +1056,41 @@ static void gdb_update_regcache(FAR struct gdb_state_s *state)
 
 static int gdb_read_registers(FAR struct gdb_state_s *state)
 {
+  FAR const char *xcpregs = state->xcpregs;
+  ssize_t offset = 0; /* Offset in g/G packet */
+  size_t i;
   int ret;
 
-  ret = gdb_bin2hex(state->pkt_buf, sizeof(state->pkt_buf),
-                    state->registers, state->size);
-  if (ret < 0)
+  memset(state->pkt_buf, 'x', BUFSIZE);
+
+  for (i = 0; i < g_tcbinfo.regs_num; i++)
     {
-      return ret;
+      FAR const struct reginfo_s *reg = &g_tcbinfo.u.reginfo[i];
+      uintptr_t value = 0;
+
+      if (reg->goffset == REGINFO_OFFSET_INVALID)
+        {
+          continue;
+        }
+      else if (reg->goffset != REGINFO_OFFSET_AUTO)
+        {
+          offset = reg->goffset;
+        }
+
+      memcpy(&value, xcpregs + reg->toffset, reg->size);
+      ret = gdb_bin2hex(&state->pkt_buf[offset * 2],
+                        BUFSIZE - offset,
+                        &value, reg->size);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      offset += reg->size;
     }
 
-  state->pkt_len = ret;
+  state->pkt_len = offset * 2;
   gdb_send_packet(state);
-
   return 0;
 }
 
@@ -1089,13 +1114,28 @@ static int gdb_read_registers(FAR struct gdb_state_s *state)
 
 static int gdb_write_registers(FAR struct gdb_state_s *state)
 {
+  FAR char *xcpregs = state->xcpregs;
+  ssize_t offset = 0; /* Offset in g/G packet */
+  size_t i;
   int ret;
 
-  ret = gdb_hex2bin(state->registers, state->size,
-                    state->pkt_buf + 1, state->pkt_len - 1);
-  if (ret < 0)
+  for (i = 0; i < g_tcbinfo.regs_num; i++)
     {
-      return ret;
+      FAR const struct reginfo_s *reg = &g_tcbinfo.u.reginfo[i];
+      uintptr_t value = 0;
+
+      offset = reg->goffset > 0 ? reg->goffset : offset;
+      ret = gdb_hex2bin(&value, sizeof(value),
+                        state->pkt_buf + offset, state->pkt_len - offset);
+      if (ret < 0)
+        {
+          /* xxxx means to register value not available. */
+
+          continue;
+        }
+
+      memcpy(xcpregs + reg->toffset, &value, reg->size);
+      offset += reg->size;
     }
 
   gdb_send_ok_packet(state);
@@ -1121,23 +1161,33 @@ static int gdb_write_registers(FAR struct gdb_state_s *state)
 
 static int gdb_read_register(FAR struct gdb_state_s *state)
 {
-  uintptr_t addr;
+  FAR const char *xcpregs = state->xcpregs;
+  FAR const struct reginfo_s *reg;
+  uintptr_t value = 0;
+  uintptr_t regnum;
   int ret;
 
   state->pkt_next++;
-  ret = gdb_expect_integer(state, &addr);
+  ret = gdb_expect_integer(state, &regnum);
   if (ret < 0)
     {
       return ret;
     }
 
-  if (addr >= state->size)
+  reg = gdb_find_reginfo(regnum);
+  if (reg == NULL)
     {
-      return 0;
+      return -EINVAL;
+    }
+
+  memcpy(&value, xcpregs + reg->toffset, reg->size);
+  if (ret < 0)
+    {
+      return ret;
     }
 
   ret = gdb_bin2hex(state->pkt_buf, sizeof(state->pkt_buf),
-                    &state->registers[addr], sizeof(state->registers[addr]));
+                    &value, reg->size);
   if (ret < 0)
     {
       return ret;
@@ -1169,15 +1219,24 @@ static int gdb_read_register(FAR struct gdb_state_s *state)
 
 static int gdb_write_register(FAR struct gdb_state_s *state)
 {
-  uintptr_t addr;
+  FAR char *xcpregs = state->xcpregs;
+  FAR const struct reginfo_s *reg;
+  uintptr_t value = 0;
+  uintptr_t regnum;
   int ret;
 
   state->pkt_next++;
 
-  ret = gdb_expect_integer(state, &addr);
+  ret = gdb_expect_integer(state, &regnum);
   if (ret < 0)
     {
       return ret;
+    }
+
+  reg = gdb_find_reginfo(regnum);
+  if (reg == NULL)
+    {
+      return -EINVAL;
     }
 
   ret = gdb_expect_separator(state, '=');
@@ -1186,18 +1245,14 @@ static int gdb_write_register(FAR struct gdb_state_s *state)
       return ret;
     }
 
-  if (addr > state->size / sizeof(uintptr_t) - 1)
-    {
-      return -EINVAL;
-    }
-
-  ret = gdb_hex2bin(&state->registers[addr], sizeof(uintptr_t),
+  ret = gdb_hex2bin(&value, sizeof(uintptr_t),
                     state->pkt_next, gdb_remaining_len(state));
-
   if (ret < 0)
     {
       return ret;
     }
+
+  memcpy(xcpregs + reg->toffset, &value, reg->size);
 
   gdb_send_ok_packet(state);
   return 0;
@@ -2018,15 +2073,13 @@ FAR struct gdb_state_s *gdb_state_init(gdb_send_func_t send,
                                        gdb_monitor_func_t monitor,
                                        FAR void *priv)
 {
-  size_t size = g_tcbinfo.regs_num * sizeof(uintptr_t);
-  FAR struct gdb_state_s *state = lib_zalloc(sizeof(*state) + size);
+  FAR struct gdb_state_s *state = lib_zalloc(sizeof(struct gdb_state_s));
 
   if (state == NULL)
     {
       return NULL;
     }
 
-  state->size = size;
   state->send = send;
   state->recv = recv;
   state->priv = priv;
