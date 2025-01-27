@@ -32,40 +32,42 @@
  * Private Data
  ****************************************************************************/
 
-static const uint16_t g_reg_offs[] =
+/* Name,  Size, Regnum,   TCB offset,         g/G offset */
+
+static const struct reginfo_s g_reginfo[] =
 {
-  UINT16_MAX,            /* G0 */
-  TCB_REG_OFF(REG_G1),   /* G1 */
-  TCB_REG_OFF(REG_G2),   /* G2 */
-  TCB_REG_OFF(REG_G3),   /* G3 */
-  TCB_REG_OFF(REG_G4),   /* G4 */
-  TCB_REG_OFF(REG_G5),   /* G5 */
-  TCB_REG_OFF(REG_G6),   /* G6 */
-  TCB_REG_OFF(REG_G7),   /* G7 */
-  TCB_REG_OFF(REG_O0),   /* O0 */
-  TCB_REG_OFF(REG_O1),   /* O1 */
-  TCB_REG_OFF(REG_O2),   /* O2 */
-  TCB_REG_OFF(REG_O3),   /* O3 */
-  TCB_REG_OFF(REG_O4),   /* O4 */
-  TCB_REG_OFF(REG_O5),   /* O5 */
-  TCB_REG_OFF(REG_O6),   /* O6 */
-  TCB_REG_OFF(REG_O7),   /* O7 */
-  TCB_REG_OFF(REG_L0),   /* L0 */
-  TCB_REG_OFF(REG_L1),   /* L1 */
-  TCB_REG_OFF(REG_L2),   /* L2 */
-  TCB_REG_OFF(REG_L3),   /* L3 */
-  TCB_REG_OFF(REG_L4),   /* L4 */
-  TCB_REG_OFF(REG_L5),   /* L5 */
-  TCB_REG_OFF(REG_L6),   /* L6 */
-  TCB_REG_OFF(REG_L7),   /* L7 */
-  TCB_REG_OFF(REG_I0),   /* I0 */
-  TCB_REG_OFF(REG_I1),   /* I1 */
-  TCB_REG_OFF(REG_I2),   /* I2 */
-  TCB_REG_OFF(REG_I3),   /* I3 */
-  TCB_REG_OFF(REG_I4),   /* I4 */
-  TCB_REG_OFF(REG_I5),   /* I5 */
-  TCB_REG_OFF(REG_I6),   /* I6 */
-  TCB_REG_OFF(REG_I7),   /* I7 */
+  {"",    4,    0,      REGINFO_OFFSET_INVALID, REGINFO_OFFSET_AUTO},
+  {"g1",  4,    1,      TCB_REG_OFF(REG_G1),    REGINFO_OFFSET_AUTO},
+  {"g2",  4,    2,      TCB_REG_OFF(REG_G2),    REGINFO_OFFSET_AUTO},
+  {"g3",  4,    3,      TCB_REG_OFF(REG_G3),    REGINFO_OFFSET_AUTO},
+  {"g4",  4,    4,      TCB_REG_OFF(REG_G4),    REGINFO_OFFSET_AUTO},
+  {"g5",  4,    5,      TCB_REG_OFF(REG_G5),    REGINFO_OFFSET_AUTO},
+  {"g6",  4,    6,      TCB_REG_OFF(REG_G6),    REGINFO_OFFSET_AUTO},
+  {"g7",  4,    7,      TCB_REG_OFF(REG_G7),    REGINFO_OFFSET_AUTO},
+  {"o0",  4,    8,      TCB_REG_OFF(REG_O0),    REGINFO_OFFSET_AUTO},
+  {"o1",  4,    9,      TCB_REG_OFF(REG_O1),    REGINFO_OFFSET_AUTO},
+  {"o2",  4,    10,     TCB_REG_OFF(REG_O2),    REGINFO_OFFSET_AUTO},
+  {"o3",  4,    11,     TCB_REG_OFF(REG_O3),    REGINFO_OFFSET_AUTO},
+  {"o4",  4,    12,     TCB_REG_OFF(REG_O4),    REGINFO_OFFSET_AUTO},
+  {"o5",  4,    13,     TCB_REG_OFF(REG_O5),    REGINFO_OFFSET_AUTO},
+  {"o6",  4,    14,     TCB_REG_OFF(REG_O6),    REGINFO_OFFSET_AUTO},
+  {"o7",  4,    15,     TCB_REG_OFF(REG_O7),    REGINFO_OFFSET_AUTO},
+  {"l0",  4,    16,     TCB_REG_OFF(REG_L0),    REGINFO_OFFSET_AUTO},
+  {"l1",  4,    17,     TCB_REG_OFF(REG_L1),    REGINFO_OFFSET_AUTO},
+  {"l2",  4,    18,     TCB_REG_OFF(REG_L2),    REGINFO_OFFSET_AUTO},
+  {"l3",  4,    19,     TCB_REG_OFF(REG_L3),    REGINFO_OFFSET_AUTO},
+  {"l4",  4,    20,     TCB_REG_OFF(REG_L4),    REGINFO_OFFSET_AUTO},
+  {"l5",  4,    21,     TCB_REG_OFF(REG_L5),    REGINFO_OFFSET_AUTO},
+  {"l6",  4,    22,     TCB_REG_OFF(REG_L6),    REGINFO_OFFSET_AUTO},
+  {"l7",  4,    23,     TCB_REG_OFF(REG_L7),    REGINFO_OFFSET_AUTO},
+  {"i0",  4,    24,     TCB_REG_OFF(REG_I0),    REGINFO_OFFSET_AUTO},
+  {"i1",  4,    25,     TCB_REG_OFF(REG_I1),    REGINFO_OFFSET_AUTO},
+  {"i2",  4,    26,     TCB_REG_OFF(REG_I2),    REGINFO_OFFSET_AUTO},
+  {"i3",  4,    27,     TCB_REG_OFF(REG_I3),    REGINFO_OFFSET_AUTO},
+  {"i4",  4,    28,     TCB_REG_OFF(REG_I4),    REGINFO_OFFSET_AUTO},
+  {"i5",  4,    29,     TCB_REG_OFF(REG_I5),    REGINFO_OFFSET_AUTO},
+  {"i6",  4,    30,     TCB_REG_OFF(REG_I6),    REGINFO_OFFSET_AUTO},
+  {"i7",  4,    31,     TCB_REG_OFF(REG_I7),    REGINFO_OFFSET_AUTO},
 };
 
 /****************************************************************************
@@ -81,10 +83,10 @@ const struct tcbinfo_s g_tcbinfo =
   .stack_off      = TCB_STACK_OFF,
   .stack_size_off = TCB_STACK_SIZE_OFF,
   .regs_off       = TCB_REGS_OFF,
-  .regs_num       = nitems(g_reg_offs),
+  .regs_num       = nitems(g_reginfo),
   {
-    .p = g_reg_offs,
-  },
+    .reginfo      = g_reginfo,
+  }
 };
 
 /****************************************************************************

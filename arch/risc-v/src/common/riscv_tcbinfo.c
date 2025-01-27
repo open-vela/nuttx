@@ -32,81 +32,43 @@
  * Private Data
  ****************************************************************************/
 
-static const uint16_t g_reg_offs[] =
-{
-  TCB_REG_OFF(REG_EPC_NDX), /* X0, but it will be ommited by gdb client */
-  TCB_REG_OFF(REG_X1_NDX),
-  TCB_REG_OFF(REG_X2_NDX),
-  TCB_REG_OFF(REG_X3_NDX),
-  TCB_REG_OFF(REG_X4_NDX),
-  TCB_REG_OFF(REG_X5_NDX),
-  TCB_REG_OFF(REG_X6_NDX),
-  TCB_REG_OFF(REG_X7_NDX),
-  TCB_REG_OFF(REG_X8_NDX),
-  TCB_REG_OFF(REG_X9_NDX),
-  TCB_REG_OFF(REG_X10_NDX),
-  TCB_REG_OFF(REG_X11_NDX),
-  TCB_REG_OFF(REG_X12_NDX),
-  TCB_REG_OFF(REG_X13_NDX),
-  TCB_REG_OFF(REG_X14_NDX),
-  TCB_REG_OFF(REG_X15_NDX),
-  TCB_REG_OFF(REG_X16_NDX),
-  TCB_REG_OFF(REG_X17_NDX),
-  TCB_REG_OFF(REG_X18_NDX),
-  TCB_REG_OFF(REG_X19_NDX),
-  TCB_REG_OFF(REG_X20_NDX),
-  TCB_REG_OFF(REG_X21_NDX),
-  TCB_REG_OFF(REG_X22_NDX),
-  TCB_REG_OFF(REG_X23_NDX),
-  TCB_REG_OFF(REG_X24_NDX),
-  TCB_REG_OFF(REG_X25_NDX),
-  TCB_REG_OFF(REG_X26_NDX),
-  TCB_REG_OFF(REG_X27_NDX),
-  TCB_REG_OFF(REG_X28_NDX),
-  TCB_REG_OFF(REG_X29_NDX),
-  TCB_REG_OFF(REG_X30_NDX),
-  TCB_REG_OFF(REG_X31_NDX),
-  TCB_REG_OFF(REG_EPC_NDX),
+/* Name,    Size, Regnum, TCB offset,               g/G offset */
 
-#if 0
-#  ifdef CONFIG_ARCH_FPU
-  TCB_REG_OFF(REG_F0_NDX),
-  TCB_REG_OFF(REG_F1_NDX),
-  TCB_REG_OFF(REG_F2_NDX),
-  TCB_REG_OFF(REG_F3_NDX),
-  TCB_REG_OFF(REG_F4_NDX),
-  TCB_REG_OFF(REG_F5_NDX),
-  TCB_REG_OFF(REG_F6_NDX),
-  TCB_REG_OFF(REG_F7_NDX),
-  TCB_REG_OFF(REG_F8_NDX),
-  TCB_REG_OFF(REG_F9_NDX),
-  TCB_REG_OFF(REG_F10_NDX),
-  TCB_REG_OFF(REG_F11_NDX),
-  TCB_REG_OFF(REG_F12_NDX),
-  TCB_REG_OFF(REG_F13_NDX),
-  TCB_REG_OFF(REG_F14_NDX),
-  TCB_REG_OFF(REG_F15_NDX),
-  TCB_REG_OFF(REG_F16_NDX),
-  TCB_REG_OFF(REG_F17_NDX),
-  TCB_REG_OFF(REG_F18_NDX),
-  TCB_REG_OFF(REG_F19_NDX),
-  TCB_REG_OFF(REG_F20_NDX),
-  TCB_REG_OFF(REG_F21_NDX),
-  TCB_REG_OFF(REG_F22_NDX),
-  TCB_REG_OFF(REG_F23_NDX),
-  TCB_REG_OFF(REG_F24_NDX),
-  TCB_REG_OFF(REG_F25_NDX),
-  TCB_REG_OFF(REG_F26_NDX),
-  TCB_REG_OFF(REG_F27_NDX),
-  TCB_REG_OFF(REG_F28_NDX),
-  TCB_REG_OFF(REG_F29_NDX),
-  TCB_REG_OFF(REG_F30_NDX),
-  TCB_REG_OFF(REG_F31_NDX),
-  UINT16_MAX,                      /* fflags */
-  UINT16_MAX,                      /* frm */
-  TCB_REG_OFF(REG_FCSR_NDX),
-#  endif
-#endif
+static const struct reginfo_s g_reginfo[] =
+{
+  {"zero",  4,    0,      TCB_REG_OFF(REG_EPC_NDX), REGINFO_OFFSET_AUTO},
+  {"ra",    4,    1,      TCB_REG_OFF(REG_X1_NDX),  REGINFO_OFFSET_AUTO},
+  {"sp",    4,    2,      TCB_REG_OFF(REG_X2_NDX),  REGINFO_OFFSET_AUTO},
+  {"gp",    4,    3,      TCB_REG_OFF(REG_X3_NDX),  REGINFO_OFFSET_AUTO},
+  {"tp",    4,    4,      TCB_REG_OFF(REG_X4_NDX),  REGINFO_OFFSET_AUTO},
+  {"t0",    4,    5,      TCB_REG_OFF(REG_X5_NDX),  REGINFO_OFFSET_AUTO},
+  {"t1",    4,    6,      TCB_REG_OFF(REG_X6_NDX),  REGINFO_OFFSET_AUTO},
+  {"t2",    4,    7,      TCB_REG_OFF(REG_X7_NDX),  REGINFO_OFFSET_AUTO},
+  {"fp",    4,    8,      TCB_REG_OFF(REG_X8_NDX),  REGINFO_OFFSET_AUTO},
+  {"s1",    4,    9,      TCB_REG_OFF(REG_X9_NDX),  REGINFO_OFFSET_AUTO},
+  {"a0",    4,    10,     TCB_REG_OFF(REG_X10_NDX), REGINFO_OFFSET_AUTO},
+  {"a1",    4,    11,     TCB_REG_OFF(REG_X11_NDX), REGINFO_OFFSET_AUTO},
+  {"a2",    4,    12,     TCB_REG_OFF(REG_X12_NDX), REGINFO_OFFSET_AUTO},
+  {"a3",    4,    13,     TCB_REG_OFF(REG_X13_NDX), REGINFO_OFFSET_AUTO},
+  {"a4",    4,    14,     TCB_REG_OFF(REG_X14_NDX), REGINFO_OFFSET_AUTO},
+  {"a5",    4,    15,     TCB_REG_OFF(REG_X15_NDX), REGINFO_OFFSET_AUTO},
+  {"a6",    4,    25,     TCB_REG_OFF(REG_X16_NDX), REGINFO_OFFSET_AUTO},
+  {"a7",    4,    25,     TCB_REG_OFF(REG_X17_NDX), REGINFO_OFFSET_AUTO},
+  {"s2",    4,    25,     TCB_REG_OFF(REG_X18_NDX), REGINFO_OFFSET_AUTO},
+  {"s3",    4,    25,     TCB_REG_OFF(REG_X19_NDX), REGINFO_OFFSET_AUTO},
+  {"s4",    4,    25,     TCB_REG_OFF(REG_X20_NDX), REGINFO_OFFSET_AUTO},
+  {"s5",    4,    25,     TCB_REG_OFF(REG_X21_NDX), REGINFO_OFFSET_AUTO},
+  {"s6",    4,    25,     TCB_REG_OFF(REG_X22_NDX), REGINFO_OFFSET_AUTO},
+  {"s7",    4,    25,     TCB_REG_OFF(REG_X23_NDX), REGINFO_OFFSET_AUTO},
+  {"s8",    4,    25,     TCB_REG_OFF(REG_X24_NDX), REGINFO_OFFSET_AUTO},
+  {"s9",    4,    25,     TCB_REG_OFF(REG_X25_NDX), REGINFO_OFFSET_AUTO},
+  {"s10",   4,    25,     TCB_REG_OFF(REG_X26_NDX), REGINFO_OFFSET_AUTO},
+  {"s11",   4,    25,     TCB_REG_OFF(REG_X27_NDX), REGINFO_OFFSET_AUTO},
+  {"t3",    4,    25,     TCB_REG_OFF(REG_X28_NDX), REGINFO_OFFSET_AUTO},
+  {"t4",    4,    25,     TCB_REG_OFF(REG_X29_NDX), REGINFO_OFFSET_AUTO},
+  {"t5",    4,    25,     TCB_REG_OFF(REG_X30_NDX), REGINFO_OFFSET_AUTO},
+  {"t6",    4,    25,     TCB_REG_OFF(REG_X31_NDX), REGINFO_OFFSET_AUTO},
+  {"pc",    4,    25,     TCB_REG_OFF(REG_EPC_NDX), REGINFO_OFFSET_AUTO},
 };
 
 /****************************************************************************
@@ -122,10 +84,10 @@ const struct tcbinfo_s g_tcbinfo used_data =
   .stack_off      = TCB_STACK_OFF,
   .stack_size_off = TCB_STACK_SIZE_OFF,
   .regs_off       = TCB_REGS_OFF,
-  .regs_num       = nitems(g_reg_offs),
+  .regs_num       = nitems(g_reginfo),
   {
-    .p = g_reg_offs,
-  },
+    .reginfo      = g_reginfo,
+  }
 };
 
 /****************************************************************************

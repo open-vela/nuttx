@@ -32,26 +32,28 @@
  * Private Data
  ****************************************************************************/
 
-static const uint16_t g_reg_offs[] =
+/* Name,    Size, Regnum, TCB offset,           g/G offset */
+
+static const struct reginfo_s g_reginfo[] =
 {
-  TCB_REG_OFF(REG_PC),
-  TCB_REG_OFF(REG_PS),
-  TCB_REG_OFF(REG_A0),
-  TCB_REG_OFF(REG_A1),
-  TCB_REG_OFF(REG_A2),
-  TCB_REG_OFF(REG_A3),
-  TCB_REG_OFF(REG_A4),
-  TCB_REG_OFF(REG_A5),
-  TCB_REG_OFF(REG_A6),
-  TCB_REG_OFF(REG_A7),
-  TCB_REG_OFF(REG_A8),
-  TCB_REG_OFF(REG_A9),
-  TCB_REG_OFF(REG_A10),
-  TCB_REG_OFF(REG_A11),
-  TCB_REG_OFF(REG_A12),
-  TCB_REG_OFF(REG_A13),
-  TCB_REG_OFF(REG_A14),
-  TCB_REG_OFF(REG_A15),
+  {"pc",    4,    0,      TCB_REG_OFF(REG_PC),  REGINFO_OFFSET_AUTO},
+  {"ps",    4,    1,      TCB_REG_OFF(REG_PS),  REGINFO_OFFSET_AUTO},
+  {"a0",    4,    2,      TCB_REG_OFF(REG_A0),  REGINFO_OFFSET_AUTO},
+  {"a1",    4,    3,      TCB_REG_OFF(REG_A1),  REGINFO_OFFSET_AUTO},
+  {"a2",    4,    4,      TCB_REG_OFF(REG_A2),  REGINFO_OFFSET_AUTO},
+  {"a3",    4,    5,      TCB_REG_OFF(REG_A3),  REGINFO_OFFSET_AUTO},
+  {"a4",    4,    6,      TCB_REG_OFF(REG_A4),  REGINFO_OFFSET_AUTO},
+  {"a5",    4,    7,      TCB_REG_OFF(REG_A5),  REGINFO_OFFSET_AUTO},
+  {"a6",    4,    8,      TCB_REG_OFF(REG_A6),  REGINFO_OFFSET_AUTO},
+  {"a7",    4,    9,      TCB_REG_OFF(REG_A7),  REGINFO_OFFSET_AUTO},
+  {"a8",    4,    10,     TCB_REG_OFF(REG_A8),  REGINFO_OFFSET_AUTO},
+  {"a9",    4,    11,     TCB_REG_OFF(REG_A9),  REGINFO_OFFSET_AUTO},
+  {"a10",   4,    12,     TCB_REG_OFF(REG_A10), REGINFO_OFFSET_AUTO},
+  {"a11",   4,    13,     TCB_REG_OFF(REG_A11), REGINFO_OFFSET_AUTO},
+  {"a12",   4,    14,     TCB_REG_OFF(REG_A12), REGINFO_OFFSET_AUTO},
+  {"a13",   4,    15,     TCB_REG_OFF(REG_A13), REGINFO_OFFSET_AUTO},
+  {"a14",   4,    25,     TCB_REG_OFF(REG_A14), REGINFO_OFFSET_AUTO},
+  {"a15",   4,    25,     TCB_REG_OFF(REG_A15), REGINFO_OFFSET_AUTO},
 };
 
 /****************************************************************************
@@ -69,7 +71,7 @@ const struct tcbinfo_s g_tcbinfo used_data =
   .regs_off       = TCB_REGS_OFF,
   .regs_num       = COMMON_CTX_REGS,
   {
-    .p = g_reg_offs,
+    .reginfo      = g_reginfo,
   },
 };
 

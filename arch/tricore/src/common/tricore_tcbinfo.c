@@ -32,7 +32,9 @@
  * Private Data
  ****************************************************************************/
 
-static const uint16_t g_reg_offs[1];
+/* Name,    Size, Regnum, TCB offset,               g/G offset */
+
+static const struct reginfo_s g_reginfo[1];
 
 /****************************************************************************
  * Public Data
@@ -47,9 +49,9 @@ const struct tcbinfo_s g_tcbinfo used_data =
   .stack_off      = TCB_STACK_OFF,
   .stack_size_off = TCB_STACK_SIZE_OFF,
   .regs_off       = TCB_REGS_OFF,
-  .regs_num       = nitems(g_reg_offs),
+  .regs_num       = nitems(g_reginfo),
   {
-    .p = g_reg_offs,
+    .reginfo      = g_reginfo,
   },
 };
 

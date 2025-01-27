@@ -33,111 +33,39 @@
  ****************************************************************************/
 
 #if defined(CONFIG_HOST_X86_64) && !defined(CONFIG_SIM_M32)
-static const uint16_t g_reg_offs[] =
+/* Name,  Size, Regnum, TCB offset,             g/G offset */
+
+static const struct reginfo_s g_reginfo[] =
 {
-  UINT16_MAX,            /* RAX */
-  TCB_REG_OFF(JB_RBX),   /* RBX */
-  UINT16_MAX,            /* RCX */
-  UINT16_MAX,            /* RDX */
-  UINT16_MAX,            /* RSI */
-  UINT16_MAX,            /* RDI */
-  TCB_REG_OFF(JB_RBP),   /* RBP */
-  TCB_REG_OFF(JB_RSP),   /* RSP */
-  UINT16_MAX,            /* R8 */
-  UINT16_MAX,            /* R9 */
-  UINT16_MAX,            /* R10 */
-  UINT16_MAX,            /* R11 */
-  TCB_REG_OFF(JB_R12),   /* R12 */
-  TCB_REG_OFF(JB_R13),   /* R13 */
-  TCB_REG_OFF(JB_R15),   /* R14 */
-  TCB_REG_OFF(JB_R15),   /* R15 */
-  TCB_REG_OFF(JB_RIP),   /* RIP */
-  UINT16_MAX,            /* EFLAGS */
-  UINT16_MAX,            /* CS */
-  UINT16_MAX,            /* SS */
-  UINT16_MAX,            /* DS */
-  UINT16_MAX,            /* ES */
-  UINT16_MAX,            /* FS */
+  {"rbx", 8,    1,      TCB_REG_OFF(JB_RBX),    REGINFO_OFFSET_INVALID},
+  {"rbp", 8,    6,      TCB_REG_OFF(JB_RBP),    REGINFO_OFFSET_INVALID},
+  {"rsp", 8,    7,      TCB_REG_OFF(JB_RSP),    REGINFO_OFFSET_INVALID},
+  {"r12", 8,    12,     TCB_REG_OFF(JB_R12),    REGINFO_OFFSET_INVALID},
+  {"r13", 8,    13,     TCB_REG_OFF(JB_R13),    REGINFO_OFFSET_INVALID},
+  {"r14", 8,    14,     TCB_REG_OFF(JB_R14),    REGINFO_OFFSET_INVALID},
+  {"r15", 8,    15,     TCB_REG_OFF(JB_R15),    REGINFO_OFFSET_INVALID},
+  {"rip", 8,    16,     TCB_REG_OFF(JB_RIP),    REGINFO_OFFSET_INVALID},
 };
 #elif defined(CONFIG_HOST_X86) || defined(CONFIG_SIM_M32)
-static const uint16_t g_reg_offs[] =
+static const struct reginfo_s g_reginfo[] =
 {
-  UINT16_MAX,            /* RAX */
-  UINT16_MAX,            /* RCX */
-  UINT16_MAX,            /* RDX */
-  TCB_REG_OFF(JB_EBX),   /* RBX */
-  TCB_REG_OFF(JB_ESP),   /* ESP */
-  TCB_REG_OFF(JB_EBP),   /* EBP */
-  TCB_REG_OFF(JB_ESI),   /* ESI */
-  TCB_REG_OFF(JB_EDI),   /* EDI */
-  TCB_REG_OFF(JB_EIP),   /* EIP */
-  UINT16_MAX,            /* EFLAGS */
-  UINT16_MAX,            /* CS */
-  UINT16_MAX,            /* SS */
-  UINT16_MAX,            /* DS */
-  UINT16_MAX,            /* ES */
-  UINT16_MAX,            /* FS */
+  {"ebx", 4,    1,      TCB_REG_OFF(JB_EBX),    REGINFO_OFFSET_INVALID},
+  {"esp", 4,    2,      TCB_REG_OFF(JB_ESP),    REGINFO_OFFSET_INVALID},
+  {"ebp", 4,    3,      TCB_REG_OFF(JB_EBP),    REGINFO_OFFSET_INVALID},
+  {"esi", 4,    4,      TCB_REG_OFF(JB_ESI),    REGINFO_OFFSET_INVALID},
+  {"edi", 4,    5,      TCB_REG_OFF(JB_EDI),    REGINFO_OFFSET_INVALID},
+  {"eip", 4,    6,      TCB_REG_OFF(JB_EIP),    REGINFO_OFFSET_INVALID},
 };
 #elif defined(CONFIG_HOST_ARM64)
-static const uint16_t g_reg_offs[] =
+static const struct reginfo_s g_reginfo[] =
 {
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  TCB_REG_OFF(JB_SP),
-  TCB_REG_OFF(JB_PC),
-  UINT16_MAX,
-  UINT16_MAX,
+  {"sp", 8,    31,     TCB_REG_OFF(JB_SP),    REGINFO_OFFSET_INVALID},
+  {"pc", 8,    32,     TCB_REG_OFF(JB_PC),    REGINFO_OFFSET_INVALID},
 };
 #elif defined(CONFIG_HOST_ARM)
-static const uint16_t g_reg_offs[] =
+static const struct reginfo_s g_reginfo[] =
 {
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
-  UINT16_MAX,
+  {"",  4,    0,      UINT16_MAX, REGINFO_OFFSET_INVALID},
 };
 #endif
 
@@ -154,10 +82,10 @@ const struct tcbinfo_s g_tcbinfo used_data =
   .stack_off      = TCB_STACK_OFF,
   .stack_size_off = TCB_STACK_SIZE_OFF,
   .regs_off       = TCB_REGS_OFF,
-  .regs_num       = nitems(g_reg_offs),
+  .regs_num       = nitems(g_reginfo),
   {
-    .p = g_reg_offs,
-  },
+    .reginfo       = g_reginfo,
+  }
 };
 
 /****************************************************************************

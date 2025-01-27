@@ -246,6 +246,9 @@
 
 #define running_regs()               ((void *)(g_running_tasks[this_cpu()]->xcp.regs))
 
+#define REGINFO_OFFSET_INVALID       -2 /* Special value for N/A offset value */
+#define REGINFO_OFFSET_AUTO          -1 /* Calculate the offset in GDB g/G packet automatically */
+
 /****************************************************************************
  * Public Type Definitions
  ****************************************************************************/
@@ -797,6 +800,24 @@ struct pthread_tcb_s
 };
 #endif /* !CONFIG_DISABLE_PTHREAD */
 
+/* struct reginfo_s *********************************************************/
+
+/* The structure describes the register name and size.
+ *
+ * For NuttX GDB python plugin, we also use this information to understand
+ * values in tcb context.
+ */
+
+begin_packed_struct struct reginfo_s
+{
+  FAR const char *name;     /* Register name, must follow GDB, normally in lowercase */
+  uint8_t         size;     /* Register size in bytes */
+  uint8_t         regnum;   /* Remote register number as seen by GDB */
+  int16_t         toffset;  /* Register byte offset in context registers. */
+                            /* value of REGINFO_OFFSET_INVALID: This register is not provided by NuttX */
+  int16_t         goffset;  /* Register byte offset in g/G packet, default to 0 that means register in order. */
+} end_packed_struct;
+
 /* struct tcbinfo_s *********************************************************/
 
 /* The structure save key filed offset of tcb_s while can be used by
@@ -813,20 +834,11 @@ begin_packed_struct struct tcbinfo_s
   uint16_t stack_size_off;               /* Offset of tcb.adj_stack_size    */
   uint16_t regs_off;                     /* Offset of tcb.regs              */
   uint16_t regs_num;                     /* Num of general regs             */
-
-  /* Offset pointer of xcp.regs, order in GDB org.gnu.gdb.xxx feature.
-   * Refer to the link of `reg_off` below for more information.
-   *
-   * value UINT16_MAX: This register was not provided by NuttX
-   */
-
-  begin_packed_struct
   union
   {
-    uint8_t             u[8];
-    FAR const uint16_t *p;
-  }
-  end_packed_struct reg_off; /* Refer to https://sourceware.org/gdb/current/onlinedocs/gdb.html/Standard-Target-Features.html */
+    uint8_t                     u[8];
+    FAR const struct reginfo_s *reginfo; /* Register information          */
+  } u;
 } end_packed_struct;
 
 /* This is the callback type used by nxsched_foreach() */

@@ -32,94 +32,27 @@
  * Private Data
  ****************************************************************************/
 
-static const uint16_t g_reg_offs[] =
+/* Name,  Size, Regnum,   TCB offset,         g/G offset */
+
+static const struct reginfo_s g_reginfo[] =
 {
-  TCB_REG_OFF(REG_R0),   /* 0 */
-  TCB_REG_OFF(REG_R1),   /* 1 */
-  TCB_REG_OFF(REG_R2),   /* 2 */
-  TCB_REG_OFF(REG_R3),   /* 3 */
-  TCB_REG_OFF(REG_R4),   /* 4 */
-  TCB_REG_OFF(REG_R5),   /* 5 */
-  TCB_REG_OFF(REG_R6),   /* 6 */
-  TCB_REG_OFF(REG_R7),   /* 7 */
-  TCB_REG_OFF(REG_R8),   /* 8 */
-  TCB_REG_OFF(REG_R9),   /* 9 */
-  TCB_REG_OFF(REG_R10),  /* 10 */
-  TCB_REG_OFF(REG_R11),  /* 11 */
-  TCB_REG_OFF(REG_R12),  /* 12 */
-  TCB_REG_OFF(REG_R13),  /* 13 */
-  TCB_REG_OFF(REG_R14),  /* 14 */
-  TCB_REG_OFF(REG_R15),  /* 15 */
-  UINT16_MAX,            /* 16 */
-  UINT16_MAX,            /* 17 */
-  UINT16_MAX,            /* 18 */
-  UINT16_MAX,            /* 19 */
-  UINT16_MAX,            /* 20 */
-  UINT16_MAX,            /* 21 */
-  UINT16_MAX,            /* 22 */
-  UINT16_MAX,            /* 23 */
-  UINT16_MAX,            /* 24 */
-  UINT16_MAX,            /* 25 */
-  UINT16_MAX,            /* 26 */
-  UINT16_MAX,            /* 27 */
-  UINT16_MAX,            /* 28 */
-  UINT16_MAX,            /* 29 */
-  UINT16_MAX,            /* 30 */
-  UINT16_MAX,            /* 31 */
-  UINT16_MAX,            /* 32 */
-  UINT16_MAX,            /* 33 */
-  UINT16_MAX,            /* 34 */
-  UINT16_MAX,            /* 35 */
-  UINT16_MAX,            /* 36 */
-  UINT16_MAX,            /* 37 */
-  UINT16_MAX,            /* 38 */
-  UINT16_MAX,            /* 39 */
-  UINT16_MAX,            /* 40 */
-  TCB_REG_OFF(REG_CPSR), /* 41 */
-
-#if 0
-#  ifdef CONFIG_ARCH_FPU
-  TCB_REG_OFF(REG_D0),
-  TCB_REG_OFF(REG_D1),
-  TCB_REG_OFF(REG_D2),
-  TCB_REG_OFF(REG_D3),
-  TCB_REG_OFF(REG_D4),
-  TCB_REG_OFF(REG_D5),
-  TCB_REG_OFF(REG_D6),
-  TCB_REG_OFF(REG_D7),
-  TCB_REG_OFF(REG_D8),
-  TCB_REG_OFF(REG_D9),
-  TCB_REG_OFF(REG_D10),
-  TCB_REG_OFF(REG_D11),
-  TCB_REG_OFF(REG_D12),
-  TCB_REG_OFF(REG_D13),
-  TCB_REG_OFF(REG_D14),
-  TCB_REG_OFF(REG_D15),
-#  endif
-
-#  ifdef CONFIG_ARM_DPFPU32
-  TCB_REG_OFF(REG_D16),
-  TCB_REG_OFF(REG_D17),
-  TCB_REG_OFF(REG_D18),
-  TCB_REG_OFF(REG_D19),
-  TCB_REG_OFF(REG_D20),
-  TCB_REG_OFF(REG_D21),
-  TCB_REG_OFF(REG_D22),
-  TCB_REG_OFF(REG_D23),
-  TCB_REG_OFF(REG_D24),
-  TCB_REG_OFF(REG_D25),
-  TCB_REG_OFF(REG_D26),
-  TCB_REG_OFF(REG_D27),
-  TCB_REG_OFF(REG_D28),
-  TCB_REG_OFF(REG_D29),
-  TCB_REG_OFF(REG_D30),
-  TCB_REG_OFF(REG_D31),
-#  endif
-
-#  ifdef CONFIG_ARCH_FPU
-  TCB_REG_OFF(REG_FPSCR),
-#  endif
-#endif
+  {"r0",    4,    0,      TCB_REG_OFF(REG_R0),    REGINFO_OFFSET_AUTO},
+  {"r1",    4,    1,      TCB_REG_OFF(REG_R1),    REGINFO_OFFSET_AUTO},
+  {"r2",    4,    2,      TCB_REG_OFF(REG_R2),    REGINFO_OFFSET_AUTO},
+  {"r3",    4,    3,      TCB_REG_OFF(REG_R3),    REGINFO_OFFSET_AUTO},
+  {"r4",    4,    4,      TCB_REG_OFF(REG_R4),    REGINFO_OFFSET_AUTO},
+  {"r5",    4,    5,      TCB_REG_OFF(REG_R5),    REGINFO_OFFSET_AUTO},
+  {"r6",    4,    6,      TCB_REG_OFF(REG_R6),    REGINFO_OFFSET_AUTO},
+  {"r7",    4,    7,      TCB_REG_OFF(REG_R7),    REGINFO_OFFSET_AUTO},
+  {"r8",    4,    8,      TCB_REG_OFF(REG_R8),    REGINFO_OFFSET_AUTO},
+  {"r9",    4,    9,      TCB_REG_OFF(REG_R9),    REGINFO_OFFSET_AUTO},
+  {"r10",   4,    10,     TCB_REG_OFF(REG_R10),   REGINFO_OFFSET_AUTO},
+  {"r11",   4,    11,     TCB_REG_OFF(REG_R11),   REGINFO_OFFSET_AUTO},
+  {"r12",   4,    12,     TCB_REG_OFF(REG_R12),   REGINFO_OFFSET_AUTO},
+  {"sp",    4,    13,     TCB_REG_OFF(REG_R13),   REGINFO_OFFSET_AUTO},
+  {"lr",    4,    14,     TCB_REG_OFF(REG_R14),   REGINFO_OFFSET_AUTO},
+  {"pc",    4,    15,     TCB_REG_OFF(REG_R15),   REGINFO_OFFSET_AUTO},
+  {"cpsr",  4,    25,     TCB_REG_OFF(REG_CPSR),  REGINFO_OFFSET_AUTO},
 };
 
 /****************************************************************************
@@ -135,10 +68,10 @@ const struct tcbinfo_s g_tcbinfo used_data =
   .stack_off      = TCB_STACK_OFF,
   .stack_size_off = TCB_STACK_SIZE_OFF,
   .regs_off       = TCB_REGS_OFF,
-  .regs_num       = nitems(g_reg_offs),
+  .regs_num       = nitems(g_reginfo),
   {
-    .p = g_reg_offs,
-  },
+    .reginfo       = g_reginfo,
+  }
 };
 
 /****************************************************************************
