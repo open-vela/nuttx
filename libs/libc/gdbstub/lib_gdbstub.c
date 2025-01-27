@@ -984,7 +984,7 @@ static int gdb_send_error_packet(FAR struct gdb_state_s *state,
  ****************************************************************************/
 
 /****************************************************************************
- * Name: gdb_get_registers
+ * Name: gdb_update_regcache
  *
  * Description:
  *   Get the registers of the specified task.
@@ -993,7 +993,7 @@ static int gdb_send_error_packet(FAR struct gdb_state_s *state,
  *   state   - The pointer to the GDB state structure.
  ****************************************************************************/
 
-static void gdb_get_registers(FAR struct gdb_state_s *state)
+static void gdb_update_regcache(FAR struct gdb_state_s *state)
 {
   FAR struct tcb_s *tcb = nxsched_get_tcb(state->pid);
   FAR uint8_t *reg;
@@ -1048,7 +1048,6 @@ static int gdb_read_registers(FAR struct gdb_state_s *state)
 {
   int ret;
 
-  gdb_get_registers(state);
   ret = gdb_bin2hex(state->pkt_buf, sizeof(state->pkt_buf),
                     state->registers, state->size);
   if (ret < 0)
@@ -1084,7 +1083,7 @@ static int gdb_write_registers(FAR struct gdb_state_s *state)
 {
   int ret;
 
-  ret = gdb_hex2bin(state->registers, sizeof(state->registers),
+  ret = gdb_hex2bin(state->registers, state->size,
                     state->pkt_buf + 1, state->pkt_len - 1);
   if (ret < 0)
     {
@@ -1096,10 +1095,10 @@ static int gdb_write_registers(FAR struct gdb_state_s *state)
 }
 
 /****************************************************************************
- * Name: gdb_write_register
+ * Name: gdb_read_register
  *
  * Description:
- *   Write a Register Command Format: P n.
+ *   Read a Register Command Format: p n.
  *
  * Input Parameters:
  *   state   - The pointer to the GDB state structure.
@@ -1124,7 +1123,6 @@ static int gdb_read_register(FAR struct gdb_state_s *state)
       return ret;
     }
 
-  gdb_get_registers(state);
   if (addr >= state->size)
     {
       return 0;
@@ -1611,6 +1609,8 @@ static int gdb_thread_context(FAR struct gdb_state_s *state)
 
       state->pid = pid - 1;
     }
+
+  gdb_update_regcache(state);
 
   gdb_send_ok_packet(state);
   return 0;
