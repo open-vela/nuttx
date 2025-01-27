@@ -332,10 +332,10 @@ static void elf_emit_tcb_note(FAR struct elf_dumpinfo_s *cinfo,
     {
       for (i = 0; i < nitems(status.pr_regs); i++)
         {
-          if (g_tcbinfo.reg_off.p[i] != UINT16_MAX)
+          if (g_tcbinfo.u.reginfo[i].toffset != REGINFO_OFFSET_INVALID)
             {
-              status.pr_regs[i] =
-                *(uintptr_t *)((uint8_t *)regs + g_tcbinfo.reg_off.p[i]);
+              status.pr_regs[i] = *(uintptr_t *)((uint8_t *)regs
+                                    + g_tcbinfo.u.reginfo[i].toffset);
             }
         }
     }
