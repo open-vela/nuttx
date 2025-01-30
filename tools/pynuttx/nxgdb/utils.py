@@ -778,11 +778,27 @@ def get_register_byname(regname, tcb=None):
 
 
 def get_sp(tcb=None):
-    return get_register_byname("sp", tcb)
+    regname = "sp"
+    if tcb is not None:
+        # NuttX doesn't support unified register name for stack pointer
+        arch = gdb.selected_inferior().architecture().name()
+        regname = {
+            "i386:x86": "esp",
+            "i386:x86-64": "rsp",
+        }.get(arch, "sp")
+    return get_register_byname(regname, tcb)
 
 
 def get_pc(tcb=None):
-    return get_register_byname("pc", tcb)
+    regname = "pc"
+    if tcb is not None:
+        # NuttX doesn't support unified register name for PC
+        arch = gdb.selected_inferior().architecture().name()
+        regname = {
+            "i386:x86": "eip",
+            "i386:x86-64": "rip",
+        }.get(arch, "pc")
+    return get_register_byname(regname, tcb)
 
 
 def get_tcbs() -> List[Tcb]:
