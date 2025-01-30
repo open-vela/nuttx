@@ -21,7 +21,6 @@
 ############################################################################
 
 import argparse
-import re
 from enum import Enum, auto
 
 import gdb
@@ -49,55 +48,17 @@ class Registers:
         if not Registers.reginfo:
             reginfo = {}
 
-            # Switch to second inferior to get the original remote-register layout
-            state = utils.suppress_cli_notifications(True)
-            utils.switch_inferior(2)
-
-            natural_size = gdb.lookup_type("long").sizeof
-            tcb_info = gdb.parse_and_eval("g_tcbinfo")
-            reg_off = tcb_info["reg_off"]["p"]  # Register offsets in tcbinfo
-            packet_size = tcb_info["regs_num"] * natural_size
-
-            lines = gdb.execute("maint print remote-registers", to_string=True)
-            for line in lines.splitlines()[1:]:
-                if not line:
-                    continue
-                # Name         Nr  Rel Offset    Size  Type            Rmt Nr  g/G Offset
-                match = re.match(
-                    r".*?(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)(?:\s+(\d+)\s+(\d+))?.*?",
-                    line,
-                )
-                if not match:
-                    continue
-
-                name, _, _, _, size, _, rmt_nr, offset = match.groups()
-
-                # We only need those registers that have a remote register
-                if rmt_nr is None:
-                    continue
-
-                rmt_nr = int(rmt_nr)
-                offset = int(offset)
-                size = int(size)
-
-                # We only have limited number of registers in packet
-                if offset + size > packet_size:
-                    continue
-
-                index = offset // natural_size
-                tcb_reg_off = int(reg_off[index])
-                if tcb_reg_off == UINT16_MAX:
-                    # This register is not saved in tcb context
-                    continue
-
-                reginfo[name] = {
-                    "rmt_nr": rmt_nr,  # The register number in remote-registers, Aka the one we saved in g_tcbinfo.
-                    "tcb_reg_off": tcb_reg_off,
+            tcb_info = utils.parse_and_eval("g_tcbinfo")
+            reg_info = tcb_info.u.reginfo
+            reginfo = {
+                str(reg.name.string()): {
+                    "rmt_nr": int(reg.regnum),
+                    "tcb_reg_off": int(reg.toffset),
                 }
+                for reg in utils.ArrayIterator(reg_info, tcb_info.regs_num)
+            }
 
             Registers.reginfo = reginfo
-            utils.switch_inferior(1)  # Switch back
-            utils.suppress_cli_notifications(state)
 
     def load(self, regs):
         """Load registers from context register address"""

@@ -760,21 +760,17 @@ def get_register_byname(regname, tcb=None):
         return int(frame.read_register(regname))
 
     # Ok, let's take it from the context in the given tcb
-    arch = frame.architecture()
-    tcbinfo = gdb.parse_and_eval("g_tcbinfo")
+    tcbinfo = parse_and_eval("g_tcbinfo")
 
-    i = 0
-    for reg in arch.registers():
-        if reg.name == regname:
-            break
-        i += 1
-
-    regs = tcb["xcp"]["regs"].cast(gdb.lookup_type("char").pointer())
-    value = gdb.Value(regs + tcbinfo["reg_off"]["p"][i]).cast(
-        gdb.lookup_type("uintptr_t").pointer()
-    )[0]
-
-    return int(value)
+    for reg in ArrayIterator(tcbinfo.u.reginfo, tcbinfo.regs_num):
+        if reg.name.string().lower() == regname.lower():
+            xcpregs = tcb["xcp"]["regs"]
+            if xcpregs.type.code != gdb.TYPE_CODE_PTR:
+                # For sim, the xcpregs is an array, not pointer, thus need casting
+                xcpregs = xcpregs.cast(lookup_type("char").pointer())
+            value = gdb.Value(int(xcpregs) + reg.toffset)
+            value = value.cast(lookup_type("uintptr_t").pointer())
+            return int(value.dereference())
 
 
 def get_sp(tcb=None):
