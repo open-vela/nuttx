@@ -57,7 +57,7 @@ void up_dump_register(void *dumpregs)
 
   /* Are user registers available from interrupt processing? */
 
-  _alert("EPC: %" PRIxREG "\n", regs[REG_EPC]);
+  _alert("PC: %" PRIxREG "\n", regs[REG_EPC]);
   _alert("A0: %" PRIxREG " A1: %" PRIxREG " A2: %" PRIxREG
          " A3: %" PRIxREG "\n",
          regs[REG_A0], regs[REG_A1], regs[REG_A2], regs[REG_A3]);
