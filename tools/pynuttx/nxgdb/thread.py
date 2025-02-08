@@ -119,14 +119,15 @@ g_registers = Registers()
 
 
 class SetRegs(gdb.Command):
-    """Set registers to the specified values.
+    """Load registers from TCB context memory address.
     Usage: setregs [regs]
 
     Etc: setregs
          setregs tcb->xcp.regs
          setregs g_pidhash[0]->xcp.regs
 
-    Default regs is tcbinfo_running_regs(),if regs is NULL, it will not set registers.
+    Default to load from g_running_tasks if no args are provided.
+    If the memory address is NULL, it will not set registers.
     """
 
     def __init__(self):
@@ -141,7 +142,7 @@ class SetRegs(gdb.Command):
             "regs",
             nargs="?",
             default="",
-            help="The registers to set, use tcbinfo_running_regs() if not specified",
+            help="The memory address to load register values, use g_running_tasks.xcp.regs if not specified",
         )
 
         try:
@@ -154,7 +155,12 @@ class SetRegs(gdb.Command):
                 utils.lookup_type("char").pointer()
             )
         else:
-            current_regs = gdb.parse_and_eval("tcbinfo_running_regs()")
+            try:
+                current_regs = gdb.parse_and_eval("g_running_tasks[0].xcp.regs")
+            except gdb.error as e:
+                gdb.write(f"Failed to parse running tasks: {e}\n")
+                return
+
             regs = current_regs.cast(utils.lookup_type("char").pointer())
 
         if regs == 0:
