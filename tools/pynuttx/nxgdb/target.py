@@ -67,7 +67,14 @@ class Target(gdb.Command):
 
             kill()
 
-        process = multiprocessing.Process(target=nxstub.main, args=(args,))
+        def stub_main(args):
+            import signal
+
+            # Ignore the Ctrl+C signal
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            nxstub.main(args)
+
+        process = multiprocessing.Process(target=stub_main, args=(args,))
         process.start()
         self.process = process
 
