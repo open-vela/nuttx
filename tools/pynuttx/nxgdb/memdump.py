@@ -187,7 +187,7 @@ def parse_memdump_log(logfile, filters=None) -> Generator[MMNodeDump, None, None
                 None,
             )
 
-    with open(logfile) as f:
+    with open(logfile, "r", errors="ignore") as f:
         for line in f:
             match = re.search(
                 r"(\d+)\s+(\d+)\s+(\d+)\s+(\d+)((?:\s+0x[0-9a-fA-F]+)+)", line

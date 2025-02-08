@@ -82,7 +82,7 @@ def parse_log(elf, arch, logfile):
     registerdump = []
     parsing_regs = False
     lines = []
-    with open(logfile, "r") as f:
+    with open(logfile, "r", errors="ignore") as f:
         for line in f:
             line = line.strip()
             if is_register_dump(line):
