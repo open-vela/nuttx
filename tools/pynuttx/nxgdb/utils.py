@@ -779,6 +779,7 @@ def get_sp(tcb=None):
         # NuttX doesn't support unified register name for stack pointer
         arch = gdb.selected_inferior().architecture().name()
         regname = {
+            "i386": "esp",
             "i386:x86": "esp",
             "i386:x86-64": "rsp",
         }.get(arch, "sp")
@@ -791,6 +792,7 @@ def get_pc(tcb=None):
         # NuttX doesn't support unified register name for PC
         arch = gdb.selected_inferior().architecture().name()
         regname = {
+            "i386": "eip",
             "i386:x86": "eip",
             "i386:x86-64": "rip",
         }.get(arch, "pc")
