@@ -810,12 +810,12 @@ struct pthread_tcb_s
 
 begin_packed_struct struct reginfo_s
 {
-  FAR const char *name;     /* Register name, must follow GDB, normally in lowercase */
-  uint8_t         size;     /* Register size in bytes */
-  uint8_t         regnum;   /* Remote register number as seen by GDB */
-  int16_t         toffset;  /* Register byte offset in context registers. */
-                            /* value of REGINFO_OFFSET_INVALID: This register is not provided by NuttX */
-  int16_t         goffset;  /* Register byte offset in g/G packet, default to 0 that means register in order. */
+  const char  name[8];  /* Register name, must follow GDB, normally in lowercase */
+  uint8_t     size;     /* Register size in bytes */
+  uint8_t     regnum;   /* Remote register number as seen by GDB */
+  int16_t     toffset;  /* Register byte offset in context registers. */
+                        /* value of REGINFO_OFFSET_INVALID: This register is not provided by NuttX */
+  int16_t     goffset;  /* Register byte offset in g/G packet, default to 0 that means register in order. */
 } end_packed_struct;
 
 /* struct tcbinfo_s *********************************************************/

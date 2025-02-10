@@ -61,6 +61,11 @@
 #define PERROR                    g_plugin_priv.jops->erroroutf
 #define PLOG                      g_plugin_priv.jops->logoutf
 
+/* Macros for special NuttX offset value */
+
+#define REGINFO_OFFSET_INVALID    -2
+#define REGINFO_OFFSET_AUTO       -1
+
 /* GCC specific definitions */
 
 #ifdef __GNUC__
@@ -89,9 +94,19 @@ enum symbol_e
   PIDHASH = 0,
   NPIDHASH,
   TCBINFO,
+  REGINFO,
   READYTORUN,
   NSYMBOLS
 };
+
+begin_packed_struct struct reginfo_s
+{
+  const char        name[8];
+  uint8_t           size;
+  uint8_t           regnum;
+  int16_t           toffset;
+  int16_t           goffset;
+} end_packed_struct;
 
 begin_packed_struct struct tcbinfo_s
 {
@@ -103,14 +118,12 @@ begin_packed_struct struct tcbinfo_s
   uint16_t stack_size_off;
   uint16_t regs_off;
   uint16_t regs_num;
-  begin_packed_struct
   union
   {
     uint8_t  u[8];
-    uint16_t *p;
-  }
-  end_packed_struct reg_off;
-  uint16_t reg_offs[0];
+    struct reginfo_s *reginfo;
+  } u;
+  struct reginfo_s reginfo[0];
 } end_packed_struct;
 
 struct symbols_s
@@ -177,6 +190,7 @@ static struct symbols_s g_symbols[] =
   {"g_pidhash",            0, 0},
   {"g_npidhash",           0, 0},
   {"g_tcbinfo",            0, 0},
+  {"g_reginfo",            0, 0},
   {"g_readytorun",         0, 0},
   { NULL,                  0, 0}
 };
@@ -260,7 +274,7 @@ static int setget_reg(struct plugin_priv_s *priv, uint32_t idx,
       return -EINVAL;
     }
 
-  if (priv->tcbinfo->reg_offs[regidx] == UINT16_MAX)
+  if (priv->tcbinfo->reginfo[regidx].toffset == REGINFO_OFFSET_INVALID)
     {
       if (write == 0)
         {
@@ -270,7 +284,7 @@ static int setget_reg(struct plugin_priv_s *priv, uint32_t idx,
       return 0;
     }
 
-  regaddr = priv->regsaddr[idx] + priv->tcbinfo->reg_offs[regidx];
+  regaddr = priv->regsaddr[idx] + priv->tcbinfo->reginfo[regidx].toffset;
 
   if (write)
     {
@@ -310,16 +324,8 @@ static int update_tcbinfo(struct plugin_priv_s *priv)
           return -EIO;
         }
 
-      ret = READU32(g_symbols[TCBINFO].address +
-                    offsetof(struct tcbinfo_s, reg_off), &reg_off);
-      if (ret != 0)
-        {
-          PERROR("error in read regoffs address ret %d\n", ret);
-          return ret;
-        }
-
       priv->tcbinfo = ALLOC(sizeof(struct tcbinfo_s) +
-                            regs_num * sizeof(uint16_t));
+                            regs_num * sizeof(struct reginfo_s));
 
       if (!priv->tcbinfo)
         {
@@ -335,9 +341,10 @@ static int update_tcbinfo(struct plugin_priv_s *priv)
           return ret;
         }
 
-      ret = READMEM(reg_off, (char *)&priv->tcbinfo->reg_offs[0],
-                    regs_num * sizeof(uint16_t));
-      if (ret != regs_num * sizeof(uint16_t))
+      ret = READMEM(g_symbols[REGINFO].address,
+                    (char *)&priv->tcbinfo->reginfo[0],
+                    regs_num * sizeof(struct reginfo_s));
+      if (ret != regs_num * sizeof(struct reginfo_s))
         {
           PERROR("error in read tcbinfo_s reg_offs ret %d\n", ret);
           return ret;
