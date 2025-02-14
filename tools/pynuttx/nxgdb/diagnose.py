@@ -74,7 +74,7 @@ class DiagnoseReport(gdb.Command):
                 gdb.write(f"Run command: {name}\n")
                 try:
                     result = command.diagnose()
-                except gdb.error as e:
+                except Exception as e:
                     result = {
                         "title": f"Command {name} failed",
                         "summary": "Command execution failed",
