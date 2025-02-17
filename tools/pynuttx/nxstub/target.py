@@ -24,8 +24,9 @@ import logging
 import traceback
 from typing import List
 
+from nxreg.register import Registers
+
 from . import utils
-from .registers import Registers
 
 
 class RawMemory:

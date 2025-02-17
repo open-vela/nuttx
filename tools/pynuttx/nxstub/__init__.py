@@ -29,10 +29,11 @@ import subprocess
 import traceback
 from typing import List
 
+from nxreg.register import Registers, g_reg_table
+
 from . import utils
 from .gdbstub import GDBStub, Target
 from .proxy import TargetProxy
-from .registers import Registers, g_reg_table
 from .target import RawMemory
 
 # Default GDB init command, note it should start with a space

@@ -43,19 +43,6 @@ def get_regsize(elf: LiefELF) -> int:
     return sym.size // get_ncpus(elf)
 
 
-class RegInfo:
-    def __init__(self, name, size, tcb_offset=0):
-        self.name = name
-        self.size = size
-        self.tcb_offset = tcb_offset
-
-    def __str__(self):
-        return f"{self.name}({self.size})"
-
-    def __repr__(self):
-        return f"REG({self.name}, {self.size}, {self.tcb_offset})"
-
-
 def get_tcbinfo(elf: LiefELF):
     tcbinfo_s = Struct(
         "pid_off" / Int16ul,  # FIXME: only little endian supported
@@ -79,13 +66,6 @@ def get_tcb_size(elf: LiefELF) -> int:
     g_idletcb = elf.get_symbol("g_idletcb")
     ncpus = get_ncpus(elf)
     return g_idletcb.size // ncpus
-
-
-def get_reginfo(elf: LiefELF) -> List[RegInfo]:
-    # Now get register offset in TCB
-    _, data = elf.read_symbol("g_reg_offs")
-    reg_offs = Array(len(data) // 2, Int16ul).parse(data)
-    return [RegInfo("", elf.bits // 8, off) for off in reg_offs]
 
 
 def parse_array(data, type_, narray):
