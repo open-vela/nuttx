@@ -225,6 +225,14 @@ static int elf_loadbinary(FAR struct binary_s *binp,
     }
 #endif
 
+#ifdef HAVE_MODLIB_NAMES
+  /* Save the filename in the registry entry */
+
+  strlcpy(binp->mod.modname, strrchr(filename, '/') == NULL ?
+          filename: strrchr(filename, '/') + 1,
+          sizeof(binp->mod.modname));
+#endif
+
   modlib_uninitialize(&loadinfo);
   return OK;
 
