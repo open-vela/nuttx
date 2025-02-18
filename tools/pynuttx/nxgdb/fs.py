@@ -110,6 +110,19 @@ class Inode(utils.Value, p.Inode):
         return inode_gettype(self)
 
 
+def get_fstype(node: p.Inode):
+    try:
+        if not node:
+            return ""
+
+        statfs = node.u.i_mops.statfs
+        funcname = gdb.block_for_pc(int(statfs)).function.print_name
+        return funcname.split("_")[0]
+
+    except gdb.MemoryError:
+        return "<MemoryError>"
+
+
 def get_inode_name(inode: p.Inode):
     try:
         if not inode:
@@ -337,9 +350,7 @@ class Mount(gdb.Command):
             lambda x: inode_gettype(x[0]) == InodeType.MOUNTPT, foreach_inode()
         )
         for node, path in nodes:
-            statfs = node.u.i_mops.statfs
-            funcname = gdb.block_for_pc(int(statfs)).function.print_name
-            fstype = funcname.split("_")[0]
+            fstype = get_fstype(node)
             gdb.write("  %s type %s\n" % (path, fstype))
             self.mount_count += 1
 
