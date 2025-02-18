@@ -30,14 +30,15 @@ try:
 except ImportError:
     print('Package missing, please do "pip install lief"')
 
-from .utils import get_field_nitems, get_tcbs
+from .utils import get_tcbs, has_field
 
-CONFIG_ARCH_USE_SEPARATED_SECTION = get_field_nitems("struct module_s", "sectalloc")
+CONFIG_ARCH_USE_SEPARATED_SECTION = has_field("struct module_s", "sectalloc")
 
 
 class ElfImport(gdb.Command):
     def __init__(self):
-        super().__init__("elfimport", gdb.COMMAND_USER)
+        if has_field("struct task_group_s", "tg_bininfo"):
+            super().__init__("elfimport", gdb.COMMAND_USER)
 
     def invoke(self, args, from_tty):
         parser = argparse.ArgumentParser(description="import elf symbols to gdb")
@@ -51,37 +52,33 @@ class ElfImport(gdb.Command):
         if tcbs is None:
             print("No TCBs found")
             return
-        bins = []
+        modules = []
         for tcb in tcbs:
-            if tcb["group"] != 0 and tcb["group"]["tg_bininfo"] != 0:
-                bins.append(tcb["group"]["tg_bininfo"])
+            if tcb.group != 0 and tcb.group.tg_bininfo != 0:
+                modules.append(tcb.group.tg_bininfo.mod)
 
-        if len(bins) == 0:
-            print("Not find elf in current environment")
+        if not modules:
+            print("No modules in current environment")
             return
 
-        print(f"Have {len(bins)} elf in current environment")
+        print(f"Found {len(modules)} modules in current environment")
 
-        for i, bin in enumerate(bins):
-            mod = bin["mod"]
+        for mod in modules:
             sections = {}
             cmd = ""
             if CONFIG_ARCH_USE_SEPARATED_SECTION:
-                for i in range(mod["nsect"]):
-                    section = hex(mod["sectalloc"][i])
-                    if section != "0x0":
-                        sections[i] = section
-                filename = os.path.join(args.elfpath, mod["modname"].string())
+                for i in range(mod.nsect):
+                    section = mod.sectalloc[i]
+                    if section:
+                        sections[i] = hex(section)
+                filename = os.path.join(args.elfpath, mod.modname.string())
                 cmd = f"add-symbol-file {filename} "
                 elf = lief.parse(filename)
                 for i, section in sections.items():
                     cmd += f"-s {elf.sections[i].name} {sections[i]} "
             else:
-                filename = os.path.join(args.elfpath, mod["modname"].string())
-                cmd = f"add-symbol-file {filename} -s .text {hex(mod['textalloc'])} -s .data {hex(mod['dataalloc'])}"
+                filename = os.path.join(args.elfpath, mod.modname.string())
+                cmd = f"add-symbol-file {filename} -s .text {hex(mod.textalloc)} -s .data {hex(mod.dataalloc)}"
 
             print(cmd)
             gdb.execute(cmd)
-
-
-ElfImport()

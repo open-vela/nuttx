@@ -24,6 +24,25 @@ from .fs import FileList
 from .value import Value
 
 
+class TgBininfo(Value):
+    """struct tg_bininfo_s"""
+
+    entrypt: Value
+    mapped: Value
+    mod: Value
+    picbase: Value
+    addrenv: Value
+    oldenv: Value
+    mapsize: Value
+    priority: Value
+    stacksize: Value
+    uid: Value
+    gid: Value
+    mode: Value
+    stackaddr: Value
+    unload: Value
+
+
 class Group(Value):
     """struct group_s"""
 
@@ -35,7 +54,7 @@ class Group(Value):
     tg_euid: Value
     tg_egid: Value
     tg_members: Value
-    tg_bininfo: Value
+    tg_bininfo: TgBininfo
     tg_children: Value
     tg_nchildren: Value
     tg_exitcode: Value
