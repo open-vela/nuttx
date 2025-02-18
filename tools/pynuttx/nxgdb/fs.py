@@ -27,6 +27,7 @@ from typing import Generator, Tuple, Union
 import gdb
 
 from . import utils
+from .lists import NxList
 from .protocols import fs as p
 from .protocols.thread import Tcb
 
@@ -162,7 +163,7 @@ def get_inode_name(inode: p.Inode):
 
 
 def inode_getpath(inode: p.Inode):
-    """get path fron inode"""
+    """get path from inode"""
     try:
         if not inode:
             return ""
@@ -232,6 +233,18 @@ def foreach_file(tcb: Tcb):
             fd = row * CONFIG_NFILE_DESCRIPTORS_PER_BLOCK + col
 
             yield fd, file
+
+
+def fstype_filter(fstype):
+    """Filter inodes by filesystem type"""
+
+    def filter(item):
+        inode, path = item
+        if inode_gettype(inode) != InodeType.MOUNTPT:
+            return False
+        return get_fstype(inode) == fstype
+
+    return filter
 
 
 class Fdinfo(gdb.Command):
@@ -546,10 +559,10 @@ class InfoRomfs(gdb.Command):
         volume_size = mpt.rm_volsize
         xip_base = mpt.rm_xipbase
         buffer_base = mpt.rm_buffer
-        gdb.write(
+        print(
             f" HW sector size: {sector_size} HW sector number: {sector_num}\n"
             f" Volume size: {volume_size} XIP_addr: {hex(xip_base)}"
-            f" Buffer_addr: {hex(buffer_base)}\n"
+            f" Buffer_addr: {hex(buffer_base)}"
         )
 
     def dump_romfs_files(self, node, level=1, prefix="", maxlevel=4096):
@@ -566,9 +579,9 @@ class InfoRomfs(gdb.Command):
             dirfix = ""
 
         name = node.rn_name.string(length=node.rn_namesize)
-        gdb.write(
+        print(
             f"{initial_indent}{name}{dirfix} offset:{node.rn_offset} next:{node.rn_next}"
-            f" size:{node.rn_size} child_count:{node.rn_count}\n"
+            f" size:{node.rn_size} child_count:{node.rn_count}"
         )
 
         for child in utils.ArrayIterator(node.rn_child, node.rn_count):
@@ -577,7 +590,7 @@ class InfoRomfs(gdb.Command):
     def dump_romfs_cache(self, node: Inode, path):
         mpt = node.i_private.cast(utils.lookup_type("struct romfs_mountpt_s").pointer())
         root = mpt.rm_root.cast(utils.lookup_type("struct romfs_nodeinfo_s").pointer())
-        gdb.write(f"Romfs {path} mount point information: {hex(mpt)}\n")
+        print(f"Romfs {path} mount point information: {hex(mpt)}")
         self.dump_romfs_mpt(mpt)
         self.dump_romfs_files(root)
 
@@ -594,17 +607,121 @@ class InfoRomfs(gdb.Command):
 
     def invoke(self, args, from_tty):
         args = self.parse_arguments(gdb.string_to_argv(args))
-
-        def romfs_filter(item):
-            inode, path = item
-            if inode_gettype(inode) != InodeType.MOUNTPT:
-                return False
-            if args and args.path and path != args.path:
-                return False
-
-            fstype = get_fstype(inode)
-            return fstype == "romfs"
-
-        nodes = filter(romfs_filter, foreach_inode())
+        nodes = filter(fstype_filter("romfs"), foreach_inode())
         for node, path in nodes:
+            if args and args.path and path != args.path:
+                continue
             self.dump_romfs_cache(node, path)
+
+
+class InfoYaffs(gdb.Command):
+    """Show yaffs cache information"""
+
+    YAFFS_FILETYPE_MAP = {
+        0: "yaffs_UNKNOWN_var",
+        1: "yaffs_file_var",
+        2: "yaffs_symlink_var",
+        3: "yaffs_dir_var",
+        4: "yaffs_hardlink_var",
+        5: "yaffs_SPECIAL_var",
+    }
+
+    def __init__(self):
+        if utils.get_symbol_value("CONFIG_FS_YAFFS"):
+            super().__init__("info yaffs", gdb.COMMAND_USER)
+
+    def parse_arguments(self, argv):
+        parser = argparse.ArgumentParser(description=gdb.__doc__)
+        parser.add_argument(
+            "-P",
+            "--path",
+            type=str,
+            default=None,
+            help="set the yaffs path to be dumped",
+        )
+
+        try:
+            args = parser.parse_args(argv)
+        except SystemExit:
+            return None
+
+        return args
+
+    def dump_yaffs_files(self, node, level=1, prefix="", maxlevel=4096):
+        if level > maxlevel:
+            return
+
+        file_type = self.YAFFS_FILETYPE_MAP[int(node.variant_type)]
+        if file_type == "yaffs_dir_var":
+            initial_indent = prefix + "├── "
+            newprefix = prefix + "│   "
+            dirfix = "/"
+            moreinfo = ""
+        elif file_type == "yaffs_file_var":
+            initial_indent = prefix + "└── "
+            newprefix = prefix + "    "
+            dirfix = ""
+            file = node.variant.cast(utils.lookup_type("struct yaffs_file_var"))
+            file_size = file.file_size
+            stored = file.stored_size
+            moreinfo = f" file_size:{file_size},stored:{stored}"
+        else:
+            initial_indent = prefix + "└── "
+            newprefix = prefix + "    "
+            dirfix = ""
+            moreinfo = ""
+
+        obj_id = node.obj_id
+        short_name = node.short_name.string(length=16).rstrip("\0")
+        if short_name == "":
+            short_name = "(null)"
+        hdr_chunk = node.hdr_chunk
+        n_data_chunks = node.n_data_chunks
+        serial = str(node.serial).split(" ")[0]
+        baseinfo = {
+            f"name:{short_name}{dirfix},obj_id:{obj_id},hdr_chunk:{hdr_chunk},"
+            f"n_data_chunks:{n_data_chunks},serial:{serial}{moreinfo}"
+        }
+
+        print(f"{initial_indent}{file_type.rsplit('_',2)[1]} {baseinfo}")
+        if file_type == "yaffs_dir_var":
+            head = node.variant.cast(utils.lookup_type("struct yaffs_dir_var"))
+            for siblings in NxList(head.children, "struct yaffs_obj", "siblings"):
+                self.dump_yaffs_files(siblings, level + 1, newprefix, maxlevel)
+
+    def dump_yaffs_mpt(self, mpt):
+        geo = mpt.geo.cast(utils.lookup_type("struct mtd_geometry_s"))
+        dev = mpt.dev.cast(utils.lookup_type("struct yaffs_dev").pointer())
+        blksize = geo.blocksize
+        erasesize = geo.erasesize
+        erasecount = geo.neraseblocks
+        print(f" Block size:{blksize} Erase size:{erasesize} Erase count:{erasecount}")
+        print(f"Dump yaffs_dev: {hex(dev)}")
+        print(dev.dereference().format_string(pretty_structs=True, styling=True))
+
+    def dump_yaffs_cache(self, node: Inode, path):
+        mpt = node.i_private.cast(utils.lookup_type("struct yaffs_mountpt_s").pointer())
+        dev = mpt.dev.cast(utils.lookup_type("struct yaffs_dev").pointer())
+        root = dev.root_dir.cast(utils.lookup_type("struct yaffs_obj").pointer())
+        print(f"Yaffs {path} mount point information: {hex(mpt)}")
+        self.dump_yaffs_mpt(mpt)
+        print(f"Yaffs {path} file tree information: {hex(root)}")
+        self.dump_yaffs_files(root)
+
+    def diagnose(self, *args, **kwargs):
+        output = gdb.execute("info yaffs", to_string=True)
+        return {
+            "title": "Yaffs cache information",
+            "summary": "Yaffs information dump",
+            "command": "info Yaffs",
+            "result": "info",
+            "message": output or "No yaffs information",
+        }
+
+    def invoke(self, args, from_tty):
+        args = self.parse_arguments(gdb.string_to_argv(args))
+        nodes = filter(fstype_filter("yaffs"), foreach_inode())
+        for node, path in nodes:
+            if args and args.path and path != args.path:
+                continue
+            self.dump_yaffs_cache(node, path)
