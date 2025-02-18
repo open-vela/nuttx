@@ -22,7 +22,7 @@ import logging
 from binascii import hexlify
 from typing import List, Union
 
-from construct import Array, Int16ul
+from construct import Array, Int8ul, Int16ul, PaddedString, Struct
 from nxelf.elf import LiefELF
 
 UINT16_MAX = 0xFFFF
@@ -251,9 +251,20 @@ class RegInfo:
 
 def get_reginfo(elf: LiefELF) -> List[RegInfo]:
     # Now get register offset in TCB
-    _, data = elf.read_symbol("g_reg_offs")
-    reg_offs = Array(len(data) // 2, Int16ul).parse(data)
-    return [RegInfo("", elf.bits // 8, off) for off in reg_offs]
+    _, data = elf.read_symbol("g_reginfo")
+
+    reginfo_s = Struct(
+        "name" / PaddedString(8, "utf-8"),
+        "size" / Int8ul,
+        "regnum" / Int8ul,
+        "toffset" / Int16ul,
+        "goffset" / Int16ul,
+    )
+
+    regsnum = len(data) // reginfo_s.sizeof()
+    reginfo_t = Array(regsnum, reginfo_s)
+    reginfo = reginfo_t.parse(data)
+    return [RegInfo("", elf.bits // 8, reg.toffset) for reg in reginfo]
 
 
 class Register:
