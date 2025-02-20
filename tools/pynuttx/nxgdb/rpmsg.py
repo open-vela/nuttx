@@ -224,11 +224,13 @@ class RPMsgDump(gdb.Command):
 
     def dump_rpmsg(self, transport_only):
         for rpmsg in NxList(gdb.parse_and_eval("g_rpmsg"), "struct rpmsg_s", "node"):
-            gdb.write(f"Rpmsg Device: rpmsg:{rpmsg} rdev:{rpmsg['rdev']}\n")
+            rdev = utils.Value(int(rpmsg) + utils.sizeof("struct rpmsg_s"))
+            rdev = rdev.cast(utils.lookup_type("struct rpmsg_device").pointer())
+            gdb.write(f"Rpmsg Device: rpmsg:{rpmsg} rdev:{rdev}\n")
             if not transport_only:
-                self.dump_rdev(rpmsg["rdev"])
-            self.dump_rpmsg_virtio(rpmsg["rdev"])
-            self.dump_rpmsg_port(rpmsg["rdev"])
+                self.dump_rdev(rdev)
+            self.dump_rpmsg_virtio(rdev)
+            self.dump_rpmsg_port(rdev)
 
     def invoke(self, args, from_tty):
         if not (args := self.parse_args(args)):
