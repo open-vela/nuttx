@@ -808,7 +808,7 @@ struct pthread_tcb_s
  * values in tcb context.
  */
 
-begin_packed_struct struct reginfo_s
+struct reginfo_s
 {
   const char  name[8];  /* Register name, must follow GDB, normally in lowercase */
   uint8_t     size;     /* Register size in bytes */
@@ -816,7 +816,8 @@ begin_packed_struct struct reginfo_s
   int16_t     toffset;  /* Register byte offset in context registers. */
                         /* value of REGINFO_OFFSET_INVALID: This register is not provided by NuttX */
   int16_t     goffset;  /* Register byte offset in g/G packet, default to 0 that means register in order. */
-} end_packed_struct;
+  uint16_t    reserved; /* in order to alignment in 64bytes */
+};
 
 /* struct tcbinfo_s *********************************************************/
 
@@ -824,7 +825,7 @@ begin_packed_struct struct reginfo_s
  * debuggers to parse the tcb information
  */
 
-begin_packed_struct struct tcbinfo_s
+struct tcbinfo_s
 {
   uint16_t pid_off;                      /* Offset of tcb.pid               */
   uint16_t state_off;                    /* Offset of tcb.task_state        */
@@ -839,7 +840,7 @@ begin_packed_struct struct tcbinfo_s
     uint8_t                     u[8];
     FAR const struct reginfo_s *reginfo; /* Register information          */
   } u;
-} end_packed_struct;
+};
 
 /* This is the callback type used by nxsched_foreach() */
 
