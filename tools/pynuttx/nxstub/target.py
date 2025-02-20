@@ -141,12 +141,10 @@ class Target:
             g_running_tasks = utils.parse_array(data, pointer, ncpus)
             self.logger.debug(f"g_running_tasks: {g_running_tasks}@{sym.value:#x}")
 
-            data, _ = self._read_symbol("g_last_regs")  # an array of uintptr_t
-            assert len(data) % regsize == 0
-            g_last_regs = [data[i * regsize : (i + 1) * regsize] for i in range(ncpus)]
-
             def parse_tcb(address: int) -> ThreadInfo:
-                registers = Registers(self.elf, arch=self.arch)
+                registers = Registers(
+                    self.elf, arch=self.arch, readmem=self.memory_read
+                )
                 data = self.memory_read(address, tcbsize)
                 if not data or len(data) != tcbsize:
                     self.logger.error(f"Invalid TCB size: {len(data)} != {tcbsize}")
@@ -165,15 +163,16 @@ class Target:
                 if address in g_running_tasks:
                     # Running task registers is not in memory, best chance is the registers
                     # stored in g_last_regs when assert happened.
-                    xcpregs = g_last_regs[g_running_tasks.index(address)]
+                    g_last_regs = self.elf.get_symbol("g_last_regs").value
+                    cpu = g_running_tasks.index(address)
+                    xcpregs = cpu * regsize + g_last_regs
                 else:
                     off = tcbinfo.regs_off
                     xcpregs = data[off : off + pointer.sizeof()]
                     xcpregs = pointer.parse(xcpregs)
-                    xcpregs = self.memory_read(xcpregs, regsize)
 
                 try:
-                    registers.load(xcpregs=xcpregs)
+                    registers.load(addr=xcpregs)
                 except ValueError as e:
                     self.logger.error(f"Failed to load registers: {e}")
 
@@ -299,7 +298,7 @@ class Target:
                 # try if it's a symbol, note that expression is not supported.
                 address = self.elf.get_symbol(address).value
 
-            self.registers.load(self.memory_read(address, utils.get_regsize(self.elf)))
+            self.registers.load(address)
             return f"Loaded registers from {address:#x}\n"
         elif command.startswith(b"help"):
             return (

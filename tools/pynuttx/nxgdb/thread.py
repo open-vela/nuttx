@@ -22,8 +22,11 @@
 
 import argparse
 from enum import Enum, auto
+from typing import Union
 
 import gdb
+from nxelf.elf import LiefELF
+from nxreg.register import Registers, g_reg_table
 
 from . import utils
 from .stack import Stack
@@ -40,38 +43,36 @@ def is_thread_command_supported():
     return len(gdb.selected_inferior().threads()) > CONFIG_SMP_NCPUS
 
 
-class Registers:
+class NxRegisters:
     saved_regs = None
-    reginfo = None
 
     def __init__(self):
-        if not Registers.reginfo:
-            reginfo = {}
+        elf = gdb.objfiles()[0]
+        elf = LiefELF(elf.filename)
 
-            tcb_info = utils.parse_and_eval("g_tcbinfo")
-            reg_info = tcb_info.u.reginfo
-            reginfo = {
-                str(reg.name.string()): {
-                    "rmt_nr": int(reg.regnum),
-                    "tcb_reg_off": int(reg.toffset),
-                }
-                for reg in utils.ArrayIterator(reg_info, tcb_info.regs_num)
-            }
+        def read_memory(addr, size):
+            return bytes(gdb.selected_inferior().read_memory(addr, size))
 
-            Registers.reginfo = reginfo
-
-    def load(self, regs):
-        """Load registers from context register address"""
-        regs = int(regs)
-        for name, info in Registers.reginfo.items():
-            addr = regs + info["tcb_reg_off"]
-            # value = *(uintptr_t *)addr
-            value = (
-                gdb.Value(addr)
-                .cast(utils.lookup_type("uintptr_t").pointer())
-                .dereference()
+        arch = gdb.selected_inferior().architecture()
+        mapped_arch_name = self.map_gdbarch_name(arch.name())
+        if mapped_arch_name not in g_reg_table:
+            raise ValueError(
+                f"Architecture {mapped_arch_name} is not found in g_reg_table.\n"
             )
-            gdb.execute(f"set ${name}={int(value)}")
+
+        self.registers = Registers(elf, arch=mapped_arch_name, readmem=read_memory)
+
+    def map_gdbarch_name(self, arch: str):
+        for arch_key, arch_info in g_reg_table.items():
+            if arch in arch_info["architecture"]:
+                return arch_key
+        return None
+
+    def load(self, regs: Union[int, gdb.Value] = None):
+        """Load registers from context register address"""
+        self.registers.load(regs)
+        for reg in self.registers:
+            gdb.execute(f"set ${reg.name} = {reg.value}")
 
     def switch(self, pid):
         """Switch to the specified thread"""
@@ -93,29 +94,29 @@ class Registers:
 
     def save(self):
         """Save current registers"""
-        if Registers.saved_regs:
+        if NxRegisters.saved_regs:
             # Already saved
             return
 
         registers = {}
         frame = gdb.newest_frame()
-        for name, _ in Registers.reginfo.items():
-            value = frame.read_register(name)
-            registers[name] = value
+        for reg in self.registers:
+            value = frame.read_register(reg.name)
+            registers[reg.name] = value
 
-        Registers.saved_regs = registers
+        NxRegisters.saved_regs = registers
 
     def restore(self):
-        if not Registers.saved_regs:
+        if not NxRegisters.saved_regs:
             return
 
-        for name, value in Registers.saved_regs.items():
+        for name, value in NxRegisters.saved_regs.items():
             gdb.execute(f"set ${name}={int(value)}")
 
-        Registers.saved_regs = None
+        NxRegisters.saved_regs = None
 
 
-g_registers = Registers()
+g_registers = NxRegisters()
 
 
 class SetRegs(gdb.Command):

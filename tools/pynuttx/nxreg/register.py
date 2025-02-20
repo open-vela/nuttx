@@ -29,7 +29,16 @@ UINT16_MAX = 0xFFFF
 
 g_reg_table = {
     "arm": {
-        "architecture": "arm",
+        "architecture": [
+            "arm",
+            "armv6-m",
+            "armv6s-m",
+            "armv7e-m",
+            "armv8-m",
+            "armv8-m.base",
+            "armv8-m.main",
+            "armv8.1-m.main",
+        ],
         "feature": "org.gnu.gdb.arm.m-profile",
         "registers": [
             ("r0", 0, 0),
@@ -48,11 +57,11 @@ g_reg_table = {
             ("sp", 13, 0),
             ("lr", 14, 0),
             ("pc", 15, 0),
-            ("xpsr", 16, 0),
+            ("xpsr", 25, 0),
         ],
     },
     "arm-a": {
-        "architecture": "arm",
+        "architecture": ["armv6", "armv7", "armv8-a", "armv8-r", "armv9-a"],
         "feature": "org.gnu.gdb.arm",
         "registers": [
             ("r0", 0, 0),
@@ -75,7 +84,7 @@ g_reg_table = {
         ],
     },
     "arm64": {
-        "architecture": "aarch64",
+        "architecture": ["aarch64", "aarch64:ilp32", "aarch64:armv8-r"],
         "feature": "org.gnu.gdb.aarch64",
         "registers": [
             ("x0", 0, 0),
@@ -114,7 +123,7 @@ g_reg_table = {
         ],
     },
     "riscv": {
-        "architecture": "riscv:rv32",
+        "architecture": ["riscv", "riscv:rv32", "riscv:rv64"],
         "feature": "org.gnu.gdb.riscv:rv32",
         "registers": [
             ("zero", 0, 0),
@@ -149,11 +158,11 @@ g_reg_table = {
             ("t4", 29, 0),
             ("t5", 30, 0),
             ("t6", 31, 0),
-            ("epc", 33, 0),
+            ("epc", 33, 0),  # PC
         ],
     },
     "x86-64": {
-        "architecture": "i386:x86-64",
+        "architecture": ["i386", "i386:x86-64", "i386:x86-64:intel", "i386:intel"],
         "feature": "org.gnu.gdb.i386:x86-64",
         "registers": [
             ("rax", 0, 0),
@@ -182,7 +191,7 @@ g_reg_table = {
         ],
     },
     "esp32s3": {
-        "architecture": "xtensa",  # Use xtensa-esp32s3-elf-gdb
+        "architecture": ["esp32s3"],  # Use xtensa-esp32s3-elf-gdb
         "feature": "",
         "registers": [
             ("pc", 0, 0),
@@ -208,7 +217,7 @@ g_reg_table = {
         ],
     },
     "xtensa": {
-        "architecture": "xtensa",  # Use xt-gdb
+        "architecture": ["xtensa"],  # Use xt-gdb
         "feature": "",
         "registers": [
             ("pc", 32, 0),
@@ -264,7 +273,8 @@ def get_reginfo(elf: LiefELF) -> List[RegInfo]:
     regsnum = len(data) // reginfo_s.sizeof()
     reginfo_t = Array(regsnum, reginfo_s)
     reginfo = reginfo_t.parse(data)
-    return [RegInfo("", elf.bits // 8, reg.toffset) for reg in reginfo]
+
+    return [RegInfo(reg.name, elf.bits // 8, reg.toffset) for reg in reginfo]
 
 
 class Register:
@@ -316,12 +326,14 @@ class Register:
         self.logger.debug(f"Set {self.name} = {self._value:#x}")
 
 
-class Registers:
-    def __init__(self, elf, arch=None):
+class GeneralRegisters:
+    def __init__(self, elf, arch=None, readmem=None):
         """
         Registers class to store register information
 
+        :param elf: Parsed ELF file
         :param arch: architecture name, or use current gdb architecture by default
+        :param readmem: function to read memory
         """
         # if we don't have register names in elf, fallback to hardcoded register layouts
         if not arch:
@@ -329,6 +341,7 @@ class Registers:
 
         self.logger = logging.getLogger(__name__)
         self.arch = arch
+        self.readmem = readmem
         self._registers: List[Register] = []
         regsize = elf.get_pointer_size()
 
@@ -351,6 +364,8 @@ class Registers:
             )
 
         self._registers.sort(key=lambda x: x.regnum)
+        ncpu = elf.get_symbol("g_running_tasks").size // elf.get_pointer_size()
+        self.xcp_reg_size = elf.get_symbol("g_last_regs").size // ncpu
 
     def __str__(self):
         return f"({self.arch} x{len(self._registers)}, {self.sizeof()} bytes)"
@@ -380,7 +395,7 @@ class Registers:
             raise KeyError(f"Register {name or regnum} not found")
         reg.value = value
 
-    def load(self, xcpregs: bytes = None):
+    def load(self, addr: int):
         """
         Load register values from various sources.
 
@@ -388,12 +403,15 @@ class Registers:
         :param address: load register values from specified address which points to regs in context
         """
 
+        if self.readmem is None:
+            raise ValueError("readmem is not set")
+
+        xcpregs = self.readmem(addr, self.xcp_reg_size)
         if xcpregs:
             for reg in self._registers:
                 reg.value = xcpregs[reg.tcb_reg_off : reg.tcb_reg_off + reg.size]
         else:
-            raise ValueError("No valid source to load register values")
-
+            raise ValueError("No valid source to load register values.\n")
         return self  # allow to build and use Register().load() directly
 
     def to_g(self):
@@ -431,3 +449,7 @@ class Registers:
 
     def __getitem__(self, key):
         return self._registers[key]
+
+
+def Registers(elf, arch=None, readmem=None) -> GeneralRegisters:
+    return GeneralRegisters(elf, arch, readmem)
