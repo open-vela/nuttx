@@ -80,6 +80,22 @@ class RPMsgDump(gdb.Command):
         except SystemExit:
             return
 
+    def is_rpmsg_transport(self, rdev, transport):
+        if transport == "virtio":
+            tx_payload = "rpmsg_virtio_get_tx_payload_buffer"
+        elif transport == "port":
+            tx_payload = "rpmsg_port_get_tx_payload_buffer"
+        else:
+            return False
+
+        symbol = gdb.lookup_symbol(tx_payload)
+        if symbol[0] is None:
+            return False
+
+        real_addr = symbol[0].value().address
+        ops_addr = int(utils.Value(rdev["ops"]["get_tx_payload_buffer"])) & ~1
+        return real_addr == ops_addr
+
     def dump_virtqueue(self, vq):
         vr = vq["vq_ring"]
         gdb.write(
@@ -101,11 +117,7 @@ class RPMsgDump(gdb.Command):
         )
 
     def dump_rpmsg_virtio(self, rdev):
-        real_addr = hex(
-            gdb.lookup_symbol("rpmsg_virtio_get_tx_payload_buffer")[0].value().address
-        )
-        ops_addr = hex(int(utils.Value(rdev["ops"]["get_tx_payload_buffer"])) & ~1)
-        if real_addr != ops_addr:
+        if not self.is_rpmsg_transport(rdev, "virtio"):
             return
 
         rvdev = rdev.cast(utils.lookup_type("struct rpmsg_virtio_device").pointer())
@@ -156,12 +168,9 @@ class RPMsgDump(gdb.Command):
         return buffer_list
 
     def dump_rpmsg_port(self, rdev):
-        real_addr = hex(
-            gdb.lookup_symbol("rpmsg_port_get_tx_payload_buffer")[0].value().address
-        )
-        ops_addr = hex(int(utils.Value(rdev["ops"]["get_tx_payload_buffer"])) & ~1)
-        if real_addr != ops_addr:
+        if not self.is_rpmsg_transport(rdev, "port"):
             return
+
         port = rdev.cast(utils.lookup_type("struct rpmsg_port_s").pointer())
 
         gdb.write(f"rxq nused:{port['rxq']['ready']['num']}\n")
