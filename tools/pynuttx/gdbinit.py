@@ -29,9 +29,9 @@ if __name__ == "__main__":
     if here not in sys.path:
         sys.path.insert(0, here)
 
-    if "nxgdb" in sys.modules:
-        for key in list(sys.modules.keys()):
-            if key.startswith("nxgdb"):
-                del sys.modules[key]
+    modules = ("nxelf", "nxgdb", "nxreg", "nxstub", "nxtrace")
+    for key in list(sys.modules):
+        if key.startswith(modules):
+            del sys.modules[key]
 
     import nxgdb  # noqa: F401
