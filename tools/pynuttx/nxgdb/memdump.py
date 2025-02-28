@@ -137,7 +137,7 @@ def print_header(formatter=None):
         "Pool",
         "CNT",
         "PID",
-        "Size",
+        "NodeSize",
         "Overhead",
         "Seqno",
         "Address",

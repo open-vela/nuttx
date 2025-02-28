@@ -528,8 +528,15 @@ class MMHeap(Value, p.MMHeap):
     """
 
     def __init__(self, heap: Value, name=None) -> None:
+        mm_heap_s = utils.lookup_type("struct mm_heap_s")
         if heap.type.code == gdb.TYPE_CODE_PTR:
             heap = heap.dereference()
+        elif heap.type.code == gdb.TYPE_CODE_INT:
+            heap = gdb.Value(heap).cast(mm_heap_s.pointer()).dereference()
+
+        if heap.type != mm_heap_s:
+            raise ValueError(f"Invalid heap type: {heap.type}")
+
         super().__init__(heap)
 
         self.name = name or "<noname>"
