@@ -22,7 +22,7 @@ import logging
 from binascii import hexlify
 from typing import List, Union
 
-from construct import Array, Int8ul, Int16ul, PaddedString, Struct
+from construct import Array, Int8ul, Int16sl, Int16ul, PaddedString, Struct
 from nxelf.elf import LiefELF
 
 UINT16_MAX = 0xFFFF
@@ -304,8 +304,9 @@ def get_reginfo(elf: LiefELF) -> List[RegInfo]:
         "name" / PaddedString(8, "utf-8"),
         "size" / Int8ul,
         "regnum" / Int8ul,
-        "toffset" / Int16ul,
-        "goffset" / Int16ul,
+        "toffset" / Int16sl,
+        "goffset" / Int16sl,
+        "reserved" / Int16ul,
     )
 
     regsnum = len(data) // reginfo_s.sizeof()
