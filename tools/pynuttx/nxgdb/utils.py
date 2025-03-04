@@ -1197,3 +1197,57 @@ class Addr2Line(gdb.Command):
                     except gdb.error as e:
                         gdb.write(f"Ignore {arg}: {e}\n")
             self.print_backtrace(addresses)
+
+
+def get_gdb_thread_pid(thread: gdb.InferiorThread) -> int:
+    idlepid = get_symbol_value("PID0_REPLACE")
+    return 0 if thread.ptid[1] == idlepid else thread.ptid[1]
+
+
+def get_gdb_thread(pid: int) -> Optional[gdb.InferiorThread]:
+    for thread in gdb.selected_inferior().threads():
+        if get_gdb_thread_pid(thread) == pid:
+            return thread
+    return None
+
+
+def get_thread_frames(arg: Union[gdb.InferiorThread, int]) -> Union[List[gdb.Frame]]:
+    thread = arg
+    if isinstance(arg, int):
+        thread = get_gdb_thread(arg)
+
+    if not thread:
+        return []
+    thread.switch()
+
+    frames = []
+    frame = gdb.newest_frame()
+    while frame and frame.is_valid():
+        frames.append(frame)
+        frame = frame.older()
+
+    return frames
+
+
+def get_backtrace(arg: Union[gdb.InferiorThread, int]) -> List[int]:
+    backtrace = []
+
+    for frame in get_thread_frames(arg):
+        backtrace.append(frame.pc())
+
+    return backtrace
+
+
+def get_frame_variables(frame: gdb.Frame) -> dict:
+    varibles = {}
+    try:
+        block = frame.block()
+        while block and block.is_valid():
+            for symbol in block:
+                if symbol.is_valid() and symbol.is_variable:
+                    varibles[symbol.name] = symbol.value(frame)
+            block = block.superblock
+    except RuntimeError:
+        pass
+
+    return varibles
