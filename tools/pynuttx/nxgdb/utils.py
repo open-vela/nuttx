@@ -310,9 +310,7 @@ def offset_of(typeobj: TypeOrStr, field: str) -> Union[int, None]:
     raise gdb.GdbError(f"Field {field} not found in type {typeobj}")
 
 
-def container_of(
-    ptr: Union[gdb.Value, int], typeobj: TypeOrStr, member: str
-) -> gdb.Value:
+def container_of(ptr: Union[Value, int], typeobj: TypeOrStr, member: str) -> Value:
     """
     Return a pointer to the containing data structure.
 
@@ -322,7 +320,7 @@ def container_of(
         member: Name of the member in the container.
 
     Returns:
-        gdb.Value of the container.
+        Value of the container.
 
     Example:
         struct foo {
@@ -333,13 +331,13 @@ def container_of(
     """
 
     if isinstance(typeobj, str):
-        typeobj = gdb.lookup_type(typeobj).pointer()
+        typeobj = lookup_type(typeobj).pointer()
 
     if typeobj.code is not gdb.TYPE_CODE_PTR:
         typeobj = typeobj.pointer()
 
-    addr = gdb.Value(ptr).cast(long_type)
-    return gdb.Value(addr - offset_of(typeobj, member)).cast(typeobj)
+    addr = Value(ptr).cast(long_type)
+    return Value(addr - offset_of(typeobj, member)).cast(typeobj)
 
 
 class ContainerOf(gdb.Function):
