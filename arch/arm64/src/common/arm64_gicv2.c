@@ -709,57 +709,6 @@ void up_secure_irq_all(bool secure)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: arm_cpu_sgi
- *
- * Description:
- *   Perform a Software Generated Interrupt (SGI).  If CONFIG_SMP is
- *   selected, then the SGI is sent to all CPUs specified in the CPU set.
- *   That set may include the current CPU.
- *
- *   If CONFIG_SMP is not selected, the cpuset is ignored and SGI is sent
- *   only to the current CPU.
- *
- * Input Parameters:
- *   sgi    - The SGI interrupt ID (0-15)
- *   cpuset - The set of CPUs to receive the SGI
- *
- * Returned Value:
- *   OK is always returned at present.
- *
- ****************************************************************************/
-
-static inline void arm_cpu_sgi(int sgi, unsigned int cpuset)
-{
-  uint32_t regval;
-
-#ifdef CONFIG_SMP
-  regval = GIC_ICDSGIR_INTID(sgi) | GIC_ICDSGIR_CPUTARGET(cpuset) |
-           GIC_ICDSGIR_TGTFILTER_LIST;
-#else
-  regval = GIC_ICDSGIR_INTID(sgi) | GIC_ICDSGIR_CPUTARGET(0) |
-           GIC_ICDSGIR_TGTFILTER_THIS;
-#endif
-
-#if defined(CONFIG_ARCH_TRUSTZONE_SECURE)
-  if (sgi >= GIC_IRQ_SGI0 && sgi <= GIC_IRQ_SGI7)
-#endif
-    {
-      /* Set NSATT be 1: forward the SGI specified in the SGIINTID field to a
-       * specified CPU interfaces only if the SGI is configured as Group 1 on
-       * that interface.
-       * For non-secure context, the configuration of GIC_ICDSGIR_NSATT_GRP1
-       * is not mandatory in the GICv2 specification, but for SMP scenarios,
-       * this value needs to be configured, otherwise issues may occur in the
-       * SMP scenario.
-       */
-
-      regval |= GIC_ICDSGIR_NSATT_GRP1;
-    }
-
-  putreg32(regval, GIC_ICDSGIR);
-}
-
-/****************************************************************************
  * Name: gic_validate_dist_version
  *
  * Description:
@@ -1280,43 +1229,7 @@ void up_affinity_irq(int irq, cpu_set_t cpuset)
 }
 
 /****************************************************************************
- * Name: up_trigger_irq
- *
- * Description:
- *   Perform a Software Generated Interrupt (SGI).  If CONFIG_SMP is
- *   selected, then the SGI is sent to all CPUs specified in the CPU set.
- *   That set may include the current CPU.
- *
- *   If CONFIG_SMP is not selected, the cpuset is ignored and SGI is sent
- *   only to the current CPU.
- *
- * Input Parameters
- *   irq    - The SGI interrupt ID (0-15)
- *   cpuset - The set of CPUs to receive the SGI
- *
- ****************************************************************************/
-
-void up_trigger_irq(int irq, cpu_set_t cpuset)
-{
-  if (irq >= 0 && irq <= GIC_IRQ_SGI15)
-    {
-      arm_cpu_sgi(irq, cpuset);
-    }
-  else if (irq >= 0 && irq < NR_IRQS)
-    {
-      uintptr_t regaddr;
-
-      /* Write '1' to the corresponding bit in the distributor Interrupt
-       * Set-Pending (ICDISPR)
-       */
-
-      regaddr = GIC_ICDISPR(irq);
-      putreg32(GIC_ICDISPR_INT(irq), regaddr);
-    }
-}
-
-/****************************************************************************
- * Name: arm64_gicv_irq_trigger
+ * Name: up_set_irq_type
  *
  * Description:
  *   Set the trigger type for the specified IRQ source and the current CPU.
@@ -1325,31 +1238,36 @@ void up_trigger_irq(int irq, cpu_set_t cpuset)
  *   avoided in common implementations where possible.
  *
  * Input Parameters:
- *   irq - The interrupt request to modify.
- *   edge - False: Active HIGH level sensitive, True: Rising edge sensitive
+ *   irq  - The interrupt request to modify.
+ *   mode - Level sensitive or edge sensitive
  *
  * Returned Value:
  *   Zero (OK) on success; a negated errno value is returned on any failure.
  *
  ****************************************************************************/
 
-int arm64_gicv_irq_trigger(int irq, bool edge)
+int up_set_irq_type(int irq, int mode)
 {
   uintptr_t regaddr;
   uint32_t regval;
   uint32_t intcfg;
 
-  if (irq > GIC_IRQ_SGI15 && irq < NR_IRQS)
+  if (!GIC_IS_SGI(irq))
     {
+      if (mode == IRQ_HIGH_LEVEL || mode == IRQ_LOW_LEVEL)
+        {
+          intcfg = INT_ICDICFR_1N;
+        }
+      else
+        {
+          intcfg = INT_ICDICFR_EDGE | INT_ICDICFR_1N;
+        }
+
       /* Get the address of the Interrupt Configuration Register for this
        * irq.
        */
 
       regaddr = GIC_ICDICFR(irq);
-
-      /* Get the new Interrupt configuration bit setting */
-
-      intcfg = (edge ? (INT_ICDICFR_EDGE | INT_ICDICFR_1N) : INT_ICDICFR_1N);
 
       /* Write the correct interrupt trigger to the Interrupt Configuration
        * Register.
@@ -1364,56 +1282,6 @@ int arm64_gicv_irq_trigger(int irq, bool edge)
     }
 
   return -EINVAL;
-}
-
-/****************************************************************************
- * Name: arm64_gic_irq_set_priority
- *
- * Description:
- *   Set the interrupt priority and type.
- *
- *   If CONFIG_SMP is not selected, the cpuset is ignored and SGI is sent
- *   only to the current CPU.
- *
- * Input Parameters
- *   intid  - The SGI interrupt ID (0-15)
- *   prio   - The interrupt priority
- *   flags  - Bit IRQ_TYPE_EDGE is 1 if interrupt should be edge-triggered
- *
- * Returned Value:
- *   None
- *
- ****************************************************************************/
-
-void arm64_gic_irq_set_priority(unsigned int intid, unsigned int prio,
-                                uint32_t flags)
-{
-  int ret;
-
-  /* Disable the interrupt */
-
-  up_disable_irq(intid);
-
-  /* Set the interrupt priority */
-
-  ret = up_prioritize_irq(intid, prio);
-  DEBUGASSERT(ret == OK);
-
-  /* Configure interrupt type */
-
-  if (!GIC_IS_SGI(intid))
-    {
-      if (flags & IRQ_TYPE_EDGE)
-        {
-          ret = arm64_gicv_irq_trigger(intid, true);
-          DEBUGASSERT(ret == OK);
-        }
-      else
-        {
-          ret = arm64_gicv_irq_trigger(intid, false);
-          DEBUGASSERT(ret == OK);
-        }
-    }
 }
 
 /****************************************************************************
@@ -1478,23 +1346,58 @@ void arm64_gic_secondary_init(void)
 }
 
 /****************************************************************************
- * Name: arm64_gic_raise_sgi
+ * Name: up_trigger_irq
  *
  * Description:
- *   Raise software generated interrupt to the target
+ *   Perform a Software Generated Interrupt (SGI).  If CONFIG_SMP is
+ *   selected, then the SGI is sent to all CPUs specified in the CPU set.
+ *   That set may include the current CPU.
  *
- * Input Parameters
- *   sgi    - The SGI interrupt ID (0-15)
+ *   If CONFIG_SMP is not selected, the cpuset is ignored and SGI is sent
+ *   only to the current CPU.
+ *
+ * Input Parameters:
+ *   irq    - The SGI interrupt ID (0-15)
  *   cpuset - The set of CPUs to receive the SGI
  *
  * Returned Value:
- *   None
+ *   OK is always returned at present.
  *
  ****************************************************************************/
 
-void arm64_gic_raise_sgi(unsigned int sgi, uint16_t cpuset)
+void up_trigger_irq(int irq, uint16_t cpuset)
 {
-  arm_cpu_sgi(sgi, cpuset);
+  uint32_t regval;
+
+  if (irq >= 0 && irq <= GIC_IRQ_SGI15)
+    {
+#ifdef CONFIG_SMP
+      regval = GIC_ICDSGIR_INTID(irq) | GIC_ICDSGIR_CPUTARGET(cpuset) |
+               GIC_ICDSGIR_TGTFILTER_LIST;
+#else
+      regval = GIC_ICDSGIR_INTID(irq) | GIC_ICDSGIR_CPUTARGET(0) |
+               GIC_ICDSGIR_TGTFILTER_THIS;
+#endif
+
+#if defined(CONFIG_ARCH_TRUSTZONE_SECURE)
+      if (irq >= GIC_IRQ_SGI0 && irq <= GIC_IRQ_SGI7)
+#endif
+        {
+          /* Set NSATT be 1: forward the SGI specified in the SGIINTID field
+           * to a specified CPU interfaces only if the SGI is configured as
+           * Group 1 on that interface.
+           * For non-secure context, the configuration of
+           * GIC_ICDSGIR_NSATT_GRP1 is not mandatory in the GICv2
+           * specification, but for SMP scenarios,
+           * this value needs to be configured, otherwise issues may occur
+           * in the SMP scenario.
+           */
+
+          regval |= GIC_ICDSGIR_NSATT_GRP1;
+        }
+
+      putreg32(regval, GIC_ICDSGIR);
+    }
 }
 
 #endif /* CONFIG_SMP */

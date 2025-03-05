@@ -363,7 +363,7 @@ static int ipv6_dev_forward(FAR struct net_driver_s *dev,
 
   /* If the interface isn't "up", we can't forward. */
 
-  if ((fwddev->d_flags & IFF_UP) == 0)
+  if (IFF_IS_RUNNING(fwddev->d_flags) == 0)
     {
       nwarn("WARNING: device is DOWN\n");
       ret = -EHOSTUNREACH;
@@ -510,9 +510,10 @@ static int ipv6_forward_callback(FAR struct net_driver_s *fwddev,
 
   DEBUGASSERT(fwddev != NULL);
 
-  /* Only IFF_UP device and non-loopback device need forward packet */
+  /* Only IFF_RUNNING device and non-loopback device need forward packet */
 
-  if (!IFF_IS_UP(fwddev->d_flags) || fwddev->d_lltype == NET_LL_LOOPBACK)
+  if (!IFF_IS_RUNNING(fwddev->d_flags) ||
+      fwddev->d_lltype == NET_LL_LOOPBACK)
     {
       return OK;
     }

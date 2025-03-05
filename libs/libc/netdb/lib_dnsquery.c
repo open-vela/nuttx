@@ -991,11 +991,6 @@ try_stream:
         }
       else if (query->result != -EAGAIN)
         {
-          if (query->result == -EINTR)
-            {
-              nerr("ERROR: dns query cancel");
-              return 1;
-            }
           break;
         }
     }

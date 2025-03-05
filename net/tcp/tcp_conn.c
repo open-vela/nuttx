@@ -142,7 +142,8 @@ static FAR struct tcp_conn_s *
           if (domain == PF_INET)
 #endif /* CONFIG_NET_IPv6 */
             {
-              if (net_ipv4addr_cmp(conn->u.ipv4.laddr, ipaddr->ipv4) ||
+              if (net_ipv4addr_cmp(ipaddr->ipv4, INADDR_ANY) ||
+                  net_ipv4addr_cmp(conn->u.ipv4.laddr, ipaddr->ipv4) ||
                   net_ipv4addr_cmp(conn->u.ipv4.laddr, INADDR_ANY))
                 {
                   /* The port number is in use, return the connection */
@@ -157,7 +158,8 @@ static FAR struct tcp_conn_s *
           else
 #endif /* CONFIG_NET_IPv4 */
             {
-              if (net_ipv6addr_cmp(conn->u.ipv6.laddr, ipaddr->ipv6) ||
+              if (net_ipv6addr_cmp(ipaddr->ipv6, g_ipv6_unspecaddr) ||
+                  net_ipv6addr_cmp(conn->u.ipv6.laddr, ipaddr->ipv6) ||
                   net_ipv6addr_cmp(conn->u.ipv6.laddr, g_ipv6_unspecaddr))
                 {
                   /* The port number is in use, return the connection */
@@ -1125,7 +1127,7 @@ FAR struct tcp_conn_s *tcp_alloc_accept(FAR struct net_driver_s *dev,
       conn->expired          = 0;
       conn->isn              = 0;
       conn->sent             = 0;
-      conn->sndseq_max       = 0;
+      conn->sndseq_max       = tcp_getsequence(conn->sndseq);
 #endif
 
 #ifdef CONFIG_NET_TCP_CC_NEWRENO
@@ -1429,16 +1431,17 @@ int tcp_connect(FAR struct tcp_conn_s *conn, FAR const struct sockaddr *addr)
   conn->sa         = 0;
   conn->sv         = 16;   /* Initial value of the RTT variance. */
   conn->lport      = (uint16_t)port;
-#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
-  conn->expired    = 0;
-  conn->isn        = 0;
-  conn->sent       = 0;
-  conn->sndseq_max = 0;
-#endif
 
   /* Set initial sndseq when we have both local/remote addr and port */
 
   tcp_initsequence(conn);
+
+#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
+  conn->expired    = 0;
+  conn->isn        = 0;
+  conn->sent       = 0;
+  conn->sndseq_max = tcp_getsequence(conn->sndseq);
+#endif
 
   /* Save initial sndseq to rexmit_seq, otherwise it will be zero */
 
@@ -1471,6 +1474,24 @@ int tcp_connect(FAR struct tcp_conn_s *conn, FAR const struct sockaddr *addr)
 errout_with_lock:
   net_unlock();
   return ret;
+}
+
+/****************************************************************************
+ * Name: tcp_removeconn
+ *
+ * Description:
+ *   remove the connection from the list of active TCP connections
+ *
+ * Assumptions:
+ *   This function is called from network logic with the network locked.
+ *
+ ****************************************************************************/
+
+void tcp_removeconn(FAR struct tcp_conn_s *conn)
+{
+  net_lock();
+  dq_rem(&conn->sconn.node, &g_active_tcp_connections);
+  net_unlock();
 }
 
 #endif /* CONFIG_NET && CONFIG_NET_TCP */

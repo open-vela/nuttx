@@ -37,6 +37,7 @@
 
 #include <arpa/inet.h>
 
+#include <nuttx/arch.h>
 #include <nuttx/wdog.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
@@ -2579,7 +2580,7 @@ int imx_netinitialize(int intf)
 
   /* Configure as a (high) level interrupt */
 
-  arm_gic_irq_trigger(IMX_IRQ_ENET0, false);
+  up_set_irq_type(IMX_IRQ_ENET0, IRQ_HIG_HLEVEL);
 
 #ifdef CONFIG_NET_ETHERNET
   /* Determine a semi-unique MAC address from MCU UID

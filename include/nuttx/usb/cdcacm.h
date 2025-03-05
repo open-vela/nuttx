@@ -87,8 +87,6 @@
  *   The product ID code/string. Default 0xa4a7 and "CDC/ACM Serial"
  *   0xa4a7 was selected for compatibility with the Linux CDC ACM
  *   default PID.
- * CONFIG_CDCACM_RXBUFSIZE and CONFIG_CDCACM_TXBUFSIZE
- *   Size of the serial receive/transmit buffers. Default 256.
  */
 
 /* Information needed in usbdev_devinfo_s */
@@ -204,16 +202,6 @@
 
 #ifndef CONFIG_CDCACM_NRDREQS
 #  define CONFIG_CDCACM_NRDREQS 4
-#endif
-
-/* TX/RX buffer sizes */
-
-#ifndef CONFIG_CDCACM_RXBUFSIZE
-#  define CONFIG_CDCACM_RXBUFSIZE 256
-#endif
-
-#ifndef CONFIG_CDCACM_TXBUFSIZE
-#  define CONFIG_CDCACM_TXBUFSIZE 256
 #endif
 
 /* Vendor and product IDs and strings.  The default is the Linux Netchip
@@ -421,6 +409,27 @@ void cdcacm_uninitialize(FAR struct usbdevclass_driver_s *classdev);
 #if defined(CONFIG_USBDEV_COMPOSITE) && defined(CONFIG_CDCACM_COMPOSITE)
 struct composite_devdesc_s;
 void cdcacm_get_composite_devdesc(struct composite_devdesc_s *dev);
+#endif
+
+/****************************************************************************
+ * Name: cdcacm_write
+ *
+ * Description:
+ *   This provides a cdcacm write method for syslog devices that support
+ *   multiple byte writes.
+ *
+ * Input Parameters:
+ *   buffer - The buffer containing the data to be output
+ *   buflen - The number of bytes in the buffer
+ *
+ * Returned Value:
+ *   On success, the number of characters written is returned.  A negated
+ *   errno value is returned on any failure.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SYSLOG_CDCACM
+ssize_t cdcacm_write(FAR const char *buffer, size_t buflen);
 #endif
 
 #undef EXTERN

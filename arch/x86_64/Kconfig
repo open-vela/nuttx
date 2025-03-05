@@ -128,7 +128,7 @@ config ARCH_MULTIBOOT1
 	bool "Enable ELF32/Multiboot1"
 	default n
 	---help---
-		This enables generating `nuttx32` and allows x86 QEMU
+		This enables generating `nuttx.mb1` and allows x86 QEMU
 		`-kernel` boot in multiboot1 protocol.
 
 config ARCH_MULTIBOOT2

@@ -238,6 +238,14 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
         }
     }
 
+  if (conn->dev &&
+      !(netdev_verify(conn->dev) && IFF_IS_UP(conn->dev->d_flags)))
+    {
+      _SO_CONN_SETERRNO(conn, ENETDOWN);
+      eventset |= POLLERR | POLLHUP;
+      goto notify;
+    }
+
   /* Allocate a TCP/IP callback structure */
 
   cb = tcp_callback_alloc(conn);
@@ -356,6 +364,7 @@ int tcp_pollsetup(FAR struct socket *psock, FAR struct pollfd *fds)
 
   /* Check if any requested events are already in effect */
 
+notify:
   poll_notify(&fds, 1, eventset);
 
 errout_with_lock:

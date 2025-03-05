@@ -257,6 +257,10 @@ static const struct e1000_type_s g_e1000_82574l =
 static const struct pci_device_id_s g_e1000_id_table[] =
 {
   {
+    PCI_DEVICE(0x8086, 0x1a1c),
+    .driver_data = (uintptr_t)&g_e1000_i219
+  },
+  {
     PCI_DEVICE(0x8086, 0x1a1e),
     .driver_data = (uintptr_t)&g_e1000_i219
   },
@@ -496,6 +500,11 @@ static int e1000_transmit(FAR struct netdev_lowerhalf_s *dev,
     {
       nerr("net transmit buffer too large\n");
       return -EINVAL;
+    }
+
+  if (!IFF_IS_RUNNING(dev->netdev.d_flags))
+    {
+      return -ENETDOWN;
     }
 
   /* Store TX packet reference */

@@ -234,21 +234,21 @@ static int uart_putxmitchar(FAR uart_dev_t *dev, int ch, bool oktoblock)
   int nexthead;
   int ret;
 
-  /* Increment to see what the next head pointer will be.
-   * We need to use the "next" head pointer to determine when the circular
-   *  buffer would overrun
-   */
-
-  nexthead = dev->xmit.head + 1;
-  if (nexthead >= dev->xmit.size)
-    {
-      nexthead = 0;
-    }
-
   /* Loop until we are able to add the character to the TX buffer. */
 
   for (; ; )
     {
+      /* Increment to see what the next head pointer will be.
+       * We need to use the "next" head pointer to determine when the
+       * circular buffer would overrun
+       */
+
+      nexthead = dev->xmit.head + 1;
+      if (nexthead >= dev->xmit.size)
+        {
+          nexthead = 0;
+        }
+
       /* Check if the TX buffer is full */
 
       if (nexthead != dev->xmit.tail)
@@ -651,7 +651,7 @@ static int uart_open(FAR struct file *filep)
 {
   FAR struct inode *inode = filep->f_inode;
   FAR uart_dev_t   *dev   = inode->i_private;
-  uint8_t           tmp;
+  uint16_t          tmp;
   int               ret;
 
   /* If the port is the middle of closing, wait until the close is finished.
@@ -686,7 +686,7 @@ static int uart_open(FAR struct file *filep)
   tmp = dev->open_count + 1;
   if (tmp == 0)
     {
-      /* More than 255 opens; uint8_t overflows to zero */
+      /* More than 65535 opens; uint16_t overflows to zero */
 
       ret = -EMFILE;
       goto errout_with_lock;

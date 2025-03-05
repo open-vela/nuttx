@@ -94,17 +94,14 @@ static struct syslog_intbuffer_s g_syslog_intbuffer =
  *
  ****************************************************************************/
 
-void syslog_flush_internal(bool force, size_t buflen)
+static void syslog_flush_internal(bool force, size_t buflen)
 {
-  irqstate_t flags;
   char *buffer;
   size_t size;
 
   /* This logic is performed with the scheduler disabled to protect from
    * concurrent modification by other tasks.
    */
-
-  flags = spin_lock_irqsave_wo_note(&g_syslog_intbuffer.splock);
 
   do
     {
@@ -118,8 +115,6 @@ void syslog_flush_internal(bool force, size_t buflen)
         }
     }
   while (size > 0 && buflen > 0);
-
-  spin_unlock_irqrestore_wo_note(&g_syslog_intbuffer.splock, flags);
 }
 
 /****************************************************************************
@@ -170,7 +165,7 @@ void syslog_add_intbuffer(FAR const char *buffer, size_t buflen)
     }
   else
     {
-      syslog_flush_intbuffer(true);
+      syslog_flush_internal(true, sizeof(g_syslog_intbuffer.buffer));
       space = buflen - sizeof(g_syslog_intbuffer.buffer);
       syslog_write_foreach(buffer, space, true);
       circbuf_write(&g_syslog_intbuffer.circ,
@@ -201,7 +196,11 @@ void syslog_add_intbuffer(FAR const char *buffer, size_t buflen)
 
 void syslog_flush_intbuffer(bool force)
 {
+  irqstate_t flags;
+
+  flags = spin_lock_irqsave_wo_note(&g_syslog_intbuffer.splock);
   syslog_flush_internal(force, sizeof(g_syslog_intbuffer.buffer));
+  spin_unlock_irqrestore_wo_note(&g_syslog_intbuffer.splock, flags);
 }
 
 #endif /* CONFIG_SYSLOG_INTBUFFER */
