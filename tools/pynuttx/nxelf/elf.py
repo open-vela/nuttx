@@ -19,7 +19,13 @@
 #
 ############################################################################
 
+
+import hashlib
+import importlib
 import logging
+import os
+import pickle
+import sys
 import time
 from enum import IntEnum
 from typing import Tuple
@@ -55,8 +61,7 @@ except ModuleNotFoundError as e:
     print(f"Error:{e}.\nPlease execute the following command to install dependencies:")
     print("pip install construct pyelftools cxxfilt lief ")
 
-logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 class TypeConflictError(Exception):
@@ -494,3 +499,130 @@ class LiefELF:
 
     def get_pointer_size(self):
         return 8 if self.elf.abstract.header.is_64 else 4
+
+
+class AngrElf:
+    def __init__(self, elf: str):
+        try:
+            self.angr = importlib.import_module("angr")
+            self.capstone = importlib.import_module("capstone")
+        except Exception as e:
+            print(
+                f"Error:{e}.\nPlease execute the following command to install dependencies:"
+            )
+            print("pip install angr capstone")
+            sys.exit(1)
+
+        with open(elf, "rb") as f:
+            hash = hashlib.md5(f.read()).hexdigest()
+
+        project_cache_path = f"{hash}.project"
+        cfg_cache_path = f"{hash}.cfg"
+
+        self.project = self.load_save_cache(
+            project_cache_path, lambda: self.angr.Project(elf, auto_load_libs=False)
+        )
+        self.cfg = self.load_save_cache(
+            cfg_cache_path, lambda: self.project.analyses.CFGFast()
+        )
+
+        for func in self.cfg.kb.functions.values():
+            func._project = self.project
+
+    def load_save_cache(self, file_path, func):
+        cache_path = f"{file_path}.pkl"
+        if os.path.exists(cache_path):
+            with open(cache_path, "rb") as f:
+                print(f"load cache {cache_path}")
+                return pickle.load(f)
+        else:
+            print(f"not found cache {cache_path}")
+            obj = func()
+            with open(cache_path, "wb") as f:
+                print(f"create cache {cache_path}")
+                pickle.dump(obj, f)
+            return obj
+
+    def sym2addr(self, sym: str):
+        sym = self.cfg.kb.functions.floor_func(sym)
+        if sym:
+            return sym.addr
+        else:
+            return None
+
+    def addr2sym(self, addr: int):
+        sym = self.cfg.kb.functions.floor_func(addr)
+        if sym:
+            return sym.name
+        else:
+            return f"0x{addr:08x}"
+
+    def addr2func(self, addr: int):
+        addr = addr
+        sym = self.cfg.kb.functions.floor_func(addr)
+        if sym:
+            return self.cfg.kb.functions[sym.addr]
+        else:
+            return None
+
+    def sym2func(self, sym: str):
+        addr = self.sym2addr(sym)
+        if addr:
+            return self.cfg.kb.functions[addr]
+        else:
+            return None
+
+    def addr2block(self, addr: int):
+        addr = addr
+        sym = self.cfg.kb.functions.floor_func(addr)
+        if sym:
+            func = self.cfg.kb.functions[sym.addr]
+            for block in func._addr_to_block_node.values():
+                if addr >= block.addr and addr < block.addr + block.size:
+                    return block
+        else:
+            return None
+
+    def print_block(self, block):
+        print(f"basic block: {hex(block.addr)}, size: {block.size}")
+        for insn in block.capstone.insns:
+            print(f"    {hex(insn.address)}: {insn.mnemonic} {insn.op_str}")
+            if insn.group(self.capstone.CS_GRP_CALL):
+                print(f" call {hex(insn.operands[0].imm)}")
+            elif insn.group(self.capstone.CS_GRP_RET):
+                print(f" return {hex(insn.operands[0].imm)}")
+            elif insn.group(self.capstone.CS_GRP_INT):
+                print(f" interrupt {hex(insn.operands[0].imm)}")
+            elif insn.group(self.capstone.CS_GRP_BRANCH_RELATIVE):
+                target_addr = insn.operands[0].imm
+                target_function = self.cfg.kb.functions.floor_func(target_addr)
+                print(
+                    f" conditional jump {hex(target_addr)} (target function: {target_function.name})"
+                )
+            elif insn.group(self.capstone.CS_GRP_JUMP):
+                sub_function = self.cfg.kb.functions.floor_func(insn.operands[0].imm)
+                print(
+                    f" unconditional jump {hex(insn.operands[0].imm)} (target function: {sub_function.name})"
+                )
+        sys.stdout.flush()
+
+    def print_function(self, function):
+        print(f"function: {function.name} {function.addr} {function.size}")
+        for block in function.blocks:
+            self.print_block(block)
+
+    def get_block_next_address(self, block):
+        for insn in block.capstone.insns:
+            if insn.group(self.capstone.CS_GRP_BRANCH_RELATIVE):
+                try:
+                    addr = insn.operands[0].imm
+                    func = self.addr2func(addr)
+                    if func:
+                        next_block = func.get_block(addr)
+                        return next_block.addr
+                except Exception as e:
+                    log.error(
+                        f"get_block_next_address failed: addr: {block.addr:#08x} {e}"
+                    )
+                    return None
+        return None

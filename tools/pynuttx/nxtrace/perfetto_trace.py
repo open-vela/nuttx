@@ -28,6 +28,7 @@ except ImportError:
     print("pip install protobuf==4.25.3")
     exit(1)
 
+from . import PerfettoTraceBadArgsError
 from . import perfetto_trace_pb2 as pb2
 
 logger = logging.getLogger(__name__)
@@ -113,12 +114,52 @@ class TraceInstanceFactory:
 
 
 class PerfettoTrace:
+    DEFAULT_TRUSTED_PACKET_SEQUENCE_ID = 0
+
+    SLICE_BEGIN = pb2.TrackEvent.Type.TYPE_SLICE_BEGIN
+    SLICE_END = pb2.TrackEvent.Type.TYPE_SLICE_END
+    INSTANT = pb2.TrackEvent.Type.TYPE_INSTANT
+    COUNTER = pb2.TrackEvent.Type.TYPE_COUNTER
+
     def __init__(self, filename: str):
         """Create a trace"""
         self.flush_threshold = 10000
 
         self.trace = pb2.Trace()
         self.file = open(filename, "wb")
+
+        self.current_uuid = 0
+
+    def fill_debug_annotation_value(self, debug_annotation, value):
+        if isinstance(value, dict):
+            for key in value:
+                dict_entry = pb2.DebugAnnotation()
+                dict_entry.name = key
+                self.fill_debug_annotation_value(dict_entry, value[key])
+                debug_annotation.dict_entries.append(dict_entry)
+        elif isinstance(value, list):
+            for item in value:
+                array_value = pb2.DebugAnnotation()
+                self.fill_debug_annotation_value(array_value, item)
+                debug_annotation.array_values.append(array_value)
+        elif isinstance(value, bool):
+            debug_annotation.bool_value = value
+        elif isinstance(value, int):
+            debug_annotation.int_value = value
+        elif isinstance(value, float):
+            debug_annotation.double_value = value
+        elif isinstance(value, str):
+            debug_annotation.string_value = value
+        elif value is None:
+            debug_annotation.string_value = "None"
+        else:
+            raise PerfettoTraceBadArgsError(
+                f"cannot convert value {value} of type {type(value)} to DebugAnnotation value"
+            )
+
+    def next_uuid(self):
+        self.current_uuid += 1
+        return self.current_uuid
 
     def init(self):
         # Initialize clock snapshots
@@ -294,3 +335,55 @@ class PerfettoTrace:
 
     def atrace_int(self, head: TraceHead, msg, value):
         return self.print(head, f"C|{head.pid}|{msg}|{value}")
+
+    def add_process(self, uuid, pid, name):
+        self.trace.packet.append(
+            pb2.TracePacket(
+                track_descriptor=pb2.TrackDescriptor(
+                    uuid=uuid, process=pb2.ProcessDescriptor(pid=pid, process_name=name)
+                ),
+                trusted_packet_sequence_id=self.DEFAULT_TRUSTED_PACKET_SEQUENCE_ID,
+            )
+        )
+
+    def add_thread(self, uuid, parent_uuid, tid, pid, name):
+        self.trace.packet.append(
+            pb2.TracePacket(
+                track_descriptor=pb2.TrackDescriptor(
+                    uuid=uuid,
+                    parent_uuid=parent_uuid,
+                    thread=pb2.ThreadDescriptor(pid=pid, tid=tid, thread_name=name),
+                ),
+                trusted_packet_sequence_id=self.DEFAULT_TRUSTED_PACKET_SEQUENCE_ID,
+            )
+        )
+
+    def trace_event(self, uuid, ts, type, name=None, flow_ids=[], args={}):
+        pkt = self.trace.packet.add()
+        pkt.timestamp = ts
+        pkt.track_event.type = type
+        pkt.track_event.track_uuid = uuid
+        pkt.trusted_packet_sequence_id = self.DEFAULT_TRUSTED_PACKET_SEQUENCE_ID
+
+        if args:
+            if not isinstance(args, dict):
+                raise PerfettoTraceBadArgsError("slice args is not dict")
+            annotations = []
+
+            for key in args:
+                debug_annotation = pb2.DebugAnnotation()
+                debug_annotation.name = key
+                self.fill_debug_annotation_value(debug_annotation, args[key])
+
+                annotations.append(debug_annotation)
+
+            pkt.track_event.debug_annotations.extend(annotations)
+
+        if name:
+            pkt.track_event.name = name
+        if flow_ids:
+            pkt.track_event.flow_ids = flow_ids
+
+    def trace_slice(self, uuid, start, end, name, flow_ids=[], args={}):
+        self.trace_event(uuid, start, self.SLICE_BEGIN, name, flow_ids, args)
+        self.trace_event(uuid, end, self.SLICE_END)

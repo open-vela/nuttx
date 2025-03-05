@@ -1,3 +1,5 @@
+angr
+capstone
 construct
 debugpy
 lief
