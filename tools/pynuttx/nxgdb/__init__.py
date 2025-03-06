@@ -71,7 +71,6 @@ def register_commands(event):
     # Register prefix commands firstly
     init_gdb_commands("prefix")
     modules.remove("prefix")
-    modules.remove("__init__")
 
     # Register all other modules
     for m in modules:

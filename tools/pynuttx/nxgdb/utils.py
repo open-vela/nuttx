@@ -27,11 +27,11 @@ import hashlib
 import importlib
 import json
 import math
-import os
 import re
 import shlex
 import sys
 from enum import Enum
+from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import gdb
@@ -960,12 +960,18 @@ def get_task_argvstr(tcb: Tcb) -> List[str]:
 
 
 def gather_modules(dir=None) -> List[str]:
-    dir = os.path.normpath(dir) if dir else os.path.dirname(__file__)
-    return [
-        os.path.splitext(os.path.basename(f))[0]
-        for f in os.listdir(dir)
-        if f.endswith(".py")
-    ]
+    dir = Path(dir).resolve() if dir else Path(__file__).parent
+    modules = []
+
+    for f in dir.rglob("*.py"):
+        if f.name == "__init__.py":
+            continue
+
+        relative_path = f.relative_to(dir).with_suffix("")
+        module_name = ".".join(relative_path.parts)
+        modules.append(module_name)
+
+    return modules
 
 
 def gather_gdbcommands(modules=None, path=None) -> List[gdb.Command]:

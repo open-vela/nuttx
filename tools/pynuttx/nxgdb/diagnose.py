@@ -62,7 +62,6 @@ class DiagnoseReport(gdb.Command):
 
         modules = utils.gather_modules()
         modules.remove("prefix")
-        modules.remove("__init__")
 
         commands = utils.gather_gdbcommands(modules=modules)
 
