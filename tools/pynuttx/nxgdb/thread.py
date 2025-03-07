@@ -195,15 +195,9 @@ class Nxinfothreads(gdb.Command):
 
             pid = tcb["group"]["tg_pid"]
             tid = tcb["pid"]
-
-            if utils.task_is_running(tcb):
-                index = f"*{i}"
-                pc = utils.get_pc()
-            else:
-                index = f" {i}"
-                pc = utils.get_pc(tcb=tcb)
-
+            pc = utils.get_pc(tcb)
             thread = f"Thread {hex(tcb)}"
+            index = f"*{i}" if utils.task_is_running(tcb) else f" {i}"
 
             statename = statenames[tcb["task_state"]].string()
             statename = f'\x1b{"[32;1m" if statename == "Running" else "[33;1m"}{statename}\x1b[m'
@@ -469,7 +463,7 @@ class Ps(gdb.Command):
             int(tcb["stack_base_ptr"]),
             int(tcb["stack_alloc_ptr"]),
             int(tcb["adj_stack_size"]),
-            utils.get_sp(tcb if not utils.task_is_running(tcb) else None),
+            utils.get_sp(tcb),
             4,
         )
 

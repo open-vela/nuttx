@@ -774,12 +774,12 @@ def in_interrupt_context(cpuid=0):
 
 
 # task
-def get_register_byname(regname, tcb=None):
+def get_register_byname(regname, tcb):
     frame = gdb.selected_frame()
 
     # If no tcb is given then we can directly use the register from
     # the cached frame by GDB
-    if not tcb:
+    if task_is_running(tcb):
         return int(frame.read_register(regname))
 
     # Ok, let's take it from the context in the given tcb
@@ -796,29 +796,26 @@ def get_register_byname(regname, tcb=None):
             return int(value.dereference())
 
 
-def get_sp(tcb=None):
-    regname = "sp"
-    if tcb is not None:
-        # NuttX doesn't support unified register name for stack pointer
-        arch = gdb.selected_inferior().architecture().name()
-        regname = {
-            "i386": "esp",
-            "i386:x86": "esp",
-            "i386:x86-64": "rsp",
-        }.get(arch, "sp")
+def get_sp(tcb):
+    # NuttX doesn't support unified register name for stack pointer
+    arch = gdb.selected_inferior().architecture().name()
+    regname = {
+        "i386": "esp",
+        "i386:x86": "esp",
+        "i386:x86-64": "rsp",
+    }.get(arch, "sp")
+
     return get_register_byname(regname, tcb)
 
 
-def get_pc(tcb=None):
-    regname = "pc"
-    if tcb is not None:
-        # NuttX doesn't support unified register name for PC
-        arch = gdb.selected_inferior().architecture().name()
-        regname = {
-            "i386": "eip",
-            "i386:x86": "eip",
-            "i386:x86-64": "rip",
-        }.get(arch, "pc")
+def get_pc(tcb):
+    # NuttX doesn't support unified register name for PC
+    arch = gdb.selected_inferior().architecture().name()
+    regname = {
+        "i386": "eip",
+        "i386:x86": "eip",
+        "i386:x86-64": "rip",
+    }.get(arch, "pc")
     return get_register_byname(regname, tcb)
 
 

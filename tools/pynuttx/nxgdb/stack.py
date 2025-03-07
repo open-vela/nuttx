@@ -146,10 +146,7 @@ def fetch_stacks():
     for tcb in utils.get_tcbs():
         # We have no way to detect if we are in an interrupt context for now.
         # Originally we use `and not utils.in_interrupt_context()`
-        if tcb["task_state"] == gdb.parse_and_eval("TSTATE_TASK_RUNNING"):
-            sp = utils.get_sp()
-        else:
-            sp = utils.get_sp(tcb=tcb)
+        sp = utils.get_sp(tcb)
 
         try:
             stacks[int(tcb["pid"])] = Stack(
