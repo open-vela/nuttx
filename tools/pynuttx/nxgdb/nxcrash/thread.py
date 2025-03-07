@@ -60,6 +60,7 @@ class CrashThread(gdb.Command):
         return {
             "title": "Threads that seem crashed",
             "summary": f"{'No' if not tcbs else len(tcbs)} threads seem crashed",
+            "result": "fail" if tcbs else "pass",
             "command": "crash thread",
             "thread": [
                 {"pid": tcb["pid"], "name": utils.get_task_name(tcb)} for tcb in tcbs

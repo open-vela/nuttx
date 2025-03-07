@@ -76,6 +76,7 @@ class DeadLock(gdb.Command):
         return {
             "title": "Deadlock Report",
             "summary": f"{'No' if not collected else len(collected)} deadlocks",
+            "result": "fail" if collected else "pass",
             "command": "crash deadlock",
             "deadlocks": {int(pid): [i for i in h] for pid, h in collected},
         }
