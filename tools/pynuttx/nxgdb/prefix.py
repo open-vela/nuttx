@@ -42,3 +42,10 @@ class UVDumpPrefix(gdb.Command):
 
     def __init__(self):
         super().__init__("uv", gdb.COMMAND_USER, prefix=True)
+
+
+class CrashPrefix(gdb.Command):
+    """Crash Dump related commands prefix"""
+
+    def __init__(self):
+        super().__init__("crash", gdb.COMMAND_USER, prefix=True)
