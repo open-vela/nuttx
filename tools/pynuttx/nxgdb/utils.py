@@ -1248,6 +1248,14 @@ def get_backtrace(arg: Union[gdb.InferiorThread, int]) -> List[int]:
     return backtrace
 
 
+def get_frame_func_name(frame: gdb.Frame) -> str:
+    function = frame.function()
+    if function and function.is_valid():
+        return function.name
+
+    return ""
+
+
 def get_frame_variables(frame: gdb.Frame) -> dict:
     varibles = {}
     try:
