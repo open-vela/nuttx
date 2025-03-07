@@ -866,6 +866,10 @@ def get_task_name(tcb):
         return ""
 
 
+def sem_is_mutex(sem):
+    return sem & get_symbol_value("SEM_TYPE_MUTEX")
+
+
 def switch_inferior(inferior):
     state = suppress_cli_notifications(True)
 

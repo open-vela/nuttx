@@ -32,7 +32,6 @@ from . import utils
 from .stack import Stack
 
 UINT16_MAX = 0xFFFF
-SEM_TYPE_MUTEX = 4
 TSTATE_TASK_RUNNING = utils.get_symbol_value("TSTATE_TASK_RUNNING")
 CONFIG_SMP_NCPUS = utils.get_symbol_value("CONFIG_SMP_NCPUS") or 1
 
@@ -215,7 +214,7 @@ class Nxinfothreads(gdb.Command):
 
             if tcb["task_state"] == gdb.parse_and_eval("TSTATE_WAIT_SEM"):
                 mutex = tcb["waitobj"].cast(utils.lookup_type("sem_t").pointer())
-                if mutex["flags"] & SEM_TYPE_MUTEX:
+                if utils.sem_is_mutex(mutex["flags"]):
                     mutex = tcb["waitobj"].cast(utils.lookup_type("mutex_t").pointer())
                     statename = f"Waiting,Mutex:{mutex['holder']}"
 
@@ -446,7 +445,7 @@ class Ps(gdb.Command):
         waiter = (
             str(int(cast2ptr(tcb["waitobj"], "mutex_t")["holder"]))
             if tcb["waitobj"]
-            and cast2ptr(tcb["waitobj"], "sem_t")["flags"] & get_macro("SEM_TYPE_MUTEX")
+            and utils.sem_is_mutex(cast2ptr(tcb["waitobj"], "sem_t")["flags"])
             else ""
         )
         state_and_event = eval2str(TaskState, (tcb["task_state"])) + (
@@ -589,7 +588,7 @@ class DeadLock(gdb.Command):
             return False
 
         sem = tcb["waitobj"].cast(utils.lookup_type("sem_t").pointer())
-        if not sem["flags"] & SEM_TYPE_MUTEX:
+        if not utils.sem_is_mutex(sem["flags"]):
             return False
 
         # It's waiting on a mutex
