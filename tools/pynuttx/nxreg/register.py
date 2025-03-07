@@ -243,6 +243,43 @@ g_reg_table = {
             ("windowstart", 585, 312, 1),
         ],
     },
+    "tricore": {
+        "architecture": "tricore",  # Use tricore-gdb
+        "feature": "",
+        "registers": [
+            ("pcx", 34, 136),
+            ("pc", 36, 144),
+            ("d0", 0, 0),
+            ("d1", 1, 4),
+            ("d2", 2, 8),
+            ("d3", 3, 12),
+            ("d4", 4, 16),
+            ("d5", 5, 20),
+            ("d6", 6, 24),
+            ("d7", 7, 28),
+            ("a2", 18, 72),
+            ("a3", 19, 76),
+            ("a4", 20, 80),
+            ("a5", 21, 84),
+            ("a6", 22, 88),
+            ("a7", 23, 92),
+            ("psw", 35, 140),
+            ("sp", 26, 104),
+            ("a11", 27, 108),
+            ("d8", 8, 32),
+            ("d9", 9, 36),
+            ("d10", 10, 40),
+            ("d11", 11, 44),
+            ("a12", 28, 112),
+            ("a13", 29, 116),
+            ("a14", 30, 120),
+            ("a15", 31, 124),
+            ("d12", 12, 48),
+            ("d13", 13, 52),
+            ("d14", 14, 56),
+            ("d15", 15, 60),
+        ],
+    },
 }
 
 
@@ -328,7 +365,7 @@ class Register:
 
 
 class GeneralRegisters:
-    def __init__(self, elf, arch=None, readmem=None):
+    def __init__(self, elf: LiefELF, arch=None, readmem=None):
         """
         Registers class to store register information
 
@@ -452,5 +489,51 @@ class GeneralRegisters:
         return self._registers[key]
 
 
+class TricoreRegisters(GeneralRegisters):
+    def __init__(self, elf, arch=None, readmem=None):
+        super().__init__(elf, arch, readmem)
+
+    # tricore read csa
+    def load(self, addr: int):
+        lower_count = 16
+        upper_count = 16
+        lpcx = None
+        xcpregs = self.readmem(addr, lower_count * 4)  # read lower csa
+        xcp_table = [reg[0] for reg in g_reg_table["tricore"]["registers"]]
+
+        if not xcpregs:
+            raise ValueError("No valid source to load register values.\n")
+
+        for name in xcp_table[:lower_count]:
+            reg = self.get(name=name)
+            reg.value = xcpregs[reg.tcb_reg_off : reg.tcb_reg_off + reg.size]
+            if name == "pcx":
+                lpcx = reg.value
+
+        if not lpcx:
+            raise ValueError("Invalid lpcx register loaded.\n")
+
+        PCXI_UL = 1 << 20  # determine wheteher it is the upper csa flag
+        is_upper = (lpcx & PCXI_UL) != 0
+
+        def csa2addr(csa):
+            # #define tricore_csa2addr(csa) ((uintptr_t *)((((csa) & 0x000F0000) << 12) \
+            #                                  | (((csa) & 0x0000FFFF) << 6)))
+            return (csa & 0x000F0000) << 12 | (csa & 0x0000FFFF) << 6
+
+        if is_upper:
+            xcpregs = self.readmem(csa2addr(lpcx), upper_count * 4)
+            for name in xcp_table[lower_count:]:
+                reg = self.get(name=name)
+                if reg.tcb_reg_off + reg.size > len(xcpregs):
+                    raise ValueError("No valid source to load register values.\n")
+                reg.value = xcpregs[reg.tcb_reg_off : reg.tcb_reg_off + reg.size]
+
+        return self
+
+
 def Registers(elf, arch=None, readmem=None) -> GeneralRegisters:
-    return GeneralRegisters(elf, arch, readmem)
+    if arch == "tricore":
+        return TricoreRegisters(elf, arch, readmem)
+    else:
+        return GeneralRegisters(elf, arch, readmem)
