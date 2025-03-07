@@ -83,7 +83,7 @@ class DeadLock(gdb.Command):
     def invoke(self, args, from_tty):
         collected = self.collect(utils.get_tcbs())
         if not collected:
-            gdb.write("No deadlock detected.")
+            gdb.write("No deadlock detected.\n")
             return
 
         for pid, holders in collected:

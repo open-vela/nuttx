@@ -31,8 +31,6 @@ from nxreg.register import Registers, g_reg_table
 from . import utils
 from .stack import Stack
 
-UINT16_MAX = 0xFFFF
-TSTATE_TASK_RUNNING = utils.get_symbol_value("TSTATE_TASK_RUNNING")
 CONFIG_SMP_NCPUS = utils.get_symbol_value("CONFIG_SMP_NCPUS") or 1
 
 
@@ -80,7 +78,7 @@ class NxRegisters:
             gdb.write(f"Thread {pid} not found\n")
             return
 
-        if tcb["task_state"] == TSTATE_TASK_RUNNING:
+        if utils.task_is_running(tcb):
             # If the thread is running, then register is not in context but saved temporarily
             self.restore()
             return
@@ -200,7 +198,7 @@ class Nxinfothreads(gdb.Command):
             pid = tcb["group"]["tg_pid"]
             tid = tcb["pid"]
 
-            if tcb["task_state"] == gdb.parse_and_eval("TSTATE_TASK_RUNNING"):
+            if utils.task_is_running(tcb):
                 index = f"*{i}"
                 pc = utils.get_pc()
             else:
@@ -332,9 +330,7 @@ class Nxthread(gdb.Command):
                 and int(arg[0]) < npidhash
                 and pidhash[int(arg[0])] != 0
             ):
-                if pidhash[int(arg[0])]["task_state"] == gdb.parse_and_eval(
-                    "TSTATE_TASK_RUNNING"
-                ):
+                if utils.task_is_running(pidhash[int(arg[0])]):
                     g_registers.restore()
                 else:
                     gdb.execute("setregs g_pidhash[%s]->xcp.regs" % arg[0])
@@ -475,7 +471,7 @@ class Ps(gdb.Command):
             int(tcb["stack_base_ptr"]),
             int(tcb["stack_alloc_ptr"]),
             int(tcb["adj_stack_size"]),
-            utils.get_sp(tcb if tcb["task_state"] != TSTATE_TASK_RUNNING else None),
+            utils.get_sp(tcb if not utils.task_is_running(tcb) else None),
             4,
         )
 

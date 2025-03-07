@@ -48,7 +48,7 @@ class CrashThread(gdb.Command):
         collected = self.collect(utils.get_tcbs())
 
         if not collected:
-            gdb.write("No crashed threads found")
+            gdb.write("No crashed threads found.\n")
             return
 
         print(f"Found crashed threads\n{'PID':<4} {'Name':<10}")

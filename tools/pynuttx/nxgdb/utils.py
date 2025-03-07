@@ -766,6 +766,7 @@ def in_interrupt_context(cpuid=0):
         return not g_current_regs or not g_current_regs[cpuid]
 
 
+# task
 def get_register_byname(regname, tcb=None):
     frame = gdb.selected_frame()
 
@@ -869,6 +870,11 @@ def get_task_name(tcb):
         return ""
 
 
+def task_is_running(tcb):
+    return tcb["task_state"] == get_symbol_value("TSTATE_TASK_RUNNING")
+
+
+# sem
 def sem_is_mutex(sem):
     return sem & get_symbol_value("SEM_TYPE_MUTEX")
 
