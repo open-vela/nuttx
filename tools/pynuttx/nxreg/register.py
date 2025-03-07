@@ -119,8 +119,8 @@ g_reg_table = {
             ("x28", 28, REGINFO_OFFSET_AUTO),
             ("x29", 29, REGINFO_OFFSET_AUTO),
             ("x30", 30, REGINFO_OFFSET_AUTO),
-            ("sp_elx", 31, REGINFO_OFFSET_AUTO),  # SP
-            ("elr", 32, REGINFO_OFFSET_AUTO),  # PC
+            ("sp", 31, REGINFO_OFFSET_AUTO),  # SP
+            ("pc", 32, REGINFO_OFFSET_AUTO),  # PC
         ],
     },
     "riscv": {
@@ -159,7 +159,7 @@ g_reg_table = {
             ("t4", 29, REGINFO_OFFSET_AUTO),
             ("t5", 30, REGINFO_OFFSET_AUTO),
             ("t6", 31, REGINFO_OFFSET_AUTO),
-            ("epc", 33, REGINFO_OFFSET_AUTO),  # PC
+            ("pc", 33, REGINFO_OFFSET_AUTO),  # PC
         ],
     },
     "x86-64": {
