@@ -752,6 +752,13 @@ def is_target_smp():
         return False
 
 
+CONFIG_SMP_NCPUS = nitems(parse_and_eval("g_running_tasks"))
+
+
+def get_ncpus():
+    return CONFIG_SMP_NCPUS
+
+
 # FIXME: support RISC-V/X86/ARM64 etc.
 def in_interrupt_context(cpuid=0):
     frame = gdb.selected_frame()

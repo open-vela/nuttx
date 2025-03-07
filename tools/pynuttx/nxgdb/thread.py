@@ -31,13 +31,11 @@ from nxreg.register import Registers, g_reg_table
 from . import utils
 from .stack import Stack
 
-CONFIG_SMP_NCPUS = utils.get_symbol_value("CONFIG_SMP_NCPUS") or 1
-
 
 def is_thread_command_supported():
     # Check if the native thread command is available by compare the number of threads.
     # It should have at least CONFIG_SMP_NCPUS of idle threads.
-    return len(gdb.selected_inferior().threads()) > CONFIG_SMP_NCPUS
+    return len(gdb.selected_inferior().threads()) > utils.get_ncpus()
 
 
 class NxRegisters:
@@ -493,7 +491,7 @@ class Ps(gdb.Command):
             ptcb = cast2ptr(tcb, "struct pthread_tcb_s")
             arg = ptcb["arg"]
             cmd = " ".join((name, hex(entry), hex(arg)))
-        elif tcb["pid"] < get_macro("CONFIG_SMP_NCPUS"):
+        elif tcb["pid"] < utils.get_ncpus():
             # This must be the Idle Tasks, hence we just get its name
             cmd = name
         else:
