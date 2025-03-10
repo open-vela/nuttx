@@ -238,7 +238,10 @@ class RPMsgDump(gdb.Command):
         for rpmsg in NxList(gdb.parse_and_eval("g_rpmsg"), "struct rpmsg_s", "node"):
             rdev = utils.Value(int(rpmsg) + utils.sizeof("struct rpmsg_s"))
             rdev = rdev.cast(utils.lookup_type("struct rpmsg_device").pointer())
-            gdb.write(f"Rpmsg Device: rpmsg:{rpmsg} rdev:{rdev}\n")
+            gdb.write(
+                f"Rpmsg Device: rpmsg:{rpmsg} rdev:{rdev} "
+                f"localcpu:{rpmsg['local_cpuname']} remotecpu:{rpmsg['cpuname']}\n"
+            )
             if not transport_only:
                 self.dump_rdev(rdev)
             self.dump_rpmsg_virtio(rdev)
