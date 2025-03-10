@@ -33,13 +33,13 @@ class RPMsgDump(gdb.Command):
 
     CALLBACK_HEADER = ["rpmsg_cb_s at", "ns_match", "ns_bind"]
     ENDPOINT_HEADER = [
-        "endpoint_addr",
         "name",
         "addr",
-        "dest_addr",
+        "dest",
         "cb",
         "ns_bound_cb",
         "ns_unbind_cb",
+        "endpoint",
     ]
     VQ_HEADER = [
         "vq",
@@ -57,7 +57,7 @@ class RPMsgDump(gdb.Command):
     ]
 
     CALLBACK_FORAMTTER = "{:<20} {:<40} {:<40}"
-    ENDPOINT_FORMATTER = "{:<20} {:<20} {:<12} {:<12} {:<40} {:<40} {:<40}"
+    ENDPOINT_FORMATTER = "{:<24} {:<5} {:<11} {:<40} {:<40} {:<40} {:<20}"
     VQ_FORMATTER = (
         "{:<12} {:<8} {:<5} {:<5} {:<7} {:<14} {:<14} {:<10} {:<12} {:<14} {:<9} {:<11}"
     )
@@ -122,8 +122,9 @@ class RPMsgDump(gdb.Command):
 
         rvdev = rdev.cast(utils.lookup_type("struct rpmsg_virtio_device").pointer())
 
+        gdb.write("Rpmsg VirtIO Transport:\n")
         gdb.write(
-            f"Rpmsg Virtio Trasport: rvdev:{rvdev} h2r_buf_size:{rvdev['config']['h2r_buf_size']}"
+            f"rvdev:{rvdev} h2r_buf_size:{rvdev['config']['h2r_buf_size']}"
             f"r2h_buf_size:{rvdev['config']['r2h_buf_size']}\n"
         )
         for vbuff in NxList(rvdev["reclaimer"], "struct vbuff_reclaimer_t", "node"):
@@ -191,20 +192,21 @@ class RPMsgDump(gdb.Command):
         gdb.write(formatter.format(*["-" * len(header) for header in headers]) + "\n")
 
     def dump_rdev_epts(self, endpoints_head):
-        gdb.write(f"dump_rdev_epts:{endpoints_head}\n")
+        gdb.write("Rpmsg Device Endpoints:\n")
+        gdb.write(f"endpoints list:{endpoints_head}\n")
         self.print_headers(self.ENDPOINT_HEADER, self.ENDPOINT_FORMATTER)
 
         output = []
         for endpoint in NxList(endpoints_head, "struct rpmsg_endpoint", "node"):
             output.append(
                 self.ENDPOINT_FORMATTER.format(
-                    f"{endpoint}",
                     f"{endpoint['name'].string()}",
                     f"{endpoint['addr']}",
                     f"{endpoint['dest_addr']}",
                     f"{endpoint['cb']}",
                     f"{endpoint['ns_bound_cb']}",
                     f"{endpoint['ns_unbind_cb']}",
+                    f"{endpoint}",
                 )
             )
 
@@ -214,10 +216,12 @@ class RPMsgDump(gdb.Command):
         bitmap_values = [hex(bit) for bit in utils.ArrayIterator(rdev["bitmap"])]
 
         gdb.write(
-            f"bitmap:{' '.join(bitmap_values):<20} bitmaplast: {rdev['bitmap']}\n"
+            f"bitmap: {' '.join(bitmap_values):<20} bitnext: {hex(rdev['bitnext'])}\n"
         )
 
     def dump_rdev(self, rdev):
+        gdb.write("Rpmsg Device:\n")
+        gdb.write(f"rdev:{rdev}\n")
         self.dump_rdev_bitmap(rdev)
         self.dump_rdev_epts(rdev["endpoints"])
 
@@ -239,8 +243,8 @@ class RPMsgDump(gdb.Command):
             rdev = utils.Value(int(rpmsg) + utils.sizeof("struct rpmsg_s"))
             rdev = rdev.cast(utils.lookup_type("struct rpmsg_device").pointer())
             gdb.write(
-                f"Rpmsg Device: rpmsg:{rpmsg} rdev:{rdev} "
-                f"localcpu:{rpmsg['local_cpuname']} remotecpu:{rpmsg['cpuname']}\n"
+                f"Rpmsg:\n"
+                f"rpmsg:{rpmsg} localcpu:{rpmsg['local_cpuname']} remotecpu:{rpmsg['cpuname']}\n"
             )
             if not transport_only:
                 self.dump_rdev(rdev)
