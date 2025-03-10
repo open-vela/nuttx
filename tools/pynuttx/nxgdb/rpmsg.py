@@ -131,8 +131,11 @@ class RPMsgDump(gdb.Command):
 
         gdb.write("Rpmsg Virtqueues:\n")
         self.print_headers(self.VQ_HEADER, self.VQ_FORMATTER)
-        self.dump_virtqueue(rvdev["svq"])
-        self.dump_virtqueue(rvdev["rvq"])
+        try:
+            self.dump_virtqueue(rvdev["svq"])
+            self.dump_virtqueue(rvdev["rvq"])
+        except gdb.error as e:
+            gdb.write(f"Error when dump virtqueues: {e}\n")
 
         gdb.write("\n")
 
