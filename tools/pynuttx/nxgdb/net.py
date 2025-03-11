@@ -76,8 +76,8 @@ def socket_for_each_entry(proto):
         readahead = conn["readahead"]
     """
 
-    g_active_connections = gdb.parse_and_eval("g_active_%s_connections" % proto)
-    for node in NxDQueue(g_active_connections, "struct socket_conn_s", "node"):
+    active_connections = gdb.parse_and_eval("g_active_%s_connections" % proto)
+    for node in NxDQueue(active_connections, "struct socket_conn_s", "node"):
         # udp_conn_s::socket_conn_s sconn
         yield utils.container_of(
             node,

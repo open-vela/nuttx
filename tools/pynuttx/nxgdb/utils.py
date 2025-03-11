@@ -810,9 +810,9 @@ def get_tcbs() -> List[Tcb]:
 
 def get_tcb(pid) -> Tcb:
     """get tcb from pid"""
-    g_pidhash = parse_and_eval("g_pidhash")
-    g_npidhash = parse_and_eval("g_npidhash")
-    tcb = g_pidhash[pid & (g_npidhash - 1)]
+    pidhash = parse_and_eval("g_pidhash")
+    npidhash = parse_and_eval("g_npidhash")
+    tcb = pidhash[pid & (npidhash - 1)]
     if not tcb or pid != tcb["pid"]:
         return None
 

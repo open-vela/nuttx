@@ -32,9 +32,9 @@ def get_ncpus(elf: LiefELF) -> int:
     # FAR struct tcb_s *g_running_tasks[CONFIG_SMP_NCPUS];
     #
     # g_running_tasks is an pointer array in length of ncpu
-    g_running_tasks = elf.get_symbol("g_running_tasks")
+    running_tasks = elf.get_symbol("g_running_tasks")
 
-    return g_running_tasks.size // elf.get_pointer_size()
+    return running_tasks.size // elf.get_pointer_size()
 
 
 def get_regsize(elf: LiefELF) -> int:
@@ -63,9 +63,9 @@ def get_tcb_size(elf: LiefELF) -> int:
     # static struct tcb_s g_idletcb[CONFIG_SMP_NCPUS];
     # Idle TCB happen to be an array of tcb_s
 
-    g_idletcb = elf.get_symbol("g_idletcb")
+    idletcb = elf.get_symbol("g_idletcb")
     ncpus = get_ncpus(elf)
-    return g_idletcb.size // ncpus
+    return idletcb.size // ncpus
 
 
 def parse_array(data, type_, narray):

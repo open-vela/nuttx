@@ -128,18 +128,18 @@ class Target:
                 # Fallback to pure number. Don't bother to parse value of NUM_TASK_STATES, 256 is enough.
                 states = [str(i) for i in range(256)]
 
-            g_npidhash, sym = self._read_int("g_npidhash")
-            self.logger.debug(f"g_npidhash: {g_npidhash}@{sym.value:#x}")
-            if not g_npidhash:
-                self.logger.error(f"No threads info found: {g_npidhash}")
+            npidhash, sym = self._read_int("g_npidhash")
+            self.logger.debug(f"g_npidhash: {npidhash}@{sym.value:#x}")
+            if not npidhash:
+                self.logger.error(f"No threads info found: {npidhash}")
                 return self.threads
 
             ncpus = utils.get_ncpus(self.elf)
             regsize = utils.get_regsize(self.elf)
 
             data, sym = self._read_symbol("g_running_tasks")  # an array of pointers
-            g_running_tasks = utils.parse_array(data, pointer, ncpus)
-            self.logger.debug(f"g_running_tasks: {g_running_tasks}@{sym.value:#x}")
+            running_tasks = utils.parse_array(data, pointer, ncpus)
+            self.logger.debug(f"g_running_tasks: {running_tasks}@{sym.value:#x}")
 
             def parse_tcb(address: int) -> ThreadInfo:
                 registers = Registers(
@@ -160,12 +160,12 @@ class Target:
                 state = utils.uint8_t(data[tcbinfo.state_off : tcbinfo.state_off + 1])
                 state = states[state] if state < len(states) else "Unknown"
 
-                if address in g_running_tasks:
+                if address in running_tasks:
                     # Running task registers is not in memory, best chance is the registers
                     # stored in g_last_regs when assert happened.
-                    g_last_regs = self.elf.get_symbol("g_last_regs").value
-                    cpu = g_running_tasks.index(address)
-                    xcpregs = cpu * regsize + g_last_regs
+                    last_regs = self.elf.get_symbol("g_last_regs").value
+                    cpu = running_tasks.index(address)
+                    xcpregs = cpu * regsize + last_regs
                 else:
                     off = tcbinfo.regs_off
                     xcpregs = data[off : off + pointer.sizeof()]
@@ -180,12 +180,12 @@ class Target:
                 return ThreadInfo(name, pid, state, registers)
 
             data, sym = self._read_symbol("g_pidhash")
-            g_pidhash = pointer.parse(data)
-            data = self.memory_read(g_pidhash, pointer.sizeof() * g_npidhash)
-            g_pidhash = utils.parse_array(data, pointer, g_npidhash)
-            self.logger.debug(f"g_pidhash: {g_pidhash}@{sym.value:#x}")
+            pidhash = pointer.parse(data)
+            data = self.memory_read(pidhash, pointer.sizeof() * npidhash)
+            pidhash = utils.parse_array(data, pointer, npidhash)
+            self.logger.debug(f"g_pidhash: {pidhash}@{sym.value:#x}")
 
-            self.threads = [parse_tcb(tcb) for tcb in g_pidhash if tcb]
+            self.threads = [parse_tcb(tcb) for tcb in pidhash if tcb]
             self.logger.debug(f"Found {self.threads}")
         except Exception as e:
             self.logger.error(f"No threads info: {e}\n{traceback.format_exc()}")
