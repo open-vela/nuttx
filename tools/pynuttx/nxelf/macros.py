@@ -163,7 +163,12 @@ def fetch_macro_info(file):
         print(f"Cache macro info to {cache}")
     else:
         with open(cache, "r") as f2:
-            macros = json.load(f2)
+            try:
+                macros = json.load(f2)
+            except json.decoder.JSONDecodeError:
+                print(f"Warning: Failed to load {cache}, reprocessing...")
+                os.remove(cache)
+                return fetch_macro_info(file)
 
     return macros
 
