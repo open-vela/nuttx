@@ -61,9 +61,6 @@
  *            all memory accesses are complete
  */
 
-#define UP_DSB() __asm__ __volatile__ ("dsb sy" : : : "memory")
-#define UP_DMB() __asm__ __volatile__ ("dmb st" : : : "memory")
-
 #ifdef CONFIG_ARM_HAVE_WFE_SEV
 #define UP_WFE() __asm__ __volatile__ ("wfe" : : : "memory")
 #define UP_SEV() __asm__ __volatile__ ("sev" : : : "memory")
