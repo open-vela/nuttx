@@ -437,7 +437,7 @@ class Ps(gdb.Command):
             else ""
         )
         state_and_event = eval2str(TaskState, (tcb["task_state"])) + (
-            "@Mutex_Holder: " + waiter if waiter else ""
+            "@MutexHolder: " + waiter if waiter else ""
         )
         state_and_event = state_and_event.split("_")
 
