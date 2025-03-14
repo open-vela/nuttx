@@ -774,12 +774,12 @@ def in_interrupt_context(cpuid=0):
 
 
 # task
-def get_register_byname(regname, tcb):
+def get_register_byname(regname, tcb=None):
     frame = gdb.selected_frame()
 
     # If no tcb is given then we can directly use the register from
     # the cached frame by GDB
-    if task_is_running(tcb):
+    if not tcb or task_is_running(tcb):
         return int(frame.read_register(regname))
 
     # Ok, let's take it from the context in the given tcb
@@ -796,7 +796,7 @@ def get_register_byname(regname, tcb):
             return int(value.dereference())
 
 
-def get_sp(tcb):
+def get_sp(tcb=None):
     # NuttX doesn't support unified register name for stack pointer
     arch = gdb.selected_inferior().architecture().name()
     regname = {
@@ -808,7 +808,7 @@ def get_sp(tcb):
     return get_register_byname(regname, tcb)
 
 
-def get_pc(tcb):
+def get_pc(tcb=None):
     # NuttX doesn't support unified register name for PC
     arch = gdb.selected_inferior().architecture().name()
     regname = {
