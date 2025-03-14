@@ -878,6 +878,10 @@ def task_is_running(tcb):
     return tcb["task_state"] == get_symbol_value("TSTATE_TASK_RUNNING")
 
 
+def task_is_idle(tcb):
+    return tcb["pid"] < CONFIG_SMP_NCPUS
+
+
 # sem
 def sem_is_mutex(sem):
     return sem & get_symbol_value("SEM_TYPE_MUTEX")
