@@ -560,4 +560,9 @@ class Ps(gdb.Command):
         gdb.write("\n")
 
         for tcb in utils.get_tcbs():
-            self.parse_and_show_info(tcb)
+            try:
+                self.parse_and_show_info(tcb)
+            except gdb.error as e:
+                gdb.write(f"[Error] GDB error while processing TCB: {e}\n")
+            except Exception as e:
+                gdb.write(f"[Error] Unexpected error: {e}\n")
