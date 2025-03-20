@@ -226,6 +226,12 @@ class Backtrace:
     def __getitem__(self, index):
         return self.backtrace.__getitem__(index)
 
+    def toJSON(self):
+        return [
+            {"address": addr, "function": func, "source": source}
+            for addr, func, source in self.backtrace
+        ]
+
 
 def lookup_type(name, block=None) -> gdb.Type:
     """Return the type object of a type name"""

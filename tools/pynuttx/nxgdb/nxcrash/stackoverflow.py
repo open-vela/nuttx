@@ -73,7 +73,12 @@ class CrashStackOverflow(gdb.Command):
             "result": "fail" if collected else "pass",
             "command": "crash stackoverflow",
             "thread": [
-                {"pid": tcb["pid"], "name": utils.get_task_name(tcb), "filled": filled}
+                {
+                    "pid": tcb["pid"],
+                    "name": utils.get_task_name(tcb),
+                    "filled": filled,
+                    "backtrace": utils.Backtrace(utils.get_backtrace(int(tcb["pid"]))),
+                }
                 for tcb, filled in collected
             ],
         }

@@ -71,6 +71,7 @@ class CrashBusyloop(gdb.Command):
                     "pid": tcb["pid"],
                     "name": utils.get_task_name(tcb),
                     "cpuload": cpuload,
+                    "backtrace": utils.Backtrace(utils.get_backtrace(int(tcb["pid"]))),
                 }
                 for tcb, cpuload in collected
             ],

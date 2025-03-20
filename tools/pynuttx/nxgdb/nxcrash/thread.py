@@ -63,6 +63,11 @@ class CrashThread(gdb.Command):
             "result": "fail" if tcbs else "pass",
             "command": "crash thread",
             "thread": [
-                {"pid": tcb["pid"], "name": utils.get_task_name(tcb)} for tcb in tcbs
+                {
+                    "pid": tcb["pid"],
+                    "name": utils.get_task_name(tcb),
+                    "backtrace": utils.Backtrace(utils.get_backtrace(int(tcb["pid"]))),
+                }
+                for tcb in tcbs
             ],
         }
