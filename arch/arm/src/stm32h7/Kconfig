@@ -202,6 +202,16 @@ config ARCH_CHIP_STM32H747XI
 		Dual core STM32 H7 Cortex M7+M4, 2048 Kb FLASH, 1024K Kb SRAM
 		TFBGA240
 
+config ARCH_CHIP_STM32H750B
+	bool "STM32H750B"
+	select STM32H7_STM32H7X5XX
+	select STM32H7_FLASH_CONFIG_I
+	select STM32H7_IO_CONFIG_X
+	select STM32H7_HAVE_SMPS
+	---help---
+		STM32 H7 Cortex M7+M4, 1024 Kb FLASH, 1024K Kb SRAM,
+		LQFP208
+
 config ARCH_CHIP_STM32H753AI
 	bool "STM32H753AI"
 	select STM32H7_STM32H7X3XX
@@ -5608,6 +5618,15 @@ config STM32H7_LTDC_FB_SIZE
 	default 0
 	---help---
 		Must be the whole size of the active LTDC layer.
+
+config STM32H7_LTDC_FB_DOUBLE_BUFFER
+	bool "Enable double buffering"
+	default y
+	---help---
+		Enable double buffering to allow updates to the framebuffer while the display is being refreshed.
+		This configuration requires two framebuffers: one active and one inactive.
+		When the display refreshes, the active and inactive framebuffers are swapped,
+		enabling smooth and flicker-free updates.
 
 config STM32H7_LTDC_L1_CHROMAKEYEN
 	bool "Enable chromakey support for layer 1"
