@@ -26,7 +26,7 @@ import shutil
 
 import gdb
 
-from . import utils
+from . import mm, utils
 
 
 def create_file_with_size(filename, size):
@@ -100,22 +100,17 @@ class NXGcore(gdb.Command):
         else:
             corefile = elffile + ".core"
 
-        # Obtain memory range from macros or parameters
-
+        # Get memory range from parameter or elf
         if args.memrange:
             memregion = args.memrange
         else:
-            memregion = str(utils.get_symbol_value("CONFIG_BOARD_MEMORY_RANGE"))
-            if len(memregion) < 3:
-                print(
-                    "Please set CONFIG_BOARD_MEMORY_RANGE.\n"
-                    "Memory range of board. format: <start>,<end>,<flags>,....\n"
-                    "start: start address of memory range\n"
-                    "end: end address of memory range\n"
-                    "flags: Readable 0x1, writable 0x2, executable 0x4\n"
-                    "example:0x1000,0x2000,0x1,0x2000,0x3000,0x3,0x3000,0x4000,0x7"
-                )
+            memranges = mm.memory_range()
+            if not memranges:
+                gdb.write("ERROR: No loadable sections found.\n")
                 return
+
+            memregion = ",".join(f"{start:#x},{end:#x},0x7" for start, end in memranges)
+            gdb.write(f"Memory ranges: {memregion}\n")
 
         # Resolve memory range and shell run commands
 
