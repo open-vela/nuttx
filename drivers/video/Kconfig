@@ -25,6 +25,10 @@ config FB_SYNC
 	bool "Hardware signals vertical sync"
 	default n
 
+config FB_DOUBLE_BUFFER
+	bool "Use double buffer"
+	default n
+
 config FB_OVERLAY
 	bool "Framebuffer overlay support"
 	default n

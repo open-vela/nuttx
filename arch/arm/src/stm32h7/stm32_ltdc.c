@@ -206,7 +206,7 @@
 
 #define STM32_LTDC_LX_BYPP(n)       ((n) / 8)
 
-#define STM32_LTDC_L1_FBSIZE        (STM32_LTDC_L1_STRIDE * STM32_LTDC_HEIGHT)
+#define STM32_LTDC_L1_FBSIZE        (STM32_LTDC_L1_STRIDE * STM32_LTDC_HEIGHT * 2)
 
 #ifdef CONFIG_STM32H7_LTDC_L2
 #  ifndef CONFIG_STM32H7_LTDC_L2_WIDTH
@@ -740,6 +740,9 @@ static int stm32_putcmap(struct fb_vtable_s *vtable,
 static int stm32_waitforvsync(struct fb_vtable_s *vtable);
 #endif
 
+static int stm32_pandisplay(struct fb_vtable_s *vtable,
+                            struct fb_planeinfo_s *pinfo);
+
 /* The following is provided only if the video hardware supports overlays */
 
 #ifdef CONFIG_FB_OVERLAY
@@ -836,6 +839,11 @@ static struct stm32_ltdcdev_s g_vtable =
       .waitforvsync    = stm32_waitforvsync
 #endif
 
+#if defined(CONFIG_FB_PANDISPLAY) || defined(CONFIG_FB_DOUBLE_BUFFER)
+      ,
+      .pandisplay = stm32_pandisplay
+#endif
+
 #ifdef CONFIG_STM32H7_FB_CMAP
       ,
       .getcmap         = stm32_getcmap,
@@ -883,7 +891,15 @@ static struct stm32_ltdcdev_s g_vtable =
       .fblen           = STM32_LTDC_L1_FBSIZE,
       .stride          = STM32_LTDC_L1_STRIDE,
       .display         = 0,
-      .bpp             = STM32_LTDC_L1_BPP
+      .bpp             = STM32_LTDC_L1_BPP,
+      .xres_virtual    = STM32_LTDC_WIDTH,
+#if defined(CONFIG_FB_PANDISPLAY) || defined(CONFIG_FB_DOUBLE_BUFFER)
+      .yres_virtual    = STM32_LTDC_HEIGHT * 2,
+#else
+      .yres_virtual    = STM32_LTDC_HEIGHT,
+#endif
+      .xoffset = 0,
+      .yoffset = 0
     },
   .vinfo =
     {
@@ -1469,6 +1485,8 @@ static int stm32_ltdcirq(int irq, void *context, void *arg)
       reginfo("Register reloaded\n");
       putreg32(LTDC_ICR_CRRIF, STM32_LTDC_ICR);
       priv->error = OK;
+
+      fb_remove_paninfo(&g_vtable.vtable, FB_NO_OVERLAY);
     }
   else if (regval & LTDC_IER_LIE)
     {
@@ -2528,6 +2546,18 @@ static int stm32_waitforvsync(struct fb_vtable_s *vtable)
   return ret;
 }
 #endif /* CONFIG_FB_SYNC */
+
+static int stm32_pandisplay(struct fb_vtable_s *vtable,
+                            struct fb_planeinfo_s *pinfo)
+{
+  int ret = 0;
+
+  DEBUGASSERT(vtable != NULL && vtable == &g_vtable.vtable);
+
+  ret = stm32_ltdc_reload(LTDC_SRCR_VBR, true);
+
+  return ret;
+}
 
 /****************************************************************************
  * Name: stm32_getoverlayinfo
