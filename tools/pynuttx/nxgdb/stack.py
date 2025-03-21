@@ -174,13 +174,13 @@ class StackUsage(gdb.Command):
         self._stacks = []
         # format template
         self._fmt = (
-            "{0: <4} | {1: <10} | {2: <10} | {3: <20} | {4: <10} | {5: <10} | {6: <10}"
+            "{0: <4} | {1: <10} | {2: <10} | {3: <20} | {4: <10} | {5: <15} | {6: <15}"
         )
 
     def format_print(self, pid, stack):
         def gen_info_str(x):
             usage = x / stack._stack_size
-            res = ",".join([str(x), "{0:.2%}".format(usage)])
+            res = f"{str(x)} -> {usage:.2%}"
             if usage > 0.8:
                 res += "!"
             return res
