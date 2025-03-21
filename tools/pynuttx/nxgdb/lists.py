@@ -247,6 +247,25 @@ def sq_count(sq) -> int:
     return sq_check(sq, verbose=False)
 
 
+def sq_for_every(sq, entry=None):
+    """Iterate over a singly linked list"""
+    if sq.type == sq_queue_type.pointer():
+        sq = sq.dereference()
+    elif sq.type != sq_queue_type:
+        gdb.write("Must be struct sq_queue not {}".format(sq.type))
+        return
+
+    if sq["head"] == 0:
+        return
+
+    if not entry:
+        entry = sq["head"].dereference()
+
+    while entry.address:
+        yield entry
+        entry = entry["flink"].dereference()
+
+
 def dq_for_every(dq, entry=None):
     """Iterate over a doubly linked list"""
     if dq.type == dq_queue_type.pointer():
