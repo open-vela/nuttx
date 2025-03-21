@@ -672,12 +672,28 @@ class MMFree(gdb.Command):
                     heap_used += nodesize
                     nused += 1
 
-            mempool_free = sum(
-                blk.nodesize
-                for pool in mm.get_pools([heap])
-                for blk in pool.blks
-                if blk.is_free
-            )
+            mempool_total = 0
+            mempool_maxused = 0
+            mempool_used = 0
+            mempool_nused = 0
+            mempool_nfree = 0
+            mempool_free = 0
+
+            if mm_pool := heap.mm_mpool:
+                mpool = mm.MemPoolMultiple(mm_pool)
+
+                for chunk in mpool.chunks:
+                    mempool_total += int(chunk.end) - int(chunk.start)
+
+                for pool in mpool.pools:
+                    mempool_maxused += pool.total
+                    for blk in pool.blks:
+                        if blk.is_free:
+                            mempool_free += blk.nodesize
+                            mempool_nfree += 1
+                        else:
+                            mempool_used += blk.nodesize
+                            mempool_nused += 1
 
             total = heap.heapsize + mm_heap_s.sizeof
             heap_used += mm_heap_s.sizeof  # struct overhead
@@ -694,6 +710,20 @@ class MMFree(gdb.Command):
                     nfree,
                 )
             )
+
+            if mempool_total:
+                print(
+                    formatter.format(
+                        f"{heap.name}@mempool",
+                        mempool_total,
+                        mempool_used,
+                        mempool_total - mempool_used,
+                        mempool_maxused,
+                        mempool_total - mempool_maxused,
+                        mempool_nused,
+                        mempool_nfree,
+                    )
+                )
 
 
 class NxMemoryRange(gdb.Command):
