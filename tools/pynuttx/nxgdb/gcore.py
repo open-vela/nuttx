@@ -38,9 +38,10 @@ def parse_args(args):
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--output", help="Gcore output file")
     parser.add_argument(
-        "-t",
-        "--objcopy",
-        help="Select the appropriate architecture for the objcopy tool",
+        "-p",
+        "--prefix",
+        help="Prefix for objcopy tool",
+        default="",
         type=str,
     )
 
@@ -132,12 +133,13 @@ class NXGcore(gdb.Command):
 
             create_file_with_size(section, end - start)
 
+            gdb.write(f"Using objcopy: {args.prefix}objcopy")
             os.system(
-                f"{args.objcopy} --add-section {section}={section} "
+                f"{args.prefix}objcopy --add-section {section}={section} "
                 f"--set-section-flags {section}=noload,alloc {tmpfile.name}"
             )
             os.system(
-                f"{args.objcopy} --change-section-address "
+                f"{args.prefix}objcopy --change-section-address "
                 f"{section}={hex(start)} {tmpfile.name}"
             )
 
