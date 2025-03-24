@@ -845,6 +845,12 @@ def get_tcb(pid) -> Tcb:
     return tcb
 
 
+def get_running_tcbs() -> List[Tcb]:
+    """get running tcbs"""
+    running_tasks = parse_and_eval("g_running_tasks")
+    return [tcb for tcb in ArrayIterator(running_tasks) if tcb]
+
+
 def get_tcb_type(tcb):
     """get tcb type"""
     if not tcb:

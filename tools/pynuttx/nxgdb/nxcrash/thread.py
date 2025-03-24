@@ -42,7 +42,7 @@ class CrashThread(gdb.Command):
                     collected.append(tcb)
                     break
 
-        return collected
+        return collected or utils.get_running_tcbs()
 
     def invoke(self, arg: str, from_tty: bool) -> None:
         collected = self.collect(utils.get_tcbs())
