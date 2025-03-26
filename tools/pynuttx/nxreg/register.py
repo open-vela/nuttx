@@ -173,7 +173,7 @@ g_reg_table = {
             ("rsi", 4, REGINFO_OFFSET_AUTO),
             ("rdi", 5, REGINFO_OFFSET_AUTO),
             ("rbp", 6, REGINFO_OFFSET_AUTO),
-            ("fsp", 7, REGINFO_OFFSET_AUTO),
+            ("rsp", 7, REGINFO_OFFSET_AUTO),
             ("r8", 8, REGINFO_OFFSET_AUTO),
             ("r9", 9, REGINFO_OFFSET_AUTO),
             ("r10", 10, REGINFO_OFFSET_AUTO),
@@ -183,7 +183,7 @@ g_reg_table = {
             ("r14", 14, REGINFO_OFFSET_AUTO),
             ("r15", 15, REGINFO_OFFSET_AUTO),
             ("rip", 16, REGINFO_OFFSET_AUTO),
-            ("rflags", 17, REGINFO_OFFSET_AUTO),
+            ("eflags", 17, REGINFO_OFFSET_AUTO),
             ("cs", 18, REGINFO_OFFSET_AUTO),
             ("ss", 19, REGINFO_OFFSET_AUTO),
             ("ds", 20, REGINFO_OFFSET_AUTO),
@@ -386,14 +386,18 @@ class GeneralRegisters:
 
         reginfo = get_reginfo(elf)
         layouts = g_reg_table.get(self.arch, {}).get("registers", [])
-        regoffsets = [r.tcb_offset for r in reginfo if r.tcb_offset != UINT16_MAX]
         for i, (name, regnum, offset, *fixed) in enumerate(layouts):
+            info = next((r for r in reginfo if r.name == name), None)
+            if not info or info.tcb_offset == UINT16_MAX:
+                self.logger.debug(f"Register {name}({regnum}) not found in TCB")
+                continue
+
             register = Register(
                 name=name,
                 regnum=regnum,
                 size=regsize,
                 offset=offset,
-                tcb_reg_off=regoffsets[i] if i < len(regoffsets) else 0,
+                tcb_reg_off=info.tcb_offset,
                 fixedvalue=fixed[0] if fixed else None,
             )
 
