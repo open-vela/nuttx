@@ -21,6 +21,7 @@
 ############################################################################
 
 import argparse
+import binascii
 import os
 import re
 from collections import defaultdict
@@ -638,3 +639,49 @@ class NxDumpRAM(gdb.Command):
 
             with open(output, "wb") as f:
                 f.write(data)
+
+
+class NxMemoryFind(gdb.Command):
+    """Find memory address by pattern"""
+
+    def __init__(self):
+        super().__init__("mm find", gdb.COMMAND_USER)
+        utils.alias("memfind", "mm find")
+
+    def invoke(self, arg: str, from_tty: bool) -> None:
+        parser = argparse.ArgumentParser(description=self.__doc__)
+        parser.add_argument("pattern", type=str, help="Pattern to search")
+        parser.add_argument("-r", "--memrange", type=str, default=None)
+        parser.add_argument("--heap-only", action="store_true", help="Heap only")
+        parser.add_argument(
+            "--globals-only", action="store_true", help="Global variables only"
+        )
+
+        try:
+            args = parser.parse_args(gdb.string_to_argv(arg))
+        except SystemExit:
+            return
+
+        if args.pattern.startswith('"') and args.pattern.endswith('"'):
+            # Search for string
+            value = bytes(args.pattern[1:-1], "utf-8")
+        else:
+            # Convert to a number
+            value = utils.parse_arg(args.pattern)
+            value = value.to_bytes((value.bit_length() + 7) // 8, "little")
+
+        print(f"Searching for pattern {binascii.hexlify(value)} in memory")
+        pattern = re.compile(value)
+
+        memrange = mm.get_memrange(args.memrange, args.heap_only, args.globals_only)
+        for start, end in memrange:
+            try:
+                data = bytes(gdb.selected_inferior().read_memory(start, end - start))
+            except gdb.MemoryError:
+                print(f"Failed to read memory range {start:#x} - {end:#x}")
+                continue
+
+            matches = [match.start() for match in pattern.finditer(data)]
+            for offset in matches:
+                print(f"Found pattern @ {offset + start:#x}")
+        print("Done")
