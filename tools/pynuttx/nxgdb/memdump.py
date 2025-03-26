@@ -595,6 +595,38 @@ class MMFree(gdb.Command):
             )
 
 
+class NxMemoryRange(gdb.Command):
+    """Show RAM range of heap and sections"""
+
+    def __init__(self):
+        super().__init__("mm range", gdb.COMMAND_USER)
+        utils.alias("memrange", "mm range")
+
+    def invoke(self, arg, from_tty):
+        parser = argparse.ArgumentParser(description=self.__doc__)
+        parser.add_argument("--heap-only", action="store_true", help="Heap only")
+        parser.add_argument(
+            "--globals-only", action="store_true", help="Global variables only"
+        )
+
+        try:
+            args = parser.parse_args(gdb.string_to_argv(arg))
+        except SystemExit:
+            return
+
+        memrange = mm.get_memrange(None, args.heap_only, args.globals_only)
+        if not memrange:
+            print("No memory range found")
+            return
+
+        header = ("start", "end", "size", "size(kB)")
+        formatter = "{:<20} {:<20} {:<20} {:<20}"
+        print(formatter.format(*header))
+        for start, end in memrange:
+            length = end - start
+            print(formatter.format(hex(start), hex(end), length, f"{length/1024: .1f}"))
+
+
 class NxDumpRAM(gdb.Command):
     """Dump memory to file, similar to GDB dump memory"""
 
