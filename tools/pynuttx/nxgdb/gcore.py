@@ -101,25 +101,9 @@ class NXGcore(gdb.Command):
             corefile = elffile + ".core"
 
         # Get memory range from parameter or elf
-        if args.memrange:
-            memregion = args.memrange
-        else:
-            memranges = mm.memory_range()
-            if not memranges:
-                gdb.write("ERROR: No loadable sections found.\n")
-                return
+        memrange = mm.get_memrange(args.memrange)
 
-            memregion = ",".join(f"{start:#x},{end:#x},0x7" for start, end in memranges)
-            gdb.write(f"Memory ranges: {memregion}\n")
-
-        # Resolve memory range and shell run commands
-
-        values = memregion.replace('"', "").split(",")
-
-        for i in range(0, len(values), 3):
-            start = int(values[i], 16)
-            end = int(values[i + 1], 16)
-
+        for i, (start, end) in enumerate(memrange):
             # Create a random section name
 
             section = tmpfile.name + f"{i // 3}"

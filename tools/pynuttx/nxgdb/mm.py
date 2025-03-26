@@ -572,7 +572,7 @@ class MMHeap(Value, p.MMHeap):
         return utils.get_field(self, "mm_mpool", default=None)
 
     @property
-    def regions(self):
+    def regions(self) -> List[Tuple[MMNode, MMNode]]:
         if not self._regions:
             regions = self.nregions
             self._regions = []
@@ -632,39 +632,65 @@ def get_pools(heaps: List[Value] = []) -> Generator[MemPool, None, None]:
             yield pool
 
 
-def memory_range():
+def memory_range(heap=True, globals=True) -> List[Tuple[int, int]]:
     # Execute the GDB command to get section info
-    section = gdb.execute("maintenance info sections", to_string=True)
     memranges = []
+    if globals:
+        section = gdb.execute("maintenance info sections", to_string=True)
 
-    # Parse the output to find sections with ALLOC and LOAD
-    for line in section.splitlines():
-        if "ALLOC" in line and "READONLY" not in line:
-            parts = line.split()
-            start = int(parts[1].split("->")[0], 16)
-            end = int(parts[1].split("->")[1], 16)
-            memranges.append((start, end))
+        # Parse the output to find sections with ALLOC and LOAD
+        for line in section.splitlines():
+            if "ALLOC" in line and "READONLY" not in line:
+                parts = line.split()
+                start = int(parts[1].split("->")[0], 16)
+                end = int(parts[1].split("->")[1], 16)
+                if start == end:
+                    continue
 
-    # Get heaps from memdump
-    for heap in get_heaps():
-        for i in range(heap.nregions):
-            start = int(heap["mm_heapstart"][i])
-            end = int(heap["mm_heapend"][i])
-
-            for r in memranges:
-                # If the address range is already in memranges, skip
-                if r[0] <= start and r[1] >= end:
-                    break
-                # If the new address range includes a range in memranges,
-                # delete the old one and add the new one
-                elif start <= r[0] and end >= r[1]:
-                    memranges.remove(r)
-                    memranges.append((start, end))
-                    break
-            else:
                 memranges.append((start, end))
 
-    return memranges
+    # Get heaps from memdump
+    if heap:
+        for heap in get_heaps():
+            for i in range(heap.nregions):
+                start = int(heap["mm_heapstart"][i])
+                end = int(heap["mm_heapend"][i])
+
+                if start == end:
+                    continue
+
+                for r in memranges:
+                    # If the address range is already in memranges, skip
+                    if r[0] <= start and r[1] >= end:
+                        break
+                    # If the new address range includes a range in memranges,
+                    # delete the old one and add the new one
+                    elif start <= r[0] and end >= r[1]:
+                        memranges.remove(r)
+                        memranges.append((start, end))
+                        break
+                else:
+                    memranges.append((start, end))
+    return sorted(memranges, key=lambda x: x[0])
+
+
+def get_memrange(
+    rangestr: str = "", heap_only=False, globals_only=False
+) -> List[Tuple[int, int]]:
+    """
+    Parse memory range from string or get from heap and globals,
+    the string should be in the format of "start1,end1,attr1 start2,end2,attr2".
+    """
+    if rangestr:
+        values = rangestr.replace('"', "").split(",")
+        memrange = []
+        for i in range(0, len(values), 3):
+            start = utils.parse_arg(values[i])
+            end = utils.parse_arg(values[i + 1])
+            memrange.append((start, end))
+        return memrange
+    else:
+        return memory_range(heap=not globals_only, globals=not heap_only)
 
 
 class MMHeapInfo(gdb.Command):
