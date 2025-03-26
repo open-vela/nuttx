@@ -114,6 +114,33 @@ class NxRegisters:
 g_registers = NxRegisters()
 
 
+class RegInfoCommand(gdb.Command):
+    """Display the register information"""
+
+    def __init__(self):
+        super().__init__("maintenance reginfo", gdb.COMMAND_USER)
+
+    def invoke(self, arg: str, from_tty: bool) -> None:
+        registers = g_registers.registers
+        header = ("Name", "Rmt Nr", "Offset", "Tcb Reg Off")
+        print(
+            "Name: the register name GDB uses.\n"
+            "Rmt Nr: the register number in RSP packet, also the position in tcb.xcp.regs \n"
+            "Tcb Reg Off: the byte offset in tcb.xcp.regs"
+        )
+        formatter = "{:<20} {:<10} {:<10} {:<10}"
+        print(formatter.format(*header))
+        for register in registers:
+            print(
+                formatter.format(
+                    register.name,
+                    register.regnum,
+                    register.offset,
+                    register.tcb_reg_off,
+                )
+            )
+
+
 class SetRegs(gdb.Command):
     """Load registers from TCB context memory address.
     Usage: setregs [regs]
