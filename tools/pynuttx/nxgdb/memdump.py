@@ -21,6 +21,7 @@
 ############################################################################
 
 import argparse
+import os
 import re
 from collections import defaultdict
 from typing import Dict, Generator, List, Protocol, Tuple
@@ -591,3 +592,49 @@ class MMFree(gdb.Command):
                     nfree,
                 )
             )
+
+
+class NxDumpRAM(gdb.Command):
+    """Dump memory to file, similar to GDB dump memory"""
+
+    def __init__(self):
+        super().__init__("dump ram", gdb.COMMAND_USER)
+
+    def invoke(self, arg: str, from_tty: bool) -> None:
+        parser = argparse.ArgumentParser(description=self.__doc__)
+        parser.add_argument(
+            "-o", "--output", help="Memory dump output directory", default="memdump"
+        )
+        parser.add_argument("-r", "--memrange", type=str, default=None)
+        parser.add_argument("--heap-only", action="store_true", help="Heap only")
+        parser.add_argument(
+            "--globals-only", action="store_true", help="Global variables only"
+        )
+
+        try:
+            args = parser.parse_args(gdb.string_to_argv(arg))
+        except SystemExit:
+            return
+
+        memrange = mm.get_memrange(args.memrange, args.heap_only, args.globals_only)
+        if not memrange:
+            print("No memory range found")
+            return
+
+        # Enable trust-readonly flag to try to read from elf file if possible
+        gdb.execute("set trust-readonly-sections on")
+
+        print(f"Dumping memory to {args.output}")
+        os.makedirs(args.output, exist_ok=True)
+
+        for start, end in memrange:
+            print(f"Dumping memory range {start:#x} - {end:#x}")
+            try:
+                data = gdb.selected_inferior().read_memory(start, end - start)
+                output = os.path.join(args.output, f"{start:#x}.bin")
+            except gdb.MemoryError:
+                print(f"Failed to read memory range {start:#x} - {end:#x}")
+                continue
+
+            with open(output, "wb") as f:
+                f.write(data)
