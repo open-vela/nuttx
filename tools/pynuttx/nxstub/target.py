@@ -111,7 +111,7 @@ class Target:
             output += b
             address += 1
 
-        return output.decode("utf-8")
+        return output.decode("utf-8", errors="replace")
 
     def update_threads(self) -> List[ThreadInfo]:
         """Update the latest threads information"""

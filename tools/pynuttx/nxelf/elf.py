@@ -479,7 +479,7 @@ class LiefELF:
             output += c.tobytes()
             addr += 1
 
-        return output.decode("utf-8")
+        return output.decode("utf-8", errors="replace")
 
     def get_inttype(self) -> Construct:
         return {
