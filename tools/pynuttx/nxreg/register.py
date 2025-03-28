@@ -162,8 +162,30 @@ g_reg_table = {
             ("pc", 33, REGINFO_OFFSET_AUTO),  # PC
         ],
     },
+    "x86": {
+        "architecture": ["i386", "i386:intel"],
+        "feature": "org.gnu.gdb.i386:x86",
+        "registers": [
+            ("eax", 0, REGINFO_OFFSET_AUTO),
+            ("ecx", 1, REGINFO_OFFSET_AUTO),
+            ("edx", 2, REGINFO_OFFSET_AUTO),
+            ("ebx", 3, REGINFO_OFFSET_AUTO),
+            ("esp", 4, REGINFO_OFFSET_AUTO),
+            ("ebp", 5, REGINFO_OFFSET_AUTO),
+            ("esi", 6, REGINFO_OFFSET_AUTO),
+            ("edi", 7, REGINFO_OFFSET_AUTO),
+            ("eip", 8, REGINFO_OFFSET_AUTO),
+            ("eflags", 9, REGINFO_OFFSET_AUTO),
+            ("cs", 10, REGINFO_OFFSET_AUTO),
+            ("ss", 11, REGINFO_OFFSET_AUTO),
+            ("ds", 12, REGINFO_OFFSET_AUTO),
+            ("es", 13, REGINFO_OFFSET_AUTO),
+            ("fs", 14, REGINFO_OFFSET_AUTO),
+            ("gs", 15, REGINFO_OFFSET_AUTO),
+        ],
+    },
     "x86-64": {
-        "architecture": ["i386", "i386:x86-64", "i386:x86-64:intel", "i386:intel"],
+        "architecture": ["i386:x86-64", "i386:x86-64:intel"],
         "feature": "org.gnu.gdb.i386:x86-64",
         "registers": [
             ("rax", 0, REGINFO_OFFSET_AUTO),
