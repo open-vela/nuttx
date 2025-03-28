@@ -45,9 +45,9 @@ class Dmesg(gdb.Command):
         rl_buffer = int(rl_header["rl_buffer"].address)  # rl_buffer is a char array
 
         inf = gdb.selected_inferior()
-        buf = bytes(inf.read_memory(offset + rl_buffer, tail))
+        buf = bytes(inf.read_memory(offset + rl_buffer, tail) if tail else b"")
         buf = buf.lstrip(b"\0")  # Remove leading NULLs
-        buf += bytes(inf.read_memory(rl_buffer, offset))
+        buf += bytes(inf.read_memory(rl_buffer, offset) if offset else b"")
         buf = buf.replace(
             b"\0", "␀".encode("utf-8")
         )  # NULL is valid utf-8 but not printable
@@ -58,7 +58,8 @@ class Dmesg(gdb.Command):
         if not (priv := utils.gdb_eval_or_none("g_syslog_rpmsg")):
             return "RPMsg syslog not avaliable"
 
-        buffer = bytes(gdb.selected_inferior().read_memory(priv.buffer, priv.size))
+        inf = gdb.selected_inferior()
+        buffer = bytes(inf.read_memory(priv.buffer, priv.size) if priv.size else b"")
         buf = buffer.replace(b"\0", "␀".encode("utf-8"))
         return buf.decode("utf-8", errors="replace")
 
