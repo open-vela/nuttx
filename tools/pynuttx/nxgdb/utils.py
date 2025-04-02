@@ -1238,9 +1238,11 @@ class Addr2Line(gdb.Command):
             self.print_backtrace(addresses)
 
 
+PID0_REPLACE = get_symbol_value("PID0_REPLACE")
+
+
 def get_gdb_thread_pid(thread: gdb.InferiorThread) -> int:
-    idlepid = get_symbol_value("PID0_REPLACE")
-    return 0 if thread.ptid[1] == idlepid else thread.ptid[1]
+    return 0 if thread.ptid[1] == PID0_REPLACE else thread.ptid[1]
 
 
 def get_gdb_thread(pid: int) -> Optional[gdb.InferiorThread]:

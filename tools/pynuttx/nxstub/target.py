@@ -59,7 +59,7 @@ class ThreadInfo:
 
 
 class Target:
-    PID0_ID = 0xFFFF
+    PID0_REPLACE = 0x7FFFFFFF
 
     def __init__(
         self,
@@ -85,7 +85,7 @@ class Target:
         self.registers = registers or Registers(elf, arch=arch)
         self.memories: List[RawMemory] = []
         self.arch = arch
-        self.pid = self.PID0_ID  # Current thread PID
+        self.pid = self.PID0_REPLACE  # Current thread PID
         self.remap = remap or []
         for mem in memories or []:
             # Go through the write process to merge overlapping memory regions
@@ -116,7 +116,9 @@ class Target:
     def update_threads(self) -> List[ThreadInfo]:
         """Update the latest threads information"""
 
-        self.threads = (ThreadInfo("main", self.PID0_ID, "Running", self.registers),)
+        self.threads = (
+            ThreadInfo("main", self.PID0_REPLACE, "Running", self.registers),
+        )
 
         try:
             pointer = self.elf.get_pointer_type()
@@ -156,7 +158,7 @@ class Target:
                     name = self._read_str(address + tcbinfo.name_off)
                 self.logger.debug(f"loading thread: {name}, tcb@{address:#x}")
                 pid = utils.uint16_t(data[tcbinfo.pid_off : tcbinfo.pid_off + 2])
-                pid = pid if pid != 0 else self.PID0_ID
+                pid = pid if pid != 0 else self.PID0_REPLACE
                 state = utils.uint8_t(data[tcbinfo.state_off : tcbinfo.state_off + 1])
                 state = states[state] if state < len(states) else "Unknown"
 
@@ -205,7 +207,7 @@ class Target:
 
         if pid is None:
             # None is only used during our initial setup, not of GDB RSP protocol
-            pid = self.PID0_ID
+            pid = self.PID0_REPLACE
 
         for t in self.threads:
             if pid == t.pid:
