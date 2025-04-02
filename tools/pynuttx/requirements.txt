@@ -5,5 +5,7 @@ debugpy
 lief
 matplotlib
 numpy
+pandas
 pillow
+plotly
 pyelftools

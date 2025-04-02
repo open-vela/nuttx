@@ -532,6 +532,107 @@ class MMMap(gdb.Command):
             gdb.write(f"Memory map saved to {output}\n")
 
 
+class MMVisualize(gdb.Command):
+    """Generates a memory treemap, showing all backtrace statistics"""
+
+    def __init__(self):
+        self.backtrace_depth = mm.CONFIG_MM_RECORD_STACK
+        if self.backtrace_depth <= 0:
+            gdb.write(
+                "Without mm record backtrace enabled, visualization is not possible"
+            )
+            return
+
+        super().__init__("mm visualize", gdb.COMMAND_USER)
+        utils.alias("memvisualize", "mm visualize")
+        self.px = utils.import_check(
+            "plotly.express", errmsg="Please pip install plotly\n"
+        )
+        self.pd = utils.import_check("pandas", errmsg="Please pip install pandas\n")
+
+    def invoke(self, args, from_tty):
+        parser = argparse.ArgumentParser(description=self.__doc__)
+        parser.add_argument(
+            "-o",
+            "--output",
+            type=str,
+            default="mm_visualize",
+            help="html output file",
+        )
+        parser.add_argument(
+            "--heap", type=str, help="Which heap's pool to show", default=None
+        )
+
+        try:
+            args = parser.parse_args(gdb.string_to_argv(args))
+        except SystemExit:
+            return
+
+        nodes = mm.get_nodes_dict()
+        df = self.pd.DataFrame.from_records(nodes)
+
+        # Only show used nodes, exclude all free nodes
+        df = df[~df["free"]]
+
+        # Merge all nodes with the same pid and backtrace
+        df = (
+            df.groupby(["backtrace", "pid"], as_index=False)
+            .agg(
+                {
+                    "name": lambda x: x.iloc[0],
+                    "address": "any",
+                    "size": "sum",
+                    "pid": "first",
+                    "from_pool": "first",
+                }
+            )
+            .reset_index()
+        )
+
+        for i in range(self.backtrace_depth):
+            df[f"stack_{i}"] = df["backtrace"].apply(
+                lambda x: "Unkown" if not x[i] else utils.Symbol(x[i]).func
+            )
+
+        # Drop the backtrace column
+        df = df.drop(columns=["backtrace"])
+
+        # Reorder the backtrace to ensure it is displayed in the correct format in the UI.
+        # For example, a,b,c,0,U,U,U,U generates U,U,U,U,U,a,b,c
+        stack_columns = [f"stack_{i}" for i in range(8)]
+        for index, row in df.iterrows():
+            stack_values = row[stack_columns].tolist()
+            unknowns = [val for val in stack_values if val == "Unkown"]
+            non_unknowns = [val for val in stack_values if val != "Unkown"]
+            new_stack_values = unknowns + non_unknowns
+            df.loc[index, stack_columns] = new_stack_values
+
+        # Generate the treemap
+        stack_cols = [f"stack_{i}" for i in range(self.backtrace_depth - 1, -1, -1)]
+        fig = self.px.treemap(
+            df,
+            path=stack_cols,
+            values="size",
+            hover_data=["pid", "from_pool"],
+            title="Memory Allocation",
+        )
+
+        fig.update_layout(
+            margin=dict(t=50, l=25, r=25, b=25),
+            coloraxis_colorbar=dict(title="Size (bytes)"),
+        )
+        fig.update_traces(
+            maxdepth=3,
+            texttemplate="%{label}<br>%{value:,d} bytes",
+            textposition="middle center",
+            marker=dict(line=dict(width=1, color="DarkGray")),
+        )
+
+        path = args.output + ".html"
+        fig.write_html(path)
+        gdb.write(f"Memory map saved to Memory visualizations saved to {path}\n")
+
+
 class MMFree(gdb.Command):
     """Show heap statistics, same as device command free"""
 

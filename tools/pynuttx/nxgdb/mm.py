@@ -701,6 +701,51 @@ def get_memrange(
         return memory_range(heap=not globals_only, globals=not heap_only)
 
 
+def get_nodes_dict():
+    """
+    Return dict of all memory nodes, including memory pool.
+    """
+
+    # If there is a cached result, return it directly
+    if hasattr(get_nodes_dict, "_cached_nodes"):
+        return get_nodes_dict._cached_nodes
+
+    nodes = []
+    for heap in get_heaps():
+        nodes.extend(
+            {
+                "name": heap.name,
+                "address": node.address,
+                "size": node.nodesize,
+                "seqno": node.seqno,
+                "pid": node.pid,
+                "free": node.is_free,
+                "from_pool": False,
+                "backtrace": node.backtrace,
+            }
+            for node in heap.nodes
+        )
+
+        for pool in get_pools([heap]):
+            nodes.extend(
+                {
+                    "name": f"{heap.name}@{blk.nodesize}pool",
+                    "address": blk.address,
+                    "size": blk.nodesize,
+                    "seqno": blk.seqno,
+                    "pid": blk.pid,
+                    "free": blk.is_free,
+                    "from_pool": True,
+                    "backtrace": blk.backtrace,
+                }
+                for blk in pool.blks
+            )
+
+    # Cache the result
+    get_nodes_dict._cached_nodes = nodes
+    return nodes
+
+
 class MMHeapInfo(gdb.Command):
     """Show basic heap information"""
 
