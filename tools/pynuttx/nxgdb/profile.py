@@ -35,13 +35,22 @@ class Profile(gdb.Command):
         self.cProfile = import_check(
             "cProfile", errmsg="cProfile module not found, try gdb-multiarch.\n"
         )
-        if not self.cProfile:
+        self.pstats = import_check(
+            "pstats", errmsg="pstats module not found, try gdb-multiarch.\n"
+        )
+        if not self.cProfile or not self.pstats:
             return
 
         super().__init__("profile", gdb.COMMAND_USER)
 
     def invoke(self, args, from_tty):
-        self.cProfile.run(f"gdb.execute('{args}')", sort="cumulative")
+        self.cProfile.run(f"gdb.execute('{args}')", "results.prof")
+
+        stats = self.pstats.Stats("results.prof")
+        stats.strip_dirs().sort_stats("cumulative").print_stats(20)
+        print(
+            "Generate profile file: results.prof, Execute 'snakeviz results.prof' to view the report."
+        )
 
 
 class Time(gdb.Command):
