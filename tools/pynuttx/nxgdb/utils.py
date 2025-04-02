@@ -32,7 +32,7 @@ import shlex
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import gdb
 from nxelf.macros import fetch_macro_info, try_expand
@@ -128,6 +128,70 @@ class Value(gdb.Value):
         return Value(super().dynamic_cast(type))
 
 
+class Symbol:
+    def __init__(self, address: Union[int, gdb.Value]):
+        self.func: str = ""
+        self.address: int = 0
+        self._symtab_and_line: gdb.Symtab_and_line = None
+        self.resolve_symbol(address)
+
+    def resolve_symbol(self, address: Union[int, gdb.Value]) -> None:
+        """Resolve symbol information for the given address"""
+        if not address:
+            return
+
+        # Check cache first
+        if int(address) in g_backtrace_cache:
+            cached = g_backtrace_cache[int(address)]
+            self.address, self.func, self._symtab_and_line = cached
+            return
+
+        # Convert to proper gdb.Value if needed
+        if type(address) is int:
+            address = gdb.Value(address)
+
+        # Ensure we have a pointer type
+        if address.type.code is not gdb.TYPE_CODE_PTR:
+            address = address.cast(gdb.lookup_type("void").pointer())
+
+        # Get symbol information
+        self.address = int(address)
+        self._symtab_and_line = gdb.find_pc_line(int(address))
+        if not self.is_valid():
+            return
+
+        self.func = address.format_string(symbols=True, address=False)
+
+        # Cache the result
+        result = (self.address, self.func, self._symtab_and_line)
+        g_backtrace_cache[self.address] = result
+
+    def is_valid(self) -> bool:
+        return (
+            self._symtab_and_line
+            and self._symtab_and_line.is_valid()
+            and self._symtab_and_line.symtab
+            and self._symtab_and_line.symtab.is_valid()
+        )
+
+    @property
+    def filename(self) -> str:
+        if not self.is_valid():
+            return ""
+        return str(self._symtab_and_line.symtab.fullname())
+
+    @property
+    def line(self) -> int:
+        if not self.is_valid():
+            return 0
+        return int(self._symtab_and_line.line)
+
+    def __repr__(self) -> str:
+        return (
+            f"<Symbol {hex(self.address)}: {self.func} at {self.filename}:{self.line}>"
+        )
+
+
 class Backtrace:
     """
     Convert addresses to backtrace
@@ -135,12 +199,12 @@ class Backtrace:
     backtrace = Backtrace(addresses=[0x4001, 0x4002, 0x4003])
 
     # Access converted backtrace
-    addr, func, source = backtrace[0]
-    remaining = backtrace[1:]  # Return list of (addr, func, source)
+    addr, func, file, line = backtrace[0]
+    remaining = backtrace[1:]  # Return list of (addr, func, file, line)
 
     # Iterate over backtrace
-    for addr, func, source in backtrace:
-        print(addr, func, source)
+    for addr, func, file, line in backtrace:
+        print(addr, func, file, line)
 
     # Append more addresses to convert
     backtrace.append(0x40001234)
@@ -177,38 +241,19 @@ class Backtrace:
 
     def append(self, addr: Union[gdb.Value, int]) -> None:
         """Append an address to the backtrace"""
-        if result := self.convert(addr):
-            self.backtrace.append(result)
+        if result := Symbol(addr):
+            self.backtrace.append(
+                (result.address, result.func, result.filename, result.line)
+            )
             self._formatted = None  # Clear cached result
-
-    def convert(self, addr: Union[gdb.Value, int]) -> Tuple[int, str, str]:
-        """Convert an address to function and source"""
-        if not addr:
-            return None
-
-        if int(addr) in g_backtrace_cache:
-            return g_backtrace_cache[int(addr)]
-
-        if type(addr) is int:
-            addr = gdb.Value(addr)
-
-        if addr.type.code is not gdb.TYPE_CODE_PTR:
-            addr = addr.cast(gdb.lookup_type("void").pointer())
-
-        func = addr.format_string(symbols=True, address=False)
-        sym = gdb.find_pc_line(int(addr))
-        source = str(sym.symtab) + ":" + str(sym.line)
-        result = (int(addr), func, source)
-        g_backtrace_cache[int(addr)] = result
-        return result
 
     @property
     def formatted(self):
         """Return the formatted backtrace string list"""
         if not self._formatted:
             self._formatted = [
-                self.formatter.format(hex(addr), func, source)
-                for addr, func, source in self.backtrace
+                self.formatter.format(hex(addr), func, f"{file}:{line}")
+                for addr, func, file, line in self.backtrace
             ]
 
         return self._formatted
