@@ -81,5 +81,8 @@ class Dmesg(gdb.Command):
         ramlog = self._get_ramlog()
         rpmsg_syslog = self._get_rpmsg_syslog()
 
-        print(f"RAM log:{ramlog}\n---END of RAMLOG")
-        print(f"RPMSG syslog:{rpmsg_syslog}\n---END of RPMSG SYSLOG---")
+        if CONFIG_RAMLOG_SYSLOG:
+            print(f"RAM log:{ramlog}\n---END of RAMLOG")
+
+        if CONFIG_SYSLOG_RPMSG:
+            print(f"RPMSG syslog:{rpmsg_syslog}\n---END of RPMSG SYSLOG---")
