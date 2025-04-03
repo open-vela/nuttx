@@ -260,8 +260,8 @@ def main(args=None):
         logging.basicConfig(
             format="%(asctime)s:%(levelname)s:%(name)s:%(message)s",
         )
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.DEBUG if args.debug else logging.INFO)
+        logging.getLogger(__name__).setLevel(logging.DEBUG)
+        logging.getLogger("nxreg").setLevel(logging.DEBUG)
 
     if args.gdb:
         gdb = gdb_start(args)
