@@ -25,8 +25,8 @@ from typing import List, Union
 from construct import Array, Int8ul, Int16sl, Int16ul, PaddedString, Struct
 from nxelf.elf import LiefELF
 
-UINT16_MAX = 0xFFFF
-REGINFO_OFFSET_AUTO = 0
+REGINFO_OFFSET_INVALID = -2
+REGINFO_OFFSET_AUTO = -1
 
 g_reg_table = {
     "arm": {
@@ -408,9 +408,13 @@ class GeneralRegisters:
 
         reginfo = get_reginfo(elf)
         layouts = g_reg_table.get(self.arch, {}).get("registers", [])
+        goffset = 0
         for i, (name, regnum, offset, *fixed) in enumerate(layouts):
+            offset = goffset if offset == REGINFO_OFFSET_AUTO else offset
+            goffset = offset + regsize  # move to next register offset
+
             info = next((r for r in reginfo if r.name == name), None)
-            if not info or info.tcb_offset == UINT16_MAX:
+            if not info or info.tcb_offset == REGINFO_OFFSET_INVALID:
                 self.logger.debug(f"Register {name}({regnum}) not found in TCB")
                 continue
 
@@ -420,6 +424,7 @@ class GeneralRegisters:
                 size=regsize,
                 offset=offset,
                 tcb_reg_off=info.tcb_offset,
+                value=None if info.tcb_offset == REGINFO_OFFSET_INVALID else 0,
                 fixedvalue=fixed[0] if fixed else None,
             )
 
