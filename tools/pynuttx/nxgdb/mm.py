@@ -649,15 +649,23 @@ def memory_range(heap=True, globals=True) -> List[Tuple[int, int]]:
 
                 memranges.append((start, end))
 
+        idle_topstack = int(gdb.parse_and_eval("g_idle_topstack"))
+        idle_stacksize = int(gdb.parse_and_eval("CONFIG_IDLETHREAD_STACKSIZE"))
+        memranges.append((idle_topstack - idle_stacksize, idle_topstack))
+
     # Get heaps from memdump
     if heap:
         for heap in get_heaps():
             for i in range(heap.nregions):
                 start = int(heap["mm_heapstart"][i])
-                end = int(heap["mm_heapend"][i])
+                end = int(heap["mm_heapend"][i]) + MMNode.MM_SIZEOF_ALLOCNODE
 
                 if start == end:
                     continue
+
+                # For the first region in the heap we need to compensate for the heap_s size
+                if i == 0:
+                    start = int(heap.address)
 
                 for r in memranges:
                     # If the address range is already in memranges, skip
