@@ -518,4 +518,11 @@ config AUDIO_DMA
 	depends on AUDIO
 	depends on DMA
 
+config AUDIO_TUNNEL
+	bool "tunnel audio device"
+	default n
+	depends on AUDIO
+	---help---
+		A tunnel audio device driver.
+
 endif # DRIVERS_AUDIO

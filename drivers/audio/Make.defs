@@ -87,6 +87,10 @@ ifeq ($(CONFIG_AUDIO_NULL),y)
 CSRCS += audio_null.c
 endif
 
+ifeq ($(CONFIG_AUDIO_TUNNEL),y)
+CSRCS += audio_tunnel.c
+endif
+
 ifeq ($(CONFIG_AUDIO_TONE),y)
 CSRCS += tone.c
 endif
