@@ -51,7 +51,7 @@ class Target(gdb.Command):
         # If currently has connection to target, disconnect it
         inferior = gdb.selected_inferior()
         if inferior and inferior.connection and inferior.connection.is_valid():
-            gdb.execute("disconnect")
+            gdb.execute("detach", from_tty=True)
 
         def kill(event=None):
             if self.process:
