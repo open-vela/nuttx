@@ -118,3 +118,12 @@ class UnameCommand(gdb.Command):
             print(machine)
         if args.version:
             print(tool_version)
+
+    def diagnose(self, *args, **kwargs):
+        return {
+            "title": "Uname Report",
+            "summary": "dump the kernel version number",
+            "command": "uname",
+            "result": "info",
+            "message": gdb.execute("uname -a", to_string=True),
+        }
