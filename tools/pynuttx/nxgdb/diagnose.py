@@ -21,6 +21,7 @@
 ############################################################################
 
 import argparse
+from gc import get_referrers
 
 import gdb
 
@@ -66,11 +67,20 @@ class DiagnoseReport(gdb.Command):
 
         commands = utils.gather_gdbcommands(modules=modules)
 
+        registered_command_types = {
+            obj.__class__.__name__.lower()
+            for cls in gdb.Command.__subclasses__()
+            for obj in get_referrers(cls)
+            if isinstance(obj, cls) and not isinstance(obj, type)
+        }
+
         results = []
         for clz in commands:
             if hasattr(clz, "diagnose"):
                 command = clz()
                 name = clz.__name__.lower()
+                if name not in registered_command_types:
+                    continue
                 gdb.write(f"Run command: {name}\n")
                 try:
                     result = command.diagnose()
