@@ -306,16 +306,16 @@ g_reg_table = {
 
 
 class RegInfo:
-    def __init__(self, name, size, tcb_offset=0):
+    def __init__(self, name, size, toffset=0):
         self.name = name
         self.size = size
-        self.tcb_offset = tcb_offset
+        self.toffset = toffset
 
     def __str__(self):
         return f"{self.name}({self.size})"
 
     def __repr__(self):
-        return f"REG({self.name}, {self.size}, {self.tcb_offset})"
+        return f"REG({self.name}, {self.size}, {self.toffset})"
 
 
 def get_reginfo(elf: LiefELF) -> List[RegInfo]:
@@ -340,19 +340,22 @@ def get_reginfo(elf: LiefELF) -> List[RegInfo]:
 
 class Register:
     def __init__(
-        self, name, regnum, size: int, offset=0, tcb_reg_off=0, value=0, fixedvalue=None
+        self, name, regnum, size: int, goffset=0, toffset=0, value=0, fixedvalue=None
     ):
         self.name = name
         self.regnum = regnum
         self.size = size  # size in bytes
-        self.offset = offset
-        self.tcb_reg_off = tcb_reg_off
+        assert (
+            goffset != REGINFO_OFFSET_AUTO
+        )  # Must be the final processed offset for GDB g/G packet
+        self.goffset = goffset
+        self.toffset = toffset
         self._value = value
         self.fixedvalue = fixedvalue
         self.logger = logging.getLogger(__name__)
 
     def __str__(self):
-        return f"{self.name}({self.regnum}, size:{self.size}, offset:{self.offset},{self.tcb_reg_off} value:{self.value:#x})"
+        return f"{self.name}({self.regnum}, size:{self.size}, offset:{self.goffset},{self.toffset} value:{self.value:#x})"
 
     def __repr__(self):
         return self.__str__()
@@ -414,7 +417,7 @@ class GeneralRegisters:
             goffset = offset + regsize  # move to next register offset
 
             info = next((r for r in reginfo if r.name == name), None)
-            if not info or info.tcb_offset == REGINFO_OFFSET_INVALID:
+            if not info or info.toffset == REGINFO_OFFSET_INVALID:
                 self.logger.debug(f"Register {name}({regnum}) not found in TCB")
                 continue
 
@@ -422,15 +425,15 @@ class GeneralRegisters:
                 name=name,
                 regnum=regnum,
                 size=regsize,
-                offset=offset,
-                tcb_reg_off=info.tcb_offset,
-                value=None if info.tcb_offset == REGINFO_OFFSET_INVALID else 0,
+                goffset=offset,
+                toffset=info.toffset,
+                value=None if info.toffset == REGINFO_OFFSET_INVALID else 0,
                 fixedvalue=fixed[0] if fixed else None,
             )
 
             self._registers.append(register)
             self.logger.debug(
-                f"Register {name}({regnum}) offset: {offset}, tcb_off: {register.tcb_reg_off}"
+                f"Register {name}({regnum}) offset: {offset}, tcb_off: {register.toffset}"
             )
 
         self._registers.sort(key=lambda x: x.regnum)
@@ -479,7 +482,7 @@ class GeneralRegisters:
         xcpregs = self.readmem(addr, self.xcp_reg_size)
         if xcpregs:
             for reg in self._registers:
-                reg.value = xcpregs[reg.tcb_reg_off : reg.tcb_reg_off + reg.size]
+                reg.value = xcpregs[reg.toffset : reg.toffset + reg.size]
         else:
             raise ValueError("No valid source to load register values.\n")
         return self  # allow to build and use Register().load() directly
@@ -487,29 +490,28 @@ class GeneralRegisters:
     def to_g(self):
         """Return GDB RSP g packet"""
         reply = b""
-        offset = 0
+        goffset = 0
         for reg in self._registers:
-            if reg.offset and reg.offset != offset:
-                reply += b"xx" * (reg.offset - offset)
+            if reg.goffset != goffset:
+                reply += b"xx" * (reg.goffset - goffset)
 
             if not reg.has_value:
                 reply += b"xx" * reg.size
             else:
                 reply += hexlify(bytes(reg))
 
-            offset = reg.offset + reg.size
+            goffset = reg.goffset + reg.size
         return reply
 
     def from_g(self, data: bytes):
         """Parse GDB RSP G packet"""
-        offset = 0
         for reg in self._registers:
-            offset = reg.offset if reg.offset else offset
+            goffset = reg.goffset
             self.logger.debug(
-                f"Parse {reg.name}({reg.regnum}) from {offset}, data: {data[offset:offset+reg.size]}"
+                f"Parse {reg.name}({reg.regnum}) from {goffset}, data: {data[goffset:goffset+reg.size]}"
             )
-            reg.value = data[offset : offset + reg.size]
-            offset = reg.offset + reg.size
+            reg.value = data[goffset : goffset + reg.size]
+            goffset = reg.goffset + reg.size
 
     def __iter__(self):
         return iter(self._registers)
@@ -538,7 +540,7 @@ class TricoreRegisters(GeneralRegisters):
 
         for name in xcp_table[:lower_count]:
             reg = self.get(name=name)
-            reg.value = xcpregs[reg.tcb_reg_off : reg.tcb_reg_off + reg.size]
+            reg.value = xcpregs[reg.toffset : reg.toffset + reg.size]
             if name == "pcx":
                 lpcx = reg.value
 
@@ -557,9 +559,9 @@ class TricoreRegisters(GeneralRegisters):
             xcpregs = self.readmem(csa2addr(lpcx), upper_count * 4)
             for name in xcp_table[lower_count:]:
                 reg = self.get(name=name)
-                if reg.tcb_reg_off + reg.size > len(xcpregs):
+                if reg.toffset + reg.size > len(xcpregs):
                     raise ValueError("No valid source to load register values.\n")
-                reg.value = xcpregs[reg.tcb_reg_off : reg.tcb_reg_off + reg.size]
+                reg.value = xcpregs[reg.toffset : reg.toffset + reg.size]
 
         return self
 

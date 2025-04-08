@@ -135,8 +135,8 @@ class RegInfoCommand(gdb.Command):
                 formatter.format(
                     register.name,
                     register.regnum,
-                    register.offset,
-                    register.tcb_reg_off,
+                    register.goffset,
+                    register.toffset,
                 )
             )
 
