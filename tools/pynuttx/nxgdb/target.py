@@ -24,6 +24,7 @@ import multiprocessing
 
 import gdb
 import nxstub
+from nxreg.register import get_arch_name
 
 from . import utils
 
@@ -43,14 +44,21 @@ class Target(gdb.Command):
         if "-e" not in args and "--elf" not in args:
             args += f" -e {gdb.objfiles()[0].filename}"
 
+        arch = get_arch_name()  # Convert to nxstub arch name
+
         if "-a" not in args and "--arch" not in args:
-            args += f" -a {gdb.selected_inferior().architecture().name().lower()}"
+            args += f" -a {arch}"
+        else:
+            print(f"Hint: no need to specify architecture, current arch: {arch}")
 
         args = gdb.string_to_argv(args)
         try:
             parsed = nxstub.parse_args(args)
         except SystemExit:
             return
+
+        if parsed.arch != arch:
+            print(f"Warning: current arch {arch} does not match nxstub {parsed.arch}")
 
         # If currently has connection to target, disconnect it
         inferior = gdb.selected_inferior()

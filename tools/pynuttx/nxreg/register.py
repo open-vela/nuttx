@@ -571,3 +571,19 @@ def Registers(elf, arch=None, readmem=None) -> GeneralRegisters:
         return TricoreRegisters(elf, arch, readmem)
     else:
         return GeneralRegisters(elf, arch, readmem)
+
+
+def get_arch_name():
+    """
+    GDB uses arch name like aarch64, while we use arm64 to identify the register set.
+    This function maps the GDB arch name to our arch name.
+    """
+    import gdb
+
+    gdb_arch = gdb.selected_inferior().architecture()
+    gdb_arch = gdb_arch.name().lower()
+
+    for arch_key, arch_info in g_reg_table.items():
+        if gdb_arch in arch_info["architecture"]:
+            return arch_key
+    return None

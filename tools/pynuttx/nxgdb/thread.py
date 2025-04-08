@@ -26,7 +26,7 @@ from typing import Union
 
 import gdb
 from nxelf.elf import LiefELF
-from nxreg.register import Registers, g_reg_table
+from nxreg.register import Registers, get_arch_name
 
 from . import utils
 from .stack import Stack
@@ -48,20 +48,11 @@ class NxRegisters:
         def read_memory(addr, size):
             return bytes(gdb.selected_inferior().read_memory(addr, size))
 
-        arch = gdb.selected_inferior().architecture()
-        mapped_arch_name = self.map_gdbarch_name(arch.name())
-        if mapped_arch_name not in g_reg_table:
-            raise ValueError(
-                f"Architecture {mapped_arch_name} is not found in g_reg_table.\n"
-            )
+        mapped_arch_name = get_arch_name()
+        if not mapped_arch_name:
+            raise ValueError("Architecture is not found in g_reg_table.\n")
 
         self.registers = Registers(elf, arch=mapped_arch_name, readmem=read_memory)
-
-    def map_gdbarch_name(self, arch: str):
-        for arch_key, arch_info in g_reg_table.items():
-            if arch in arch_info["architecture"]:
-                return arch_key
-        return None
 
     def load(self, regs: Union[int, gdb.Value] = None):
         """Load registers from context register address"""
