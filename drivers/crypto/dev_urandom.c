@@ -45,6 +45,7 @@
 #include <nuttx/fs/fs.h>
 #include <nuttx/drivers/drivers.h>
 #include <nuttx/random.h>
+#include <nuttx/clock.h>
 
 #if defined(CONFIG_DEV_URANDOM) && !defined(CONFIG_DEV_URANDOM_ARCH)
 
@@ -313,13 +314,19 @@ void devurandom_register(void)
 {
   /* Seed the PRNG */
 
+  unsigned int seed = 0;
+  struct timespec ts;
+
+  nxclock_gettime(CLOCK_REALTIME, &ts);
+  seed = clock_time2ticks(&ts);
+
 #ifdef CONFIG_DEV_URANDOM_CONGRUENTIAL
-  srand(10197);
+  srand(seed);
 #elif defined(CONFIG_DEV_URANDOM_RANDOM_POOL)
   up_randompool_initialize();
 #else
-  g_prng.state.w = 97;
-  g_prng.state.x = 101;
+  g_prng.state.w = seed + 97;
+  g_prng.state.x = seed + 101;
   g_prng.state.y = g_prng.state.w << 17;
   g_prng.state.z = g_prng.state.x << 25;
 #endif
