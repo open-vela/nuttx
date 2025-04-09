@@ -125,6 +125,7 @@ class UVDump(gdb.Command):
 
         return None
 
+    @utils.dont_repeat_decorator
     def invoke(self, argument: str, from_tty: bool):
         parser = argparse.ArgumentParser(description="libuv dump command")
         parser.add_argument(

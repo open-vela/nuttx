@@ -77,6 +77,7 @@ class Dmesg(gdb.Command):
             "message": f"RAM log:\n{ramlog}\n RPMSG syslog:{rpmsg_syslog}",
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         ramlog = self._get_ramlog()
         rpmsg_syslog = self._get_rpmsg_syslog()

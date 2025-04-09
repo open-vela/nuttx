@@ -87,6 +87,7 @@ class NoteSnap(gdb.Command):
             "message": self.parse_notesnap(),
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         try:
             print(*(self.parse_notesnap()), sep="\n")

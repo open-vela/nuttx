@@ -40,6 +40,7 @@ class DiagnoseReport(gdb.Command):
     def __init__(self):
         super().__init__("diagnose report", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         parser = argparse.ArgumentParser(description=self.__doc__)
         parser.add_argument(

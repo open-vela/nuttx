@@ -44,6 +44,7 @@ class CrashThread(gdb.Command):
 
         return collected or utils.get_running_tcbs()
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         collected = self.collect(utils.get_tcbs())
 

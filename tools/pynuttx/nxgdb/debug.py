@@ -38,6 +38,7 @@ class DebugPy(gdb.Command):
         self.debugpy = debugpy
         super().__init__("debugpy", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         debugpy = self.debugpy
         if debugpy.is_client_connected():

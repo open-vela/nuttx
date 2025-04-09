@@ -127,6 +127,7 @@ class uORBDump(gdb.Command):
     def __init__(self):
         super().__init__("uorb", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         parser = argparse.ArgumentParser(description=self.__doc__)
         parser.add_argument(

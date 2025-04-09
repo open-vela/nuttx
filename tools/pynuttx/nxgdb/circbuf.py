@@ -148,6 +148,7 @@ class CircBufInfo(gdb.Command):
     def __init__(self):
         super().__init__("circbuf", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         parser = argparse.ArgumentParser(description="Dump circle buffer information")
         parser.add_argument(

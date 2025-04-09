@@ -79,6 +79,7 @@ class UnameCommand(gdb.Command):
 
         return args
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
 
         args = self.parse_arguments(gdb.string_to_argv(args))

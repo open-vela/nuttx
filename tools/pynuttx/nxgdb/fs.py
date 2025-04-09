@@ -321,6 +321,7 @@ class Fdinfo(gdb.Command):
             "message": output,
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg, from_tty):
         parser = argparse.ArgumentParser(
             description="Get fdinfo for a process or all processes."
@@ -357,6 +358,7 @@ class Mount(gdb.Command):
             "message": output or "No mount",
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         self.mount_count = 0
         nodes = filter(
@@ -459,6 +461,7 @@ class ForeachInode(gdb.Command):
             "message": output,
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         args = self.parse_arguments(args.split(" "))
         if not args:
@@ -513,6 +516,7 @@ class InfoShmfs(gdb.Command):
             "message": output or "No InfoShmfs",
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         self.total_size = 0
         self.block_count = 0
@@ -605,6 +609,7 @@ class InfoRomfs(gdb.Command):
             "message": output or "No romfs information",
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         args = self.parse_arguments(gdb.string_to_argv(args))
         nodes = filter(fstype_filter("romfs"), foreach_inode())
@@ -718,6 +723,7 @@ class InfoYaffs(gdb.Command):
             "message": output or "No yaffs information",
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         args = self.parse_arguments(gdb.string_to_argv(args))
         nodes = filter(fstype_filter("yaffs"), foreach_inode())

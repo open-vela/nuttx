@@ -155,6 +155,7 @@ class WorkQueueDump(gdb.Command):
 
         super().__init__("worker", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg, from_tty):
         queues = get_work_queues()
         for queue in queues:

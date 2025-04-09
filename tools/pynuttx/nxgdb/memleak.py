@@ -184,6 +184,7 @@ class MMLeak(gdb.Command):
             count = len(nodes[node])
             yield node, is_pid_alive(node.pid), count
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         heaps = memdump.get_heaps("g_mmheap")
 

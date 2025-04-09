@@ -158,6 +158,7 @@ class MMCheck(gdb.Command):
                 f"{len(reasons)} issues @{hex(address)}: " f"{','.join(reasons)}\n"
             )
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         try:
             heaps = memdump.get_heaps()

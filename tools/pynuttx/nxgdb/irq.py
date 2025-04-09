@@ -64,6 +64,7 @@ class IRQInfoDump(gdb.Command):
     def __init__(self):
         super().__init__("irqinfo", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         irq_unexpected_isr = utils.gdb_eval_or_none("irq_unexpected_isr")
 

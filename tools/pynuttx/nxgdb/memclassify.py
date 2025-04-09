@@ -315,6 +315,7 @@ class MMClassify(gdb.Command):
 
         return args
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         if not (args := self.parse_args(gdb.string_to_argv(arg))):
             print("memoryclassify: parse args error")

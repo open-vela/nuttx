@@ -335,6 +335,18 @@ def get_field_nitems(t: TypeOrStr, field: str) -> Union[int, None]:
 
 long_type = lookup_type("long")
 
+
+def dont_repeat_decorator(func):
+    def wrapper(self, args, from_tty):
+        try:
+            self.dont_repeat()
+            func(self, args, from_tty)
+        except Exception as e:
+            print(f"Error: {e}")
+
+    return wrapper
+
+
 # Common Helper Functions
 
 
@@ -1175,6 +1187,7 @@ class Hexdump(gdb.Command):
     def __init__(self):
         super().__init__("hexdump", gdb.COMMAND_USER)
 
+    @dont_repeat_decorator
     def invoke(self, args, from_tty):
         argv = args.split(" ")
         address = 0
@@ -1221,6 +1234,7 @@ class Addr2Line(gdb.Command):
         backtraces = Backtrace(addresses, formatter=self.formatter, break_null=False)
         gdb.write(str(backtraces))
 
+    @dont_repeat_decorator
     def invoke(self, args, from_tty):
         if not args:
             gdb.write(Addr2Line.__doc__ + "\n")

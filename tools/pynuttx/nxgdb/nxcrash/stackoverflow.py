@@ -55,6 +55,7 @@ class CrashStackOverflow(gdb.Command):
 
         return collected
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         collected = self.collect(utils.get_tcbs())
         if not collected:

@@ -758,6 +758,7 @@ class MMHeapInfo(gdb.Command):
     def __init__(self):
         super().__init__("mm heap", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         for heap in get_heaps():
             regions = [(start.address, end.address) for start, end in heap.regions]
@@ -773,6 +774,7 @@ class MMPoolInfo(gdb.Command):
         super().__init__("mm pool", gdb.COMMAND_USER)
         utils.alias("mempool", "mm pool")
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         parser = argparse.ArgumentParser(description="Dump memory pool information.")
         parser.add_argument(

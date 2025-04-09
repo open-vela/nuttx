@@ -90,6 +90,7 @@ class Pmconfig(gdb.Command):
                 + "\n"
             )
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
         if not has_inferior():
             return

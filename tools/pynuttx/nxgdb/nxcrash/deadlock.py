@@ -81,6 +81,7 @@ class DeadLock(gdb.Command):
             "deadlocks": {int(pid): [i for i in h] for pid, h in collected},
         }
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         collected = self.collect(utils.get_tcbs())
         if not collected:

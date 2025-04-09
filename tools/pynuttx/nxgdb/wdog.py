@@ -62,6 +62,7 @@ class WDogDump(gdb.Command):
     def __init__(self):
         super().__init__("wdog", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg, from_tty):
         for wdog in get_wdog_list():
             print(wdog)

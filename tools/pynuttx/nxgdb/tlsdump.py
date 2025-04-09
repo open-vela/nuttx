@@ -126,6 +126,7 @@ class TlsDump(gdb.Command):
             print("Error occurred during integrity check")
             return True
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         args = self.parse_arguments(gdb.string_to_argv(args))
         if not args:

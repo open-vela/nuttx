@@ -328,6 +328,7 @@ class ListCheck(gdb.Command):
     def __init__(self):
         super().__init__("list_check", gdb.COMMAND_DATA, gdb.COMPLETE_EXPRESSION)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg, from_tty):
         argv = gdb.string_to_argv(arg)
         if len(argv) != 1:
@@ -350,6 +351,7 @@ class ForeachListEntry(gdb.Command):
     def __init__(self):
         super().__init__("foreach list", gdb.COMMAND_DATA, gdb.COMPLETE_EXPRESSION)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg, from_tty):
         argv = gdb.string_to_argv(arg)
 
@@ -407,6 +409,7 @@ class ForeachArray(gdb.Command):
     def __init__(self):
         super().__init__("foreach array", gdb.COMMAND_DATA, gdb.COMPLETE_EXPRESSION)
 
+    @utils.dont_repeat_decorator
     def invoke(self, arg, from_tty):
         argv = gdb.string_to_argv(arg)
 

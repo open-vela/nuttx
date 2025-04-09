@@ -251,6 +251,7 @@ class RPMsgDump(gdb.Command):
             self.dump_rpmsg_virtio(rdev)
             self.dump_rpmsg_port(rdev)
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         if not (args := self.parse_args(args)):
             return

@@ -22,7 +22,7 @@
 
 import gdb
 
-from .utils import read_u64
+from .utils import dont_repeat_decorator, read_u64
 
 
 class PageTable:
@@ -103,6 +103,7 @@ class DumpPageTableCommand(gdb.Command):
     def __init__(self):
         super().__init__("dump_pagetable", gdb.COMMAND_USER)
 
+    @dont_repeat_decorator
     def invoke(self, arg, from_tty):
 
         arch = gdb.selected_inferior().architecture().name()

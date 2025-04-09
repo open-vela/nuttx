@@ -79,6 +79,7 @@ class NXGcore(gdb.Command):
 
         super().__init__("nxgcore", gdb.COMMAND_USER)
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         try:
             args = parse_args(gdb.string_to_argv(args))

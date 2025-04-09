@@ -30,7 +30,7 @@ try:
 except ImportError:
     print('Package missing, please do "pip install lief"')
 
-from .utils import get_tcbs, has_field
+from .utils import dont_repeat_decorator, get_tcbs, has_field
 
 CONFIG_ARCH_USE_SEPARATED_SECTION = has_field("struct module_s", "sectalloc")
 
@@ -40,6 +40,7 @@ class ElfImport(gdb.Command):
         if has_field("struct task_group_s", "tg_bininfo"):
             super().__init__("elfimport", gdb.COMMAND_USER)
 
+    @dont_repeat_decorator
     def invoke(self, args, from_tty):
         parser = argparse.ArgumentParser(description="import elf symbols to gdb")
         parser.add_argument("elfpath", type=str, help="elf file path, etc: apps/bin")

@@ -237,6 +237,7 @@ class NetStats(gdb.Command):
         except gdb.error as e:
             gdb.write("Failed to get UDP stats: %s\n" % e)
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         # Parse the arguments in a simple way
         if not args or "all" in args:
@@ -313,6 +314,7 @@ class NetCheck(gdb.Command):
         finally:
             return result, message
 
+    @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
         if utils.get_symbol_value("CONFIG_MM_IOB"):
             result, message = self.check_iob()
