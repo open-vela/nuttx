@@ -20,9 +20,22 @@
 #
 ############################################################################
 
+from dataclasses import dataclass
+from typing import List
+
 import gdb
 
 from .. import utils
+
+
+@dataclass
+class ThreadInfo:
+    """Thread information"""
+
+    pid: int
+    name: str
+    backtrace: utils.Backtrace
+    crashed: bool = False
 
 
 class CrashThread(gdb.Command):
@@ -31,18 +44,55 @@ class CrashThread(gdb.Command):
     def __init__(self):
         super().__init__("crash thread", gdb.COMMAND_USER)
 
-    def collect(self, tcbs):
+    def collect(self, tcbs) -> List[ThreadInfo]:
         """Collect threads that crashed information"""
 
-        collected = []
-        for tcb in tcbs:
-            pid = int(tcb["pid"])
+        def is_thread_crashed(pid):
+            """Check if the thread is crashed"""
+            # Check if the thread is in the crashed state
             for frame in utils.get_thread_frames(pid):
                 if "_assert" in utils.get_frame_func_name(frame):
-                    collected.append(tcb)
-                    break
+                    return True
 
-        return collected or utils.get_running_tcbs()
+        def get_thread_info(tcb):
+            pid = int(tcb.pid)
+            return ThreadInfo(
+                pid=pid,
+                name=utils.get_task_name(tcb),
+                backtrace=utils.Backtrace(utils.get_backtrace(pid)),
+                crashed=True,
+            )
+
+        collected = []
+        pid = 0
+        for tcb in tcbs:
+            pid = int(tcb["pid"])
+            if is_thread_crashed(pid):
+                collected.append(get_thread_info(tcb))
+
+        # Analysis the g_last_regs if we have running target (or nxstub)
+        if type(gdb.selected_inferior().connection) is gdb.RemoteTargetConnection:
+            running_tasks = utils.get_running_tcbs()
+            for n in range(utils.get_ncpus()):
+                gdb.execute(f"setregs g_last_regs[{n}]")
+                if is_thread_crashed(pid):
+                    tcb = running_tasks[n]
+                    collected.append(
+                        ThreadInfo(
+                            pid=tcb.pid if tcb else -1 - n,
+                            name=f"g_last_regs[{n}]-"
+                            + (utils.get_task_name(tcb) if tcb else ""),
+                            backtrace=utils.Backtrace(
+                                utils.get_backtrace(pid)
+                            ),  # setregs affect backtrace of current thread
+                            crashed=True,
+                        )
+                    )
+
+            # Restore the tcb registers.
+            gdb.execute(f"setregs {utils.get_tcb(pid).xcp.regs}")
+
+        return collected or [get_thread_info(tcb) for tcb in utils.get_running_tcbs()]
 
     @utils.dont_repeat_decorator
     def invoke(self, arg: str, from_tty: bool) -> None:
@@ -52,23 +102,33 @@ class CrashThread(gdb.Command):
             gdb.write("No crashed threads found.\n")
             return
 
-        print(f"Found crashed threads\n{'PID':<4} {'Name':<10}")
-        for tcb in collected:
-            print("{:<4} {:<10}".format(tcb["pid"], utils.get_task_name(tcb)))
+        print(f"Found {len(collected)} crashed threads\n{'PID':<4} {'Name':<10}")
+        for thread in collected:
+            print("{:<4} {:<10}".format(thread.pid, thread.name))
+            for _, func, _, _ in thread.backtrace:
+                print("{:<4} {:<10}".format("", func))
 
     def diagnose(self, *args, **kwargs):
-        tcbs = self.collect(utils.get_tcbs())
+        threads = self.collect(utils.get_tcbs())
         return {
             "title": "Threads that seem crashed",
-            "summary": f"{'No' if not tcbs else len(tcbs)} threads seem crashed",
-            "result": "fail" if tcbs else "pass",
+            "summary": f"{'No' if not threads else len(threads)} threads seem crashed",
+            "result": "fail" if threads else "pass",
             "command": "crash thread",
             "thread": [
                 {
-                    "pid": tcb["pid"],
-                    "name": utils.get_task_name(tcb),
-                    "backtrace": utils.Backtrace(utils.get_backtrace(int(tcb["pid"]))),
+                    "pid": thread.pid,
+                    "name": thread.name,
+                    "backtrace": [
+                        {
+                            "address": addr,
+                            "function": func,
+                            "source": src,
+                            "line": line,
+                        }
+                        for addr, func, src, line in thread.backtrace
+                    ],
                 }
-                for tcb in tcbs
+                for thread in threads
             ],
         }
