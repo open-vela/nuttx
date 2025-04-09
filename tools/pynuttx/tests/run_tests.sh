@@ -133,6 +133,10 @@ python -c "import sys; print(sys.version); print(sys.path)"
 
 echo "##############################"
 
+# Prepare the environment for gdb plugin testing in a virtual environment. However,
+# this requires that the Python version in the virtual environment
+# should be as consistent as possible with the Python version in the real environment.
+PACKAGE_PATH=$(python -m site | grep 'site-packages' | head -n 1 | sed 's/^[ \t]*//;s/[ \t]*$//')
 
 # Test requires running the ELF without Qemu
 gdb-multiarch \
@@ -142,7 +146,7 @@ ${elffile} \
 -ex="b up_idle" \
 -ex="${EXTRA_CMD}" \
 -ex="c" \
--ex="python import sys; print(sys.version); print(sys.executable); print(sys.path)" \
+-ex="python import sys; sys.path.append(${PACKAGE_PATH}); print(sys.version); print(sys.executable); print(sys.path)" \
 -ex="source ${GDB_TOOLS}/gdbinit.py" \
 -ex="source ${GDB_TOOLS}/tests/runner.py" \
 
