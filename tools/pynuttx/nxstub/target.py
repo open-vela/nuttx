@@ -137,7 +137,6 @@ class Target:
                 return self.threads
 
             ncpus = utils.get_ncpus(self.elf)
-            regsize = utils.get_regsize(self.elf)
 
             data, sym = self._read_symbol("g_running_tasks")  # an array of pointers
             running_tasks = utils.parse_array(data, pointer, ncpus)
@@ -162,16 +161,8 @@ class Target:
                 state = utils.uint8_t(data[tcbinfo.state_off : tcbinfo.state_off + 1])
                 state = states[state] if state < len(states) else "Unknown"
 
-                if address in running_tasks:
-                    # Running task registers is not in memory, best chance is the registers
-                    # stored in g_last_regs when assert happened.
-                    last_regs = self.elf.get_symbol("g_last_regs").value
-                    cpu = running_tasks.index(address)
-                    xcpregs = cpu * regsize + last_regs
-                else:
-                    off = tcbinfo.regs_off
-                    xcpregs = data[off : off + pointer.sizeof()]
-                    xcpregs = pointer.parse(xcpregs)
+                xcpregs = data[tcbinfo.regs_off : tcbinfo.regs_off + pointer.sizeof()]
+                xcpregs = pointer.parse(xcpregs)
 
                 try:
                     registers.load(addr=xcpregs)
@@ -290,15 +281,29 @@ class Target:
         if command.startswith(b"setregs"):
             command = command.decode("ascii")
             _, address = command.split(" ")
-            try:
-                address = (
-                    int(address, 16)
-                    if "0x" in address or "0X" in address
-                    else int(address)
-                )
-            except ValueError:
-                # try if it's a symbol, note that expression is not supported.
-                address = self.elf.get_symbol(address).value
+
+            # Check frequently used symbols
+            if address.startswith("g_last_regs"):
+                # address could be g_last_regs or g_last_regs[1] or g_last_regs[0] etc.
+                if "[" in address:
+                    regsize = utils.get_regsize(self.elf)
+                    splitted = address.split("[")
+                    index = int(splitted[1].split("]")[0])
+                    address = self.elf.get_symbol(splitted[0]).value
+                    address += index * regsize
+                else:
+                    symbol = self.elf.get_symbol(address)
+                    address = symbol.value
+            else:
+                try:
+                    address = (
+                        int(address, 16)
+                        if "0x" in address or "0X" in address
+                        else int(address)
+                    )
+                except ValueError:
+                    # try if it's a symbol, note that expression is not supported.
+                    address = self.elf.get_symbol(address).value
 
             self.registers.load(address)
             return f"Loaded registers from {address:#x}\n"
