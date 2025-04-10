@@ -23,6 +23,7 @@ __version__ = "0.0.1"
 import argparse
 import logging
 import multiprocessing
+import os
 import re
 import signal
 import subprocess
@@ -123,12 +124,38 @@ def gdbstub_start(args):
     memories = []
     registers = None
 
-    for rawfile in args.rawfile or []:
-        filename, address = rawfile.split(":")
-        address = int(address, 16)
-        with open(filename, "rb") as f:
-            memories.append(RawMemory(address, f.read()))
-            print(f"Add memory dump: {memories[-1]}")
+    for name in args.rawfile or []:
+
+        def get_address(filename: str):
+            """
+            Get memory dump address from file name from below formats
+            memdump.bin:0x123456
+            abc/0x123456.bin
+            0x123456.bin
+            abc/123456.bin
+            123456.bin
+            """
+            try:
+                if ":" in filename:
+                    return int(filename.split(":")[1], 16)
+                else:
+                    return int(filename.split("/")[-1].split(".")[0], 0)
+            except ValueError:
+                return None
+
+        if os.path.isdir(name):
+            for f in os.listdir(name):
+                if (address := get_address(f)) is None:
+                    print(f"Ignore file {os.path.join(name, f)}")
+                else:
+                    with open(os.path.join(name, f), "rb") as f:
+                        memories.append(RawMemory(address, f.read()))
+                        print(f"Add memory dump: {memories[-1]}")
+        else:
+            address = get_address(name)
+            with open(name, "rb") as f:
+                memories.append(RawMemory(address, f.read()))
+                print(f"Add memory dump: {memories[-1]}")
 
     elf = utils.LiefELF(args.elffile)
     registers, mem = parse_log(elf, args.arch, args.log)
@@ -254,8 +281,6 @@ def parse_args(args=None):
 
 def main(args=None):
     args = parse_args(args)
-
-    gdb = None
     if args.debug:
         logging.basicConfig(
             format="%(asctime)s:%(levelname)s:%(name)s:%(message)s",
@@ -263,6 +288,7 @@ def main(args=None):
         logging.getLogger(__name__).setLevel(logging.DEBUG)
         logging.getLogger("nxreg").setLevel(logging.DEBUG)
 
+    gdb = None
     if args.gdb:
         gdb = gdb_start(args)
         # Ignore the Ctrl+C signal
