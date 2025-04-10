@@ -239,7 +239,11 @@ class GDBStub:
         packet = packet.decode("ascii")
         addr, length_and_data = packet[1:].split(",")
         length, data = length_and_data.split(":")
-        ok = self.target.memory_write(int(addr, 16), unhexlify(data), int(length, 16))
+        if int(length, 16) != len(data) // 2:
+            self.send_packet("E01")
+            return
+
+        ok = self.target.memory_write(int(addr, 16), unhexlify(data))
         self.send_packet("OK" if ok else "")
 
     def handle_etx(self, packet: bytes):
