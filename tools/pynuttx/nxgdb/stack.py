@@ -100,15 +100,13 @@ class Stack(object):
         return usage
 
     def check_max_usage(self):
-        ptr_4bytes = gdb.Value(self._stack_base).cast(
-            utils.lookup_type("unsigned int").pointer()
-        )
-
         spare = 0
-
-        for i in range(0, self._stack_size // 4):
-            if int(ptr_4bytes[i]) != self._pattern:
-                spare = i * 4
+        memory = gdb.selected_inferior().read_memory(self._stack_base, self._stack_size)
+        size = utils.sizeof("int")
+        pattern = int(self._pattern).to_bytes(size, byteorder="little")
+        for i in range(0, self._stack_size // size):
+            if bytes(memory[i * size : (i + 1) * size]) != pattern:
+                spare = i * size
                 break
         return self._stack_size - spare
 
