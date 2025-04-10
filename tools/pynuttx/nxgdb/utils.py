@@ -1068,10 +1068,13 @@ def gather_gdbcommands(modules=None, path=None) -> List[gdb.Command]:
     modules = modules or gather_modules(path)
     commands = []
     for m in modules:
-        module = importlib.import_module(f"{__package__}.{m}")
-        for c in module.__dict__.values():
-            if isinstance(c, type) and issubclass(c, gdb.Command):
-                commands.append(c)
+        try:
+            module = importlib.import_module(f"{__package__}.{m}")
+            for c in module.__dict__.values():
+                if isinstance(c, type) and issubclass(c, gdb.Command):
+                    commands.append(c)
+        except Exception:
+            gdb.write(f"Ignore module {m}\n")
     return commands
 
 
