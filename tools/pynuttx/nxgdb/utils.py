@@ -1011,7 +1011,28 @@ def check_version():
         gdb.write(f"Build version: {mem_version}\n")
 
     switch_inferior(1)  # Switch back
+    # Verify the ELF file version against the GDB tool version
+    check_compatibility()
     suppress_cli_notifications(state)
+
+
+def check_compatibility():
+    """Check the elf and the GDB tool version"""
+    from . import uname
+
+    kernel_version = uname.kernel_version
+    version_parts = kernel_version.split(" ")
+    if len(version_parts) < 1:
+        gdb.write(f"Invalid kernel_version format: {kernel_version}")
+        return
+    elf_version = version_parts[0]
+    tool_verson = uname.tool_version
+
+    if not elf_version.startswith(tool_verson):
+        gdb.write(
+            f"\x1b[31;1mWarning: ELF version {elf_version} "
+            f"does not match GDB tool version {tool_verson}\x1b[m\n"
+        )
 
 
 def get_task_tls(tid, key):
