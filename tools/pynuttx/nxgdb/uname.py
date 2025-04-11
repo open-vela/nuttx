@@ -19,10 +19,35 @@
 ############################################################################
 
 import argparse
+import subprocess
+from os import path
 
 import gdb
 
 from . import utils
+
+
+def get_commit_id():
+    here = path.dirname(path.abspath(__file__))
+    try:
+        result = subprocess.run(
+            ["git", "-C", here, "rev-parse", "--short", "HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
+kernel_name = "NuttX"
+node_name = str(utils.get_symbol_value("CONFIG_LIBC_HOSTNAME")).replace('"', "")
+kernel_release = str(utils.get_symbol_value("CONFIG_VERSION_STRING")).replace('"', "")
+kernel_version = str(utils.parse_and_eval("g_version")).replace('"', "")
+machine = str(utils.get_symbol_value("CONFIG_ARCH")).replace('"', "")
+tool_version = get_commit_id()
 
 
 class UnameCommand(gdb.Command):
@@ -81,21 +106,9 @@ class UnameCommand(gdb.Command):
 
     @utils.dont_repeat_decorator
     def invoke(self, args, from_tty):
-
         args = self.parse_arguments(gdb.string_to_argv(args))
         if not args:
             return
-
-        kernel_name = "NuttX"
-        node_name = str(utils.get_symbol_value("CONFIG_LIBC_HOSTNAME") or "").replace(
-            '"', ""
-        )
-        kernel_release = str(
-            utils.get_symbol_value("CONFIG_VERSION_STRING") or ""
-        ).replace('"', "")
-        kernel_version = str(utils.parse_and_eval("g_version") or "").replace('"', "")
-        machine = str(utils.get_symbol_value("CONFIG_ARCH") or "").replace('"', "")
-        tool_version = "1.0.0"
 
         if args.all:
             print(
