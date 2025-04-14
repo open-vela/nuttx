@@ -149,8 +149,10 @@ class RPMsgDump(gdb.Command):
         return None
 
     def rpmsg_port_node_to_buf(self, queue, node):
-        node_offset = int(node) - int(queue["node"])
-        buf_addr = queue["buf"] + (node_offset * queue["len"])
+        node_offset = (int(node) - int(queue["node"])) / int(
+            utils.sizeof("struct list_node")
+        )
+        buf_addr = queue["buf"] + (int(node_offset) * queue["len"])
         return buf_addr
 
     def dump_rpmsg_port_buffer(self, rdev, queue, label):
@@ -159,6 +161,7 @@ class RPMsgDump(gdb.Command):
 
         for node in NxList(head):
             hdr = self.rpmsg_port_node_to_buf(queue, node)
+            hdr = hdr.cast(utils.lookup_type("struct rpmsg_port_header_s").pointer())
             if not hdr or not hdr["buf"]:
                 continue
 
@@ -175,7 +178,7 @@ class RPMsgDump(gdb.Command):
         if not self.is_rpmsg_transport(rdev, "port"):
             return
 
-        port = rdev.cast(utils.lookup_type("struct rpmsg_port_s").pointer())
+        port = utils.container_of(rdev, "struct rpmsg_port_s", "rdev")
 
         gdb.write(f"rxq nused:{port['rxq']['ready']['num']}\n")
         gdb.write(f"rxq navail:{port['rxq']['free']['num']}\n")
