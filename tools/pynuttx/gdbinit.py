@@ -35,3 +35,5 @@ if __name__ == "__main__":
             del sys.modules[key]
 
     import nxgdb  # noqa: F401
+
+    print("GDB Plugin Loaded Successfully")
