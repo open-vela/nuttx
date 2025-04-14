@@ -2,6 +2,7 @@ angr
 capstone
 construct
 debugpy
+lauterbach-trace32-rcl
 lief
 matplotlib
 numpy
@@ -9,3 +10,4 @@ pandas
 pillow
 plotly
 pyelftools
+pylink-square
