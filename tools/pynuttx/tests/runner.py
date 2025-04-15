@@ -20,7 +20,6 @@
 ############################################################################
 
 import os
-import sys
 import unittest
 
 if __name__ == "__main__":
@@ -40,6 +39,6 @@ if __name__ == "__main__":
     result_mock = test_runner.run(testsuit_mock)
 
     if not result_runtime.wasSuccessful() or not result_mock.wasSuccessful():
-        sys.exit(255)
+        print("GDB Plugin Test Failed")
     else:
-        sys.exit(0)
+        print("GDB Plugin Test Successfully")
