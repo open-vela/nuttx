@@ -120,9 +120,55 @@ def parse_log(elf, arch, logfile):
     return registers[int(choice)], memories[int(choice)]
 
 
+def auto_parse_dump(args):
+    """
+    Automatically parse the dump file, which could be a crash log, memory dump or core dump.
+    Store the parsed result directly to args, so the remaining logic keeps unchanged.
+    """
+    dump = args.dump
+    if not dump:
+        return
+
+    if args.rawfile or args.log or args.core:
+        raise ValueError("Error: 'dump' cannot be used with rawfile, log, or core.")
+
+    if os.path.isdir(dump):
+        # We suppose only memory dump could be a directory
+        print(f"Input is raw memory dump: {dump}")
+        args.rawfile = [dump]  # rawfile must be a list
+        return
+
+    def is_core_file(file):
+        # check elf header, check magic and elf type is CORE
+        with open(dump, "rb") as f:
+            magic = f.read(4)
+            if magic != b"\x7fELF":
+                return False
+
+            f.seek(0x10)
+            elf_type = int.from_bytes(f.read(2), "little")
+            return elf_type == 4
+
+    # Check if the dump file is a crash log, memory dump or core dump
+    if dump.endswith(".log"):
+        print(f"Input is crash log: {dump}")
+        args.log = dump
+    elif dump.endswith(".bin"):
+        print(f"Input is raw memory dump: {dump}")
+        args.rawfile = dump
+    elif is_core_file(dump):
+        print(f"Input is core dump: {dump}")
+        args.core = dump
+    else:
+        raise ValueError(f"Unknown dump file type: {dump}")
+
+
 def gdbstub_start(args):
     memories = []
     registers = None
+
+    # Parse args.dump to normal parameter if exist
+    auto_parse_dump(args)
 
     for name in args.rawfile or []:
 
@@ -275,6 +321,13 @@ def parse_args(args=None):
         type=str,
         help=f'Optional custom GDB init command when GDB launches, default: "{DEFAULT_GDB_INIT_CMD}".',
     )
+    parser.add_argument(
+        "dump",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Optional dump file that could be crash log, memory dump or core dump, automatically parsed.",
+    )
 
     return parser.parse_args(args)
 
@@ -297,8 +350,9 @@ def main(args=None):
     try:
         gdbstub_start(args)
     except Exception as e:
-        print(f"GDBStub error: {e}:\n {traceback.format_exc()}")
+        print(f"GDBStub error: {e}\n {traceback.format_exc() if args.debug else ''}")
 
     if gdb:
+        print("Stop GDB session...")
         gdb.kill()
         gdb.join()
