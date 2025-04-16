@@ -255,14 +255,12 @@ class Target:
 
             if address + len(data) < m.address:
                 memories.insert(i, mem)  # New memory region in the middle
-                return
-
-            if (offset := address - m.address) >= 0:
+            elif (offset := address - m.address) >= 0:
                 # Overwrite and append data to existing memory
                 m.data[offset : offset + len(data)] = data
             else:
                 # Prepend data to existing memory
-                offset = address + len(m) - m.address
+                offset = address + len(data) - m.address
                 m.data = data + m.data[offset:]
                 m.address = address
 
@@ -274,6 +272,8 @@ class Target:
 
                 memories.remove(m2)
                 m.data += m2.data[end - m2.address :]
+
+            break
 
     def monitor_command(self, command: bytes) -> str:
         """Handle monitor command"""
