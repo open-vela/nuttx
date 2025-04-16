@@ -50,6 +50,15 @@ class DiagnoseReport(gdb.Command):
             type=str,
             help="report output file name",
         )
+        parser.add_argument(
+            "-c",
+            "--command",
+            nargs="+",
+            help="only run specified commands (case-insensitive)",
+        )
+        parser.add_argument(
+            "-l", "--list", action="store_true", help="list available commands"
+        )
 
         try:
             args = parser.parse_args(gdb.string_to_argv(args))
@@ -74,6 +83,8 @@ class DiagnoseReport(gdb.Command):
             if isinstance(obj, cls) and not isinstance(obj, type)
         }
 
+        only_set = set(name.lower() for name in args.command) if args.command else None
+
         results = []
         for clz in commands:
             if hasattr(clz, "diagnose"):
@@ -81,6 +92,15 @@ class DiagnoseReport(gdb.Command):
                 name = clz.__name__.lower()
                 if name not in registered_command_types:
                     continue
+
+                if args.list:
+                    gdb.write(f"{name}\n")
+                    continue
+
+                if only_set:
+                    if name not in only_set:
+                        continue
+
                 gdb.write(f"Run command: {name}\n")
                 try:
                     result = command.diagnose()
@@ -97,6 +117,9 @@ class DiagnoseReport(gdb.Command):
 
                 result.setdefault("command", name)
                 results.append(result)
+
+        if args.list:
+            return
 
         gdb.write(f"Write report to {reportfile}\n")
         with open(reportfile, "w") as f:
