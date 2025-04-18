@@ -974,7 +974,8 @@ def task_is_idle(tcb):
 
 # sem
 def sem_is_mutex(sem):
-    return sem & get_symbol_value("SEM_TYPE_MUTEX")
+    SEM_TYPE_MUTEX = 4
+    return sem["flags"] & SEM_TYPE_MUTEX
 
 
 def switch_inferior(inferior):

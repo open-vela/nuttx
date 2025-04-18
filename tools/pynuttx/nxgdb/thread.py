@@ -225,7 +225,7 @@ class Nxinfothreads(gdb.Command):
 
             if tcb["task_state"] == gdb.parse_and_eval("TSTATE_WAIT_SEM"):
                 mutex = tcb["waitobj"].cast(utils.lookup_type("sem_t").pointer())
-                if utils.sem_is_mutex(mutex["flags"]):
+                if utils.sem_is_mutex(mutex):
                     mutex = tcb["waitobj"].cast(utils.lookup_type("mutex_t").pointer())
                     statename = f"Waiting,Mutex:{mutex['holder']}"
 
@@ -459,8 +459,7 @@ class Ps(gdb.Command):
 
         waiter = (
             str(int(cast2ptr(tcb["waitobj"], "mutex_t")["holder"]))
-            if tcb["waitobj"]
-            and utils.sem_is_mutex(cast2ptr(tcb["waitobj"], "sem_t")["flags"])
+            if tcb["waitobj"] and utils.sem_is_mutex(cast2ptr(tcb["waitobj"], "sem_t"))
             else ""
         )
         state_and_event = eval2str(TaskState, (tcb["task_state"])) + (

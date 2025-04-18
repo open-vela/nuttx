@@ -40,7 +40,7 @@ class DeadLock(gdb.Command):
             return False
 
         sem = tcb["waitobj"].cast(utils.lookup_type("sem_t").pointer())
-        if not utils.sem_is_mutex(sem["flags"]):
+        if not utils.sem_is_mutex(sem):
             return False
 
         # It's waiting on a mutex
