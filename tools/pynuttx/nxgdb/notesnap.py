@@ -83,7 +83,7 @@ class NoteSnap(gdb.Command):
             "title": "Notesnap Report",
             "summary": "notesnap dump",
             "command": "notesnap",
-            "result": "pass",
+            "result": "info",
             "message": self.parse_notesnap(),
         }
 
