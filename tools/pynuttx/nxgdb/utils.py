@@ -175,6 +175,10 @@ class Symbol:
         )
 
     @property
+    def funcname(self) -> str:
+        return self.func
+
+    @property
     def filename(self) -> str:
         if not self.is_valid():
             return ""
@@ -190,6 +194,14 @@ class Symbol:
         return (
             f"<Symbol {hex(self.address)}: {self.func} at {self.filename}:{self.line}>"
         )
+
+    def toJSON(self):
+        return {
+            "address": self.address,
+            "function": self.funcname,
+            "source": self.filename,
+            "line": self.line,
+        }
 
 
 class Backtrace:
@@ -938,6 +950,17 @@ def get_task_name(tcb):
         return name.string()
     except gdb.error:
         return ""
+
+
+def get_task_entry(tcb) -> Symbol:
+    if not tcb:
+        return None
+
+    try:
+        entry = tcb["entry"]["main"]
+        return Symbol(entry)
+    except gdb.error:
+        return None
 
 
 def task_is_running(tcb):
