@@ -84,6 +84,7 @@ class Target:
         self.core: utils.LiefELF = core
         self.registers = registers or Registers(elf, arch=arch)
         self.memories: List[RawMemory] = []
+        self.registers.readmem = self.memory_read
         self.arch = arch
         self.pid = self.PID0_REPLACE  # Current thread PID
         self.remap = remap or []
