@@ -28,6 +28,10 @@ from nxreg.register import Registers
 
 from . import utils
 
+# Manually limit the maximum number of threads, in case the memory is
+# corrupted to non-sense values.
+MAX_THREADS = 512
+
 
 class RawMemory:
     def __init__(self, address: int, data: bytearray):
@@ -137,7 +141,12 @@ class Target:
                 self.logger.error(f"No threads info found: {npidhash}")
                 return self.threads
 
+            if npidhash > MAX_THREADS:
+                self.logger.warning(f"g_npidhash looks wrong: {npidhash}")
+                npidhash = MAX_THREADS
+
             ncpus = utils.get_ncpus(self.elf)
+            regsize = utils.get_regsize(self.elf)
 
             data, sym = self._read_symbol("g_running_tasks")  # an array of pointers
             running_tasks = utils.parse_array(data, pointer, ncpus)
@@ -162,8 +171,28 @@ class Target:
                 state = utils.uint8_t(data[tcbinfo.state_off : tcbinfo.state_off + 1])
                 state = states[state] if state < len(states) else "Unknown"
 
-                xcpregs = data[tcbinfo.regs_off : tcbinfo.regs_off + pointer.sizeof()]
-                xcpregs = pointer.parse(xcpregs)
+                xcpregs = None
+                if address in running_tasks:
+                    # Running task registers is not in memory, best chance is the registers
+                    # stored in g_last_regs when assert happened.
+                    last_regs = self.elf.get_symbol("g_last_regs").value
+                    cpu = running_tasks.index(address)
+                    xcpregs = cpu * regsize + last_regs
+                    # Check if the g_last_regs is obviously invalid
+                    if all(b == 0 for b in self.memory_read(xcpregs, regsize)):
+                        self.logger.error(
+                            f"Invalid g_last_regs: @ {xcpregs:#x}, use TCB instead"
+                        )
+                        xcpregs = None
+                    else:
+                        print(
+                            f"\x1b[31;1mLoad CPU{cpu} task [{name}] registers from g_last_regs\x1b[m"
+                        )
+
+                if not xcpregs:
+                    off = tcbinfo.regs_off
+                    xcpregs = data[off : off + pointer.sizeof()]
+                    xcpregs = pointer.parse(xcpregs)
 
                 try:
                     registers.load(addr=xcpregs)

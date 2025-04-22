@@ -70,28 +70,6 @@ class CrashThread(gdb.Command):
             if is_thread_crashed(pid):
                 collected.append(get_thread_info(tcb))
 
-        # Analysis the g_last_regs if we have running target (or nxstub)
-        if type(gdb.selected_inferior().connection) is gdb.RemoteTargetConnection:
-            running_tasks = utils.get_running_tcbs()
-            for n in range(utils.get_ncpus()):
-                gdb.execute(f"setregs g_last_regs[{n}]")
-                if is_thread_crashed(pid):
-                    tcb = running_tasks[n]
-                    collected.append(
-                        ThreadInfo(
-                            pid=tcb.pid if tcb else -1 - n,
-                            name=f"g_last_regs[{n}]-"
-                            + (utils.get_task_name(tcb) if tcb else ""),
-                            backtrace=utils.Backtrace(
-                                utils.get_backtrace(pid)
-                            ),  # setregs affect backtrace of current thread
-                            crashed=True,
-                        )
-                    )
-
-            # Restore the tcb registers.
-            gdb.execute(f"setregs {utils.get_tcb(pid).xcp.regs}")
-
         return collected or [get_thread_info(tcb) for tcb in utils.get_running_tcbs()]
 
     @utils.dont_repeat_decorator
