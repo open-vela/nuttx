@@ -267,10 +267,12 @@ class Target:
 
             # Remove overlapping memory regions
             end = m.address + len(m)
+            i = memories.index(m)  # Recalculate index, in case of list changed
             for m2 in memories[i + 1 :]:
                 if end < m2.address:
                     break
 
+                self.logger.debug(f"Remove overlapping memory: {m2}")
                 memories.remove(m2)
                 m.data += m2.data[end - m2.address :]
 
