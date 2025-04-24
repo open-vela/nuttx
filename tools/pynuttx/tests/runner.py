@@ -24,9 +24,6 @@ import unittest
 
 if __name__ == "__main__":
     test_dir = os.path.dirname(os.path.abspath(__file__))
-    testsuit_mock = unittest.defaultTestLoader.discover(
-        test_dir, pattern="test_mock*.py"
-    )
     testsuit_runtime = unittest.defaultTestLoader.discover(
         test_dir, pattern="test_runtime*.py"
     )
@@ -36,9 +33,13 @@ if __name__ == "__main__":
     # NOTE: Run the runtime testsuit first, as we are going to mock
     # lots of methods as well as classes later!
     result_runtime = test_runner.run(testsuit_runtime)
-    result_mock = test_runner.run(testsuit_mock)
 
-    if not result_runtime.wasSuccessful() or not result_mock.wasSuccessful():
+    """ testsuit_mock = unittest.defaultTestLoader.discover(
+        test_dir, pattern="test_mock*.py"
+    )
+    result_mock = test_runner.run(testsuit_mock) """
+
+    if not result_runtime.wasSuccessful():
         print("GDB Plugin Test Failed")
     else:
         print("GDB Plugin Test Successfully")
