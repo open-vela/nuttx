@@ -30,6 +30,7 @@ import math
 import re
 import shlex
 import sys
+import traceback
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Union
@@ -352,7 +353,7 @@ def dont_repeat_decorator(func):
             self.dont_repeat()
             func(self, args, from_tty)
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error: {e}\n{traceback.format_exc()}")
 
     return wrapper
 
