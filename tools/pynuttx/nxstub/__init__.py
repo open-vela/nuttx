@@ -155,7 +155,7 @@ def auto_parse_dump(args):
         args.log = dump
     elif dump.endswith(".bin"):
         print(f"Input is raw memory dump: {dump}")
-        args.rawfile = dump
+        args.rawfile = [dump]
     elif is_core_file(dump):
         print(f"Input is core dump: {dump}")
         args.core = dump
@@ -199,7 +199,7 @@ def gdbstub_start(args):
                         print(f"Add memory dump: {memories[-1]}")
         else:
             address = get_address(name)
-            with open(name, "rb") as f:
+            with open(name.split(":")[0], "rb") as f:
                 memories.append(RawMemory(address, f.read()))
                 print(f"Add memory dump: {memories[-1]}")
 
