@@ -120,15 +120,7 @@ class CrashThread(gdb.Command):
                     "pid": thread.pid,
                     "name": thread.name,
                     "entry": utils.get_task_entry(utils.get_tcb(thread.pid)),
-                    "backtrace": [
-                        {
-                            "address": addr,
-                            "function": func,
-                            "source": src,
-                            "line": line,
-                        }
-                        for addr, func, src, line in thread.backtrace
-                    ],
+                    "backtrace": thread.backtrace,
                 }
                 for thread in threads
             ],
