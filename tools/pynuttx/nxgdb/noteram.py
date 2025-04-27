@@ -19,8 +19,12 @@
 ############################################################################
 
 import gdb
-from nxelf.elf import ELFParser
-from nxtrace.trace import NoteFactory
+
+try:
+    from nxelf.elf import ELFParser
+    from nxtrace.trace import NoteFactory
+except SystemExit:
+    pass
 
 from . import utils
 
