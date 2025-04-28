@@ -244,7 +244,7 @@ class Backtrace:
         for addr in address:
             if break_null and not addr:
                 break
-            self.append(addr)
+            self.append(int(addr))
 
     def __eq__(self, value: Backtrace) -> bool:
         return self.backtrace == value.backtrace
@@ -286,8 +286,8 @@ class Backtrace:
 
     def toJSON(self):
         return [
-            {"address": addr, "function": func, "source": source}
-            for addr, func, source in self.backtrace
+            {"address": addr, "function": func, "source": source, "line": line}
+            for addr, func, source, line in self.backtrace
         ]
 
 
