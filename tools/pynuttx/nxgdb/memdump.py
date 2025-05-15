@@ -761,7 +761,9 @@ class NxMemoryRange(gdb.Command):
         print(formatter.format(*header))
         for start, end in memrange:
             length = end - start
-            print(formatter.format(hex(start), hex(end), length, f"{length/1024: .1f}"))
+            print(
+                formatter.format(hex(start), hex(end), length, f"{length / 1024: .1f}")
+            )
 
 
 class NxDumpRAM(gdb.Command):

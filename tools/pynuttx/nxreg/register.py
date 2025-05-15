@@ -508,7 +508,7 @@ class GeneralRegisters:
         for reg in self._registers:
             goffset = reg.goffset
             self.logger.debug(
-                f"Parse {reg.name}({reg.regnum}) from {goffset}, data: {data[goffset:goffset+reg.size]}"
+                f"Parse {reg.name}({reg.regnum}) from {goffset}, data: {data[goffset:goffset + reg.size]}"
             )
             reg.value = data[goffset : goffset + reg.size]
             goffset = reg.goffset + reg.size

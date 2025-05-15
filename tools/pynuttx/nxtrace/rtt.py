@@ -108,7 +108,8 @@ class SeggerRTT:
                     last_time = now_time
                     last_receive_total = self.receive_total
                     logger.debug(
-                        f"Receive rate: {self.receive_rate/1024:.2f} KB/s, total: {self.receive_total/1024/1024:.2f} MB"
+                        f"Receive rate: {self.receive_rate / 1024:.2f} KB/s, "
+                        f"total: {self.receive_total / 1024 / 1024:.2f} MB"
                     )
                     self.receive_total += len(data)
 

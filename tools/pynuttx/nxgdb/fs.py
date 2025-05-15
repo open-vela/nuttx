@@ -688,7 +688,7 @@ class InfoYaffs(gdb.Command):
             f"n_data_chunks:{n_data_chunks},serial:{serial}{moreinfo}"
         }
 
-        print(f"{initial_indent}{file_type.rsplit('_',2)[1]} {baseinfo}")
+        print(f"{initial_indent}{file_type.rsplit('_', 2)[1]} {baseinfo}")
         if file_type == "yaffs_dir_var":
             head = node.variant.cast(utils.lookup_type("struct yaffs_dir_var"))
             for siblings in NxList(head.children, "struct yaffs_obj", "siblings"):
