@@ -110,9 +110,14 @@
 #define N             19
 #define Q_TO_FLOAT(x) ((float)x/(float)(1<<N))
 
-#if defined(CONFIG_ARCH_CHIP_ESP32C6) || defined(CONFIG_ARCH_CHIP_ESP32H2)
-#define RTC_CORE_INTR_SOURCE  LP_WDT_INTR_SOURCE
-#define ESP_IRQ_RTC_CORE      ESP_IRQ_LP_WDT
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+#  define RTC_CORE_INTR_SOURCE ETS_LP_WDT_INTR_SOURCE
+#  define ESP_IRQ_RTC_CORE ESP_SOURCE2IRQ(ETS_LP_WDT_INTR_SOURCE)
+#elif defined(CONFIG_ARCH_CHIP_ESP32C6) || \
+      defined(CONFIG_ARCH_CHIP_ESP32H2)
+#  define RTC_CORE_INTR_SOURCE LP_WDT_INTR_SOURCE
+#  define ESP_IRQ_RTC_CORE ESP_IRQ_LP_WDT
+#endif
 #endif
 
 /****************************************************************************
