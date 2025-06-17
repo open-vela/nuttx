@@ -420,6 +420,11 @@ static int ili9342c_sendgram(struct ili9341_lcd_s *lcd,
 
   lcdinfo("lcd:%p, wd=%p, nwords=%" PRIu32 "\n", lcd, wd, nwords);
 
+  for (size_t i = 0; i < nwords; i++)
+    {
+      ((uint16_t *)wd)[i] = __builtin_bswap16(wd[i]);
+    }
+
   SPI_SETBITS(priv->spi_dev, 16);
 
   SPI_CMDDATA(priv->spi_dev, SPIDEV_DISPLAY(0), false);
