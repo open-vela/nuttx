@@ -154,11 +154,20 @@ int nxsem_trywait(FAR sem_t *sem)
   if (sem->flags & SEM_TYPE_MUTEX)
     {
       short old = 1;
-      if (atomic_compare_exchange_weak_explicit(NXSEM_COUNT(sem), &old, 0,
-                                                memory_order_acquire,
-                                                memory_order_relaxed))
+      while (true)
         {
-          return OK;
+          if (old != 1)
+            {
+              break;
+            }
+
+          if (atomic_compare_exchange_weak_explicit(NXSEM_COUNT(sem),
+                                                    &old, 0,
+                                                    memory_order_acquire,
+                                                    memory_order_relaxed))
+            {
+              return OK;
+            }
         }
 
       return -EAGAIN;
