@@ -46,6 +46,12 @@ config ARCH_CHIP_INTEL64_QEMU
 	---help---
 		Select this option if the platform is QEMU.
 
+config ARCH_CHIP_GOLDFISH_X86_64
+	bool "goldfish x86_64 chip"
+	select ARCH_INTEL64
+	---help---
+		Select this option if the platform is GOLDFISH.
+
 config ARCH_CHIP_INTEL64
 	bool "intel64 x86_64 chip"
 	select ARCH_INTEL64
@@ -62,6 +68,7 @@ endchoice
 config ARCH_CHIP
 	string
 	default "qemu"              if ARCH_CHIP_INTEL64_QEMU
+	default "goldfish"          if ARCH_CHIP_GOLDFISH_X86_64
 	default "intel64"           if ARCH_CHIP_INTEL64
 
 if SCHED_BACKTRACE
@@ -143,6 +150,10 @@ endif # ARCH_INTEL64
 
 if ARCH_CHIP_INTEL64_QEMU
 source "arch/x86_64/src/qemu/Kconfig"
+endif
+
+if ARCH_CHIP_GOLDFISH_X86_64
+source "arch/x86_64/src/goldfish/Kconfig"
 endif
 
 config ARCH_MULTIBOOT1
