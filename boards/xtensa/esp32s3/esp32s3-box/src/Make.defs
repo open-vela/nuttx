@@ -45,6 +45,10 @@ ifeq ($(CONFIG_ESP32S3_BOX_LCD),y)
     endif
 endif
 
+ifeq ($(CONFIG_ETC_ROMFS),y)
+RCSRCS += etc/init.d/rc.sysinit etc/init.d/rcS
+endif
+
 ifeq ($(CONFIG_ESP32S3_BOARD_TOUCHSCREEN),y)
     ifeq ($(CONFIG_ESP32_S3_BOX),y)
         CSRCS += esp32s3_board_touchsceen_tt21100.c
