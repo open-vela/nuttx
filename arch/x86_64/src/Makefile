@@ -173,8 +173,8 @@ ifeq ($(CONFIG_ARCH_MULTIBOOT1),y)
 	@echo "Generating: nuttx.mb1 in ELF32/multiboot1"
 	$(Q) $(OBJCOPY) -R.realmode -R.note.* -O binary $(NUTTX) $(NUTTX).bin \
 	&& $(OBJCOPY) -j.realmode -O binary $(NUTTX) $(NUTTX)_realmode.bin \
-	&& $(CC) -m32 -no-pie -nostdlib common/multiboot1.S \
-			-T common/multiboot1.ld -o $(NUTTX).mb1
+	&& $(AS) --32 common/multiboot1.S -o multiboot1.elf \
+	&& $(LD) -m elf_i386 -T common/multiboot1.ld multiboot1.elf -o $(NUTTX).mb1
 endif
 
 # This is part of the top-level export target
