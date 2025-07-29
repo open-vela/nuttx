@@ -97,7 +97,7 @@ if [ -z "$host" ]; then
       host=windows
       wenv=cygwin
       ;;
-    MINGW32*)
+    MINGW*)
       host=windows
       wenv=msys
       ;;
