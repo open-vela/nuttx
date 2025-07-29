@@ -173,7 +173,7 @@ function setup_toolchain()
   echo -e "${B}*           "                         "               *${N}"
   echo -e "${B}**""**""**""**""**""**""**""**""**""**""**""**""**""***${N}"
 
-  SYSTEM=`uname | tr '[:upper:]' '[:lower:]'`
+  SYSTEM=`uname | sed -E 's/(MINGW|MSYS)[^[:space:]]+/windows/g' | tr '[:upper:]' '[:lower:]'`
   SYS_ARCH=`uname -m | sed 's/arm64/aarch64/'`
 
   if [ ${SYSTEM} == "darwin" ]; then
@@ -280,14 +280,25 @@ function setup_toolchain()
 
 function build_board()
 {
+  case "$(uname -s)" in
+    Linux) host_opt="-l"
+    ;;
+    Darwin) host_opt="-m"
+    ;;
+    MSYS*|MINGW*) host_opt="-g"
+    ;;
+    *) host_opt=""
+    ;;
+  esac
+
   echo -e "Build command line:"
-  echo -e "  ${TOOLSDIR}/configure.sh -e $1"
+  echo -e "  ${TOOLSDIR}/configure.sh -e ${host_opt} $1"
   echo -e "  make -C ${NUTTXDIR} EXTRAFLAGS="$EXTRA_FLAGS" ${@:2}"
   echo -e "  make -C ${NUTTXDIR} savedefconfig"
 
   setup_toolchain $1
 
-  if ! ${TOOLSDIR}/configure.sh -e $1; then
+  if ! ${TOOLSDIR}/configure.sh -e ${host_opt} $1; then
     echo "Error: ############# config ${1} fail ##############"
     exit 1
   fi
