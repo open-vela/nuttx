@@ -46,7 +46,6 @@ function setup_environment()
       "gettext" \
       "git" \
       "gperf" \
-      "kconfig-frontends" \
       "make" \
       "mtools" \
       "nasm" \
@@ -139,10 +138,6 @@ function setup_environment()
     return
   fi
 
-  if [ ${#INSTALLS[*]} -eq 1 ] && [ "${INSTALLS[0]}" == "kconfig-frontends" ]; then
-    return
-  fi
-
   echo "*************************************************************************************"
   echo "The environment of Vela depends on above tools, Run the following command to install:"
   echo ""
@@ -151,15 +146,6 @@ function setup_environment()
     if [[ "${INSTALLS[$i]}" == *":i386" ]]; then
       echo " sudo dpkg --add-architecture i386"
       break
-    fi
-  done
-
-  for (( i = 0; i < ${#INSTALLS[*]}; i++)); do
-    result=`apt-cache search ${INSTALLS[$i]}`
-    if [ "$result" == "" ]; then
-      if [ "${INSTALLS[$i]}" == "kconfig-frontends" ]; then
-        unset INSTALLS[$i]
-      fi
     fi
   done
 
@@ -212,6 +198,8 @@ function setup_toolchain()
   TOOLCHAIN=(\
             "gcc" \
             "clang" )
+
+  export PATH=${ROOTDIR}/prebuilts/build-tools/${SYSTEM}-${SYS_ARCH}/bin:${PATH}
 
   export WASI_SDK_PATH=${ROOTDIR}/prebuilts/clang/${SYSTEM}/wasm
   export PATH=${WASI_SDK_PATH}:$PATH
@@ -296,21 +284,6 @@ function build_board()
   echo -e "  ${TOOLSDIR}/configure.sh -e $1"
   echo -e "  make -C ${NUTTXDIR} EXTRAFLAGS="$EXTRA_FLAGS" ${@:2}"
   echo -e "  make -C ${NUTTXDIR} savedefconfig"
-
-  KCONFIG_ARGS="--enable-mconf --disable-nconf --disable-gconf --disable-qconf"
-  if [ `uname` == "Darwin" ]; then
-    KCONFIG_ARGS+=" --disable-shared --enable-static"
-  fi
-
-  if [ ! -f "${ROOTDIR}/prebuilts/kconfig-frontends/bin/kconfig-conf" ] &&
-     [ ! -x "$(command -v kconfig-conf)" ]; then
-    pushd ${ROOTDIR}/prebuilts/kconfig-frontends
-    ./configure --prefix=${ROOTDIR}/prebuilts/kconfig-frontends ${KCONFIG_ARGS} 1>/dev/null
-    touch aclocal.m4 Makefile.in
-    make install 1>/dev/null
-    popd
-  fi
-  export PATH=${ROOTDIR}/prebuilts/kconfig-frontends/bin:$PATH
 
   setup_toolchain $1
 
