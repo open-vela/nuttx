@@ -45,7 +45,7 @@
  * Public Data
  ****************************************************************************/
 
-#ifdef CONFIG_ARCH_CHIP_GOLDFISH
+#ifdef CONFIG_ARCH_CHIP_GOLDFISH_ARM64
 #define CONFIG_QEMU_UART_BASE      0x9000000
 #define CONFIG_QEMU_UART_IRQ       (GIC_SPI_INT_BASE + 1)
 #endif

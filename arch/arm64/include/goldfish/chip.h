@@ -37,7 +37,7 @@
 #define MB(x)           (KB(x) << 10)
 #define GB(x)           (MB(UINT64_C(x)) << 10)
 
-#if defined(CONFIG_ARCH_CHIP_GOLDFISH)
+#if defined(CONFIG_ARCH_CHIP_GOLDFISH_ARM64)
 
 /* Addresses and sizes of goldfish (external/qemu/hw/arm/virt.c).
  *

@@ -60,7 +60,7 @@ config ARCH_CHIP_QEMU
 	---help---
 		QEMU virt platform (ARMv8a)
 
-config ARCH_CHIP_GOLDFISH
+config ARCH_CHIP_GOLDFISH_ARM64
 	bool "goldfish platform (ARMv8a)"
 	select ARCH_CORTEX_A53
 	select ARCH_HAVE_MULTICPU
@@ -297,7 +297,7 @@ config ARCH_CHIP
 	default "rk3399"    if ARCH_CHIP_RK3399
 	default "zynq-mpsoc" if ARCH_CHIP_ZYNQ_MPSOC
 	default "qemu"      if ARCH_CHIP_QEMU
-	default "goldfish"  if ARCH_CHIP_GOLDFISH
+	default "goldfish"  if ARCH_CHIP_GOLDFISH_ARM64
 	default "fvp-v8r"   if ARCH_CHIP_FVP_ARMV8R
 	default "vdk"       if ARCH_CHIP_VDK
 	default "imx8"      if ARCH_CHIP_IMX8
@@ -460,7 +460,7 @@ if ARCH_CHIP_IMX9
 source "arch/arm64/src/imx9/Kconfig"
 endif
 
-if ARCH_CHIP_GOLDFISH
+if ARCH_CHIP_GOLDFISH_ARM64
 source "arch/arm64/src/goldfish/Kconfig"
 endif
 
