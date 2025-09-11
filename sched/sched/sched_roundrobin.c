@@ -127,6 +127,7 @@ static int nxsched_roundrobin_handler(FAR void *cookie)
 uint32_t nxsched_process_roundrobin(FAR struct tcb_s *tcb, uint32_t ticks,
                                     bool noswitches)
 {
+  FAR struct tcb_s *ptcb;  /* Pointer to the next ready-to-run TCB */
   uint32_t ret;
   int decr;
 
@@ -180,8 +181,13 @@ uint32_t nxsched_process_roundrobin(FAR struct tcb_s *tcb, uint32_t ticks,
            * give that task a shot.
            */
 
-          if (tcb->flink &&
-              tcb->flink->sched_priority >= tcb->sched_priority)
+#ifdef CONFIG_SMP
+          ptcb = (FAR struct tcb_s *)dq_peek(list_readytorun());
+#else
+          ptcb = tcb->flink;
+#endif
+          if (ptcb &&
+              ptcb->sched_priority >= tcb->sched_priority)
             {
               FAR struct tcb_s *rtcb = this_task();
 
