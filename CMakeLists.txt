@@ -193,9 +193,27 @@ if("${apps_dir}" STREQUAL "dummy")
 endif()
 
 set(ENV{PYTHONPYCACHEPREFIX} ${CMAKE_BINARY_DIR})
-set(ENV{APPSDIR} ${NUTTX_APPS_DIR}) # TODO: support not having apps/
-set(ENV{APPSBINDIR} ${NUTTX_APPS_BINDIR}) # TODO: support not having apps/
-set(ENV{BINDIR} ${CMAKE_BINARY_DIR}) # TODO: support not having apps/
+if(WIN32)
+  execute_process(
+    COMMAND cygpath -u "${NUTTX_APPS_DIR}"
+    OUTPUT_VARIABLE ENV_APPSDIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(
+    COMMAND cygpath -u "${NUTTX_APPS_BINDIR}"
+    OUTPUT_VARIABLE ENV_APPSBINDIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(
+    COMMAND cygpath -u "${CMAKE_BINARY_DIR}"
+    OUTPUT_VARIABLE ENV_BINDIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+else()
+  set(ENV_APPSDIR ${NUTTX_APPS_DIR})
+  set(ENV_APPSBINDIR ${NUTTX_APPS_BINDIR})
+  set(ENV_BINDIR ${CMAKE_BINARY_DIR})
+endif()
+set(ENV{APPSDIR} ${ENV_APPSDIR}) # TODO: support not having apps/
+set(ENV{APPSBINDIR} ${ENV_APPSBINDIR}) # TODO: support not having apps/
+set(ENV{BINDIR} ${ENV_BINDIR}) # TODO: support not having apps/
 set(ENV{EXTERNALDIR} dummy) # TODO
 set(ENV{DRIVERS_PLATFORM_DIR} dummy) # TODO
 

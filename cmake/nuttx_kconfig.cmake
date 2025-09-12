@@ -156,10 +156,26 @@ function(nuttx_generate_kconfig)
     endif()
     # check whether the subdirectory will include a generated Kconfig file.
     if(EXISTS ${NUTTX_APPS_BINDIR}/${MENUCONFIG})
+      if(WIN32)
+        execute_process(
+          COMMAND cygpath -u "${NUTTX_APPS_BINDIR}"
+          OUTPUT_VARIABLE KCONFIG_APPS_BINDIR
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+      else()
+        set(KCONFIG_APPS_BINDIR ${NUTTX_APPS_BINDIR})
+      endif()
       file(APPEND ${KCONFIG_OUTPUT_FILE}
-           "source \"${NUTTX_APPS_BINDIR}/${MENUCONFIG}\"\n")
+           "source \"${KCONFIG_APPS_BINDIR}/${MENUCONFIG}\"\n")
     elseif(EXISTS ${SUB_KCONFIG})
-      file(APPEND ${KCONFIG_OUTPUT_FILE} "source \"${SUB_KCONFIG}\"\n")
+      if(WIN32)
+        execute_process(
+          COMMAND cygpath -u "${SUB_KCONFIG}"
+          OUTPUT_VARIABLE KCONFIG_SUB_KCONFIG
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+      else()
+        set(KCONFIG_SUB_KCONFIG ${SUB_KCONFIG})
+      endif()
+      file(APPEND ${KCONFIG_OUTPUT_FILE} "source \"${KCONFIG_SUB_KCONFIG}\"\n")
     endif()
   endforeach()
 
@@ -170,7 +186,8 @@ endfunction()
 
 function(nuttx_olddefconfig)
   execute_process(
-    COMMAND olddefconfig
+    COMMAND python3
+            ../prebuilts/tools/python/dist-packages/kconfiglib/olddefconfig.py
     ERROR_VARIABLE KCONFIG_ERROR
     OUTPUT_VARIABLE KCONFIG_OUTPUT
     RESULT_VARIABLE KCONFIG_STATUS
@@ -191,7 +208,9 @@ endfunction()
 function(nuttx_setconfig)
   set(ENV{KCONFIG_CONFIG} ${CMAKE_BINARY_DIR}/.config)
   execute_process(
-    COMMAND setconfig ${ARGN} --kconfig ${NUTTX_DIR}/Kconfig
+    COMMAND
+      python3 ../prebuilts/tools/python/dist-packages/kconfiglib/setconfig.py
+      ${ARGN} --kconfig ${NUTTX_DIR}/Kconfig
     ERROR_VARIABLE KCONFIG_ERROR
     OUTPUT_VARIABLE KCONFIG_OUTPUT
     RESULT_VARIABLE KCONFIG_STATUS

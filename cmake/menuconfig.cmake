@@ -23,23 +23,41 @@
 # menuconfig target this triggers a reconfiguration (TODO: do only if config
 # changes)
 
+if(WIN32)
+  execute_process(
+    COMMAND cygpath -u "${CMAKE_BINARY_DIR}/.config"
+    OUTPUT_VARIABLE ENV_KCONFIG_CONFIG
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(
+    COMMAND cygpath -u "${NUTTX_APPS_DIR}"
+    OUTPUT_VARIABLE ENV_APPSDIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(
+    COMMAND cygpath -u "${NUTTX_APPS_BINDIR}"
+    OUTPUT_VARIABLE ENV_APPSBINDIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(
+    COMMAND cygpath -u "${CMAKE_BINARY_DIR}"
+    OUTPUT_VARIABLE ENV_BINDIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+else()
+  set(ENV_KCONFIG_CONFIG ${CMAKE_BINARY_DIR}/.config)
+  set(ENV_APPSDIR ${NUTTX_APPS_DIR})
+  set(ENV_APPSBINDIR ${NUTTX_APPS_BINDIR})
+  set(ENV_BINDIR ${CMAKE_BINARY_DIR})
+endif()
 set(KCONFIG_ENV
-    "KCONFIG_CONFIG=${CMAKE_BINARY_DIR}/.config" "EXTERNALDIR=dummy"
-    "APPSDIR=${NUTTX_APPS_DIR}" "DRIVERS_PLATFORM_DIR=dummy"
-    "APPSBINDIR=${NUTTX_APPS_BINDIR}" "BINDIR=${CMAKE_BINARY_DIR}")
+    "KCONFIG_CONFIG=${ENV_KCONFIG_CONFIG}" "EXTERNALDIR=dummy"
+    "APPSDIR=${ENV_APPSDIR}" "DRIVERS_PLATFORM_DIR=dummy"
+    "APPSBINDIR=${ENV_APPSBINDIR}" "BINDIR=${ENV_BINDIR}")
 
 # Use qconfig instead of menuconfig since PowerShell not support curses
 # redirection
 
-if(WIN32)
-  set(MENUCONFIG guiconfig)
-else()
-  set(MENUCONFIG menuconfig)
-endif()
-
 add_custom_target(
   menuconfig
-  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} ${MENUCONFIG}
+  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} python3
+          ../prebuilts/tools/python/dist-packages/kconfiglib/menuconfig.py
   COMMAND ${CMAKE_COMMAND} -E remove -f
           ${CMAKE_BINARY_DIR}/include/nuttx/config.h # invalidate existing
                                                      # config
@@ -51,7 +69,8 @@ add_custom_target(
 
 add_custom_target(
   qconfig
-  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} guiconfig
+  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} python3
+          ../prebuilts/tools/python/dist-packages/kconfiglib/guiconfig.py
   COMMAND ${CMAKE_COMMAND} -E remove -f
           ${CMAKE_BINARY_DIR}/include/nuttx/config.h # invalidate existing
                                                      # config
@@ -64,7 +83,8 @@ add_custom_target(
   resetconfig
   COMMAND ${CMAKE_COMMAND} -E copy ${NUTTX_DEFCONFIG}
           ${CMAKE_BINARY_DIR}/.config
-  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} olddefconfig
+  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} python3
+          ../prebuilts/tools/python/dist-packages/kconfiglib/olddefconfig.py
   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/.config
           ${CMAKE_BINARY_DIR}/.config.orig
   COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_PARENT_LIST_FILE}
@@ -79,9 +99,12 @@ add_custom_target(
   COMMAND ${CMAKE_COMMAND} -E remove -f ${CMAKE_BINARY_DIR}/.config
   COMMAND ${CMAKE_COMMAND} -E copy ${NUTTX_DEFCONFIG}
           ${CMAKE_BINARY_DIR}/.config
-  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} olddefconfig
-  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} savedefconfig --out
-          ${CMAKE_BINARY_DIR}/defconfig.tmp
+  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} python3
+          ../prebuilts/tools/python/dist-packages/kconfiglib/olddefconfig.py
+  COMMAND
+    ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} python3
+    ../prebuilts/tools/python/dist-packages/kconfiglib/savedefconfig.py --out
+    ${CMAKE_BINARY_DIR}/defconfig.tmp
   COMMAND ${CMAKE_COMMAND} -P ${NUTTX_DIR}/cmake/savedefconfig.cmake
           ${CMAKE_BINARY_DIR}/.config ${CMAKE_BINARY_DIR}/defconfig.tmp
   WORKING_DIRECTORY ${NUTTX_DIR})
@@ -89,8 +112,10 @@ add_custom_target(
 # utility target to replace defconfig to board's defconfig
 add_custom_target(
   savedefconfig
-  COMMAND ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} savedefconfig --out
-          ${CMAKE_BINARY_DIR}/defconfig.tmp
+  COMMAND
+    ${CMAKE_COMMAND} -E env ${KCONFIG_ENV} python3
+    ../prebuilts/tools/python/dist-packages/kconfiglib/savedefconfig.py --out
+    ${CMAKE_BINARY_DIR}/defconfig.tmp
   COMMAND ${CMAKE_COMMAND} -P ${NUTTX_DIR}/cmake/savedefconfig.cmake
           ${CMAKE_BINARY_DIR}/.config ${CMAKE_BINARY_DIR}/defconfig.tmp
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/defconfig
