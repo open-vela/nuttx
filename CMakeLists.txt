@@ -88,13 +88,6 @@ if(NOT DEFINED BOARD_CONFIG)
   message(FATAL_ERROR "Please define configuration with BOARD_CONFIG")
 endif()
 
-find_program(KCONFIGLIB olddefconfig)
-if(NOT KCONFIGLIB)
-  message(
-    FATAL_ERROR "Kconfig environment depends on kconfiglib, Please install:
-  $ pip install kconfiglib")
-endif()
-
 # BOARD CONFIG can be set to directory path, or <board-name>[/:]<config-name>
 # configuration pair
 
