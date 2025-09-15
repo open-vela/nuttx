@@ -168,6 +168,9 @@ uint32_t nxsched_process_roundrobin(FAR struct tcb_s *tcb, uint32_t ticks,
         }
       else
         {
+          FAR struct tcb_s *ready_rtcb =
+          (FAR struct tcb_s *)list_readytorun()->head;
+
           /* Reset the timeslice. */
 
           tcb->timeslice = MSEC2TICK(CONFIG_RR_INTERVAL);
@@ -180,8 +183,10 @@ uint32_t nxsched_process_roundrobin(FAR struct tcb_s *tcb, uint32_t ticks,
            * give that task a shot.
            */
 
-          if (tcb->flink &&
-              tcb->flink->sched_priority >= tcb->sched_priority)
+          if ((tcb->flink &&
+              tcb->flink->sched_priority >= tcb->sched_priority) ||
+              (ready_rtcb &&
+              ready_rtcb->sched_priority >= tcb->sched_priority))
             {
               FAR struct tcb_s *rtcb = this_task();
 
