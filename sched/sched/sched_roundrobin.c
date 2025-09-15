@@ -35,6 +35,7 @@
 #include <nuttx/sched.h>
 #include <nuttx/clock.h>
 
+#include "sched.h"
 #include "sched/sched.h"
 
 #if CONFIG_RR_INTERVAL > 0
@@ -179,9 +180,10 @@ uint32_t nxsched_process_roundrobin(FAR struct tcb_s *tcb, uint32_t ticks,
            * it is the same priority, then we need to relinquish the CPU and
            * give that task a shot.
            */
-
-          if (tcb->flink &&
-              tcb->flink->sched_priority >= tcb->sched_priority)
+          FAR struct tcb_s *ready_rtcb = (FAR struct tcb_s *)list_readytorun()->head;
+          if ((tcb->flink &&
+              tcb->flink->sched_priority >= tcb->sched_priority) ||
+              (ready_rtcb && ready_rtcb->sched_priority >= tcb->sched_priority))
             {
               FAR struct tcb_s *rtcb = this_task();
 
