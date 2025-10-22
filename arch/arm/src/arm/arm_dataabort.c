@@ -68,7 +68,9 @@
 #ifdef CONFIG_LEGACY_PAGING
 void arm_dataabort(uint32_t *regs, uint32_t far, uint32_t fsr)
 {
+  struct tcb_s **running_task = &g_running_tasks[this_cpu()];
   struct tcb_s *tcb = this_task();
+
 #ifdef CONFIG_LEGACY_PAGING
   uint32_t *savestate;
 
@@ -79,6 +81,11 @@ void arm_dataabort(uint32_t *regs, uint32_t far, uint32_t fsr)
   savestate = up_current_regs();
 #endif
   up_set_current_regs(regs);
+
+  if (*running_task != NULL)
+    {
+      (*running_task)->xcp.regs = regs;
+    }
 
 #ifdef CONFIG_LEGACY_PAGING
   /* In the NuttX on-demand paging implementation, only the read-only, .text
@@ -153,6 +160,13 @@ segfault:
 
 void arm_dataabort(uint32_t *regs)
 {
+  struct tcb_s **running_task = &g_running_tasks[this_cpu()];
+
+  if (*running_task != NULL)
+    {
+      (*running_task)->xcp.regs = regs;
+    }
+
   /* Save the saved processor context in current_regs where it can be
    * accessed for register dumps and possibly context switching.
    */
