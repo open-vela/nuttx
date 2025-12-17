@@ -28,7 +28,7 @@
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
 
-#ifdef CONFIG_ARCH_CHIP_AURIX_TC48X
+#ifdef CONFIG_ARCH_CHIP_AURIX_TC4XX
 #  include "IfxWtu.h"
 #else
 #  include "IfxScuWdt.h"
