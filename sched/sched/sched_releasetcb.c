@@ -155,6 +155,10 @@ int nxsched_release_tcb(FAR struct tcb_s *tcb, uint8_t ttype)
         }
 #endif
 
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+      tcb_uninit_lock_history(tcb);
+#endif
+
 #if defined(CONFIG_ARCH_ADDRENV) && defined(CONFIG_ARCH_KERNEL_STACK)
       /* Release the kernel stack */
 

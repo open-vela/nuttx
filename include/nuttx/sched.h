@@ -111,6 +111,20 @@
 
 #define MAX_LOCK_COUNT             127
 
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+#  ifndef CONFIG_SCHED_LOCK_HISTORY_THRESHOLD
+#    define CONFIG_SCHED_LOCK_HISTORY_THRESHOLD 0
+#  endif
+#  if CONFIG_SCHED_LOCK_HISTORY_THRESHOLD == 0
+#    if MAX_LOCK_COUNT < 64
+#      error "MAX_LOCK_COUNT must be >= 64 when CONFIG_SCHED_LOCK_HISTORY_THRESHOLD is 0"
+#    endif
+#    define SCHED_LOCK_HISTORY_THRESHOLD (MAX_LOCK_COUNT - 32)
+#  else
+#    define SCHED_LOCK_HISTORY_THRESHOLD CONFIG_SCHED_LOCK_HISTORY_THRESHOLD
+#  endif
+#endif
+
 /* Values for the struct tcb_s flags bits */
 
 #define TCB_FLAG_TTYPE_SHIFT       (0)                           /* Bits 0-1: thread type */
@@ -430,6 +444,19 @@ struct stackinfo_s
                                          /* from the stack.                  */
 };
 
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+#  if CONFIG_SCHED_LOCK_HISTORY_DEPTH > 0
+#    define SCHED_LOCK_HISTORY_DEPTH_MAX CONFIG_SCHED_LOCK_HISTORY_DEPTH
+#  else
+#    define SCHED_LOCK_HISTORY_DEPTH_MAX MAX_LOCK_COUNT
+#  endif
+struct lock_stack_entry_s
+{
+  int depth;
+  void *pc[SCHED_LOCK_HISTORY_DEPTH_MAX];
+};
+#endif
+
 /* struct task_join_s *******************************************************/
 
 /* Used to save task join information */
@@ -739,6 +766,12 @@ struct tcb_s
   size_t caller_deepest;
   size_t level_deepest;
   size_t level;
+#endif
+
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+  FAR struct lock_stack_entry_s *lock_hist;
+  uint16_t lock_hist_idx;
+  uint16_t lock_hist_max;
 #endif
 };
 

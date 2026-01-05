@@ -480,6 +480,10 @@ static int nxthread_setup_scheduler(FAR struct tcb_s *tcb, int priority,
 
       up_initial_state(tcb);
 
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+      tcb_init_lock_history(tcb);
+#endif
+
       /* Add the task to the inactive task list */
 
       flags = spin_lock_irqsave(NULL);

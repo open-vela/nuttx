@@ -1,0 +1,27 @@
+config SCHED_LOCK_HISTORY
+    bool "Enable per-task scheduler lock history"
+    default n
+    ---help---
+        Records scheduler lock history per task when lockcount overflows.
+        Enable SCHED_BACKTRACE to capture backtraces; otherwise history
+        entries will have depth 0 and only the overflow message is printed.
+
+if SCHED_LOCK_HISTORY
+
+config SCHED_LOCK_HISTORY_COUNT
+    int "Number of history records (0 for MAX_LOCK_COUNT)"
+    default 0
+
+config SCHED_LOCK_HISTORY_DEPTH
+    int "Backtrace depth per record (0 disables backtrace capture)"
+    range 0 255
+    default 8
+
+config SCHED_LOCK_HISTORY_THRESHOLD
+    int "Lockcount threshold to dump history (0 for MAX_LOCK_COUNT-32)"
+    default 0
+    ---help---
+        Scheduler lock history dump triggers when lockcount reaches this
+        threshold. A value of 0 uses MAX_LOCK_COUNT-32 as the default.
+
+endif

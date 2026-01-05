@@ -29,6 +29,7 @@
 #include <sys/types.h>
 #include <sched.h>
 #include <assert.h>
+#include <debug.h>
 
 #include <arch/irq.h>
 
@@ -45,6 +46,107 @@
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+static bool g_no_lock_check = false;
+
+static inline void record_sched_lock_stack(void)
+{
+  FAR struct tcb_s *rtcb = this_task();
+
+  if (rtcb && rtcb->lock_hist)
+    {
+
+      FAR struct lock_stack_entry_s *entry =
+        &rtcb->lock_hist[rtcb->lock_hist_idx];
+
+#if CONFIG_SCHED_LOCK_HISTORY_DEPTH > 0
+      entry->depth = sched_backtrace(rtcb->pid, entry->pc,
+                                     CONFIG_SCHED_LOCK_HISTORY_DEPTH, 0);
+#else
+      entry->depth = 0;
+#endif
+
+      rtcb->lock_hist_idx++;
+      if (rtcb->lock_hist_idx >= rtcb->lock_hist_max)
+        {
+          rtcb->lock_hist_idx = 0;
+        }
+    }
+}
+
+static void dump_sched_lock_history(FAR struct tcb_s *tcb)
+{
+  if (!tcb)
+    {
+      _alert("sched_lock: lockcount overflow but rtcb is NULL\n");
+      return;
+    }
+
+  _alert("sched_lock: lockcount overflow pid=%d lockcount=%d\n",
+         tcb->pid, tcb->lockcount);
+
+  if (!tcb->lock_hist || tcb->lock_hist_max == 0)
+    {
+      _alert("sched_lock: lock history is not initialized\n");
+      return;
+    }
+
+  _alert("sched_lock: lock_hist_idx=%u lock_hist_max=%u\n",
+         (unsigned)tcb->lock_hist_idx, (unsigned)tcb->lock_hist_max);
+
+  for (uint16_t n = 0; n < tcb->lock_hist_max; n++)
+    {
+      uint16_t pos = (uint16_t)((tcb->lock_hist_idx + tcb->lock_hist_max -
+                                 (uint16_t)(n + 1)) %
+                                tcb->lock_hist_max);
+      FAR struct lock_stack_entry_s *entry = &tcb->lock_hist[pos];
+
+      if (entry->depth <= 0)
+        {
+          continue;
+        }
+
+      _alert("  hist[%u] depth=%d\n", (unsigned)pos, entry->depth);
+      for (int i = 0; i < entry->depth && i < CONFIG_SCHED_LOCK_HISTORY_DEPTH; i++)
+        {
+#if defined(CONFIG_ALLSYMS) && defined(CONFIG_LIBC_PRINT_EXTENSION)
+          _alert("    %pS\n", entry->pc[i]);
+#else
+          _alert("    %p\n", entry->pc[i]);
+#endif
+        }
+    }
+}
+
+void tcb_init_lock_history(FAR struct tcb_s *tcb)
+{
+  int count = CONFIG_SCHED_LOCK_HISTORY_COUNT;
+
+  if (count <= 0)
+    {
+      count = MAX_LOCK_COUNT;
+    }
+
+  tcb->lock_hist_max = (uint16_t)count;
+  tcb->lock_hist_idx = 0;
+
+  if (count > 0)
+    {
+      tcb->lock_hist =
+        kmm_zalloc(sizeof(struct lock_stack_entry_s) * (size_t)count);
+    }
+}
+
+void tcb_uninit_lock_history(FAR struct tcb_s *tcb)
+{
+  if (tcb->lock_hist)
+    {
+      kmm_free(tcb->lock_hist);
+      tcb->lock_hist = NULL;
+    }
+}
+#endif
 
 /****************************************************************************
  * Name:  sched_lock
@@ -90,7 +192,20 @@ int sched_lock(void)
        * integer type.
        */
 
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+      if (rtcb->lockcount >= 32)
+        {
+          g_no_lock_check = true;
+          dump_sched_lock_history(rtcb);
+          assert(false); /* IGNORE */
+        }
+      if(!g_no_lock_check)
+        {
+          record_sched_lock_stack();
+        }
+#else
       DEBUGASSERT(rtcb->lockcount < MAX_LOCK_COUNT);
+#endif
 
       flags = enter_critical_section();
 
@@ -146,7 +261,20 @@ int sched_lock(void)
        * integer type.
        */
 
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+      if (rtcb->lockcount >= SCHED_LOCK_HISTORY_THRESHOLD && !g_no_lock_check)
+        {
+          g_no_lock_check = true;
+          dump_sched_lock_history(rtcb);
+          assert(false); /* IGNORE */
+        }
+      if(!g_no_lock_check)
+        {
+          record_sched_lock_stack();
+        }
+#else
       DEBUGASSERT(rtcb->lockcount < MAX_LOCK_COUNT);
+#endif
 
       /* A counter is used to support locking.  This allows nested lock
        * operations on this thread (on any CPU)

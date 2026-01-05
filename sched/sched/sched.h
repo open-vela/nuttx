@@ -305,6 +305,11 @@ int nxthread_create(FAR const char *name, uint8_t ttype, int priority,
                     FAR void *stack_addr, int stack_size, main_t entry,
                     FAR char * const argv[], FAR char * const envp[]);
 
+#ifdef CONFIG_SCHED_LOCK_HISTORY
+void tcb_init_lock_history(FAR struct tcb_s *tcb);
+void tcb_uninit_lock_history(FAR struct tcb_s *tcb);
+#endif
+
 /* Task list manipulation functions */
 
 bool nxsched_add_readytorun(FAR struct tcb_s *rtrtcb);
