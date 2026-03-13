@@ -2,6 +2,8 @@
 LCKFB SZPI ESP32-S3
 ===================
 
+.. tags:: chip:esp32, chip:esp32s3
+
 The `LCKFB SZPI ESP32-S3 <https://wiki.lckfb.com/zh-hans/szpi-esp32s3/>`_ is a development board for the ESP32-S3 SoC from Jialichuang, based on a ESP32-S3-WROOM-1 module.
 
 .. list-table::
@@ -145,8 +147,8 @@ Then check the partition::
 fastboot
 --------
 
-The basic Fastboot configuration is based on lckfb-szpi-esp32s3:usb_device.
-More details about usage of fastboot, please refer to `fastbootd — NuttX latest documentation <https://nuttx.apache.org/docs/latest/applications/system/fastboot/index.html>`_.
+| The Fastboot configuration is based on lckfb-szpi-esp32s3:usb_device and lckfb-szpi-esp32s3:wifi, and support both **USB** and **TCP** network transport.
+| More details about usage of fastboot, please refer to `fastbootd — NuttX latest documentation <https://nuttx.apache.org/docs/latest/applications/system/fastboot/index.html>`_.
 
 You can run the configuration and compilation procedure::
 
@@ -159,14 +161,36 @@ To test it, just run the following (**Default is host side**):
 
     sudo apt install fastboot
 
-2. List devices running fastboot::
+2. Specify a device / List devices:
+
+  List devices only supported for USB transport::
 
     fastboot devices
 
-  Example::
+    # Examples
 
     $ fastboot devices
     1234    fastboot
+
+  To specific a device, use "-s" option::
+
+    # Usage
+    #
+    #   -s tcp:HOST[:PORT]         Specify a TCP network device.
+    #   -s SERIAL                  Specify a USB device.
+
+    fastboot -s SERIAL COMMAND
+    fastboot -s tcp:HOST[:PORT] COMMAND
+
+    # Examples
+
+    $ fastboot -s 1234 oem shell ifconfig
+    wlan0   Link encap:Ethernet HWaddr a0:85:e3:f4:43:30 at RUNNING mtu 1500
+            inet addr:192.168.211.111 DRaddr:192.168.211.107 Mask:255.255.255.0
+
+    PS C:\workspace> fastboot.exe -s tcp:192.168.211.111 oem shell ifconfig
+    wlan0   Link encap:Ethernet HWaddr a0:85:e3:f4:43:30 at RUNNING mtu 1500
+            inet addr:192.168.211.111 DRaddr:192.168.211.107 Mask:255.255.255.0
 
 3. Display given variable::
 
@@ -225,6 +249,48 @@ To test it, just run the following (**Default is host side**):
     0060: 10 d0 70 27 92 91 32 25 f5 cc 1f 59 ea 39 31 24 ..p'..2%...Y.91$
     0070: 3f 2e b0 fe ef 87 df 9b d4 7d 79 2e de 64 f6 ed ?........}y..d..
 
+fastboot_usb
+------------
+
+| The basic Fastboot configuration is based on lckfb-szpi-esp32s3:usb_device and support **USB** transport only.
+| More details about usage of fastboot, please refer to `fastbootd — NuttX latest documentation <https://nuttx.apache.org/docs/latest/applications/system/fastboot/index.html>`_.
+
+You can run the configuration and compilation procedure::
+
+  $ ./tools/configure.sh -l lckfb-szpi-esp32s3:fastboot_usb
+  $ make flash ESPTOOL_PORT=/dev/ttyUSBx -j
+
+fastboot_tcp
+------------
+
+| The Fastboot TCP network device configuration is based on lckfb-szpi-esp32s3:wifi and support **TCP** network transport only.
+| More details about usage of fastboot, please refer to `fastbootd — NuttX latest documentation <https://nuttx.apache.org/docs/latest/applications/system/fastboot/index.html>`_.
+
+You can run the configuration and compilation procedure::
+
+    $ ./tools/configure.sh -l lckfb-szpi-esp32s3:fastboot_tcp
+    $ make flash ESPTOOL_PORT=/dev/ttyUSBx -j
+
+To test it, just run the following::
+
+    # Device side
+
+    nsh> wapi psk wlan0 mypasswd 3
+    nsh> wapi essid wlan0 myssid 1
+    nsh> renew wlan0
+
+    # Host side
+
+    PS C:\workspace> fastboot.exe -s tcp:HOST[:PORT] oem shell ls
+    /:
+     data/
+     dev/
+     etc/
+     proc/
+     var/
+    OKAY [  0.063s]
+    Finished. Total time: 0.064s
+
 pca9557
 -------
 
@@ -275,6 +341,28 @@ Then test LEDC(PWM) with pin42(backlight of LCD)::
   nsh> pwm -d 0
   pwm_main: starting output with frequency: 100 duty: 00000000
   pwm_main: stopping output
+
+psram
+-----
+
+Basic NuttShell configuration console and PSRAM(Pseudo Static Random Access Memory) enabled.
+
+You can run the configuration and compilation procedure::
+
+  $ ./tools/configure.sh lckfb-szpi-esp32s3:psram
+  $ make flash -j$(nproc) ESPTOOL_PORT=/dev/ttyUSB0
+
+Then comparing memory size with the basic "nsh" config::
+
+  # lckfb-szpi-esp32s3:nsh
+  nsh> free
+     total       used       free    maxused    maxfree  nused  nfree name
+       332948     161500     171448     178280     171448     39      1 Umem
+
+  # lckfb-szpi-esp32s3:psram
+  nsh> free
+        total       used       free    maxused    maxfree  nused  nfree name
+      8785268     161516    8623752     161888    8388592     41      2 Umem
 
 gpio
 ----
@@ -344,3 +432,96 @@ Then run the fb command::
    5: (105,145) ( 30, 30)
   Test finished
   nsh>
+
+lvgl
+----
+
+Basic NuttShell configuration console and LVGL(Light and Versatile Graphics Library) enabled.
+
+.. figure:: lckfb-szpi-esp32s3-lvgl.jpg
+   :align: center
+
+You can run the configuration and compilation procedure::
+
+  $ ./tools/configure.sh -l lckfb-szpi-esp32s3:lvgl
+  $ make flash -j$(nproc) ESPTOOL_PORT=/dev/ttyUSB0
+
+Then run the lvgldemo command::
+
+ nsh> lvgldemo
+ [LVGL] [User]   (6.560, +6560)   check_stack_size: tid: 2, Stack size : 16328 lv_nuttx_entry.c:297
+ [LVGL] [User]   (6.560, +0)      lv_nuttx_lcd_create: lcd /dev/lcd0 opening lv_nuttx_lcd.c:77
+ [LVGL] [User]   (6.560, +0)      lv_nuttx_lcd_create: lcd /dev/lcd0 open success lv_nuttx_lcd.c:84
+ [LVGL] [Warn]   (6.570, +10)     lv_demo_widgets: LV_FONT_MONTSERRAT_18 is not enabled for the widgets demo. Using LV_FONT_DEFAULT instead. lv_demo_widgets.c:156
+ [LVGL] [Warn]   (6.580, +10)     lv_demo_widgets: LV_FONT_MONTSERRAT_12 is not enabled for the widgets demo. Using LV_FONT_DEFAULT instead. lv_demo_widgets.c:161
+
+qmi8658
+-------
+
+Basic NuttShell configuration console and QMI8658 6-axis IMU sensor enabled.
+
+The QMI8658 is a 6-axis IMU sensor that combines a 3-axis accelerometer and 3-axis gyroscope.
+This configuration enables the sensor on I2C0 at address 0x6A and registers uORB devices:
+
+- ``/dev/uorb/sensor_accel0`` for accelerometer data
+- ``/dev/uorb/sensor_gyro0`` for gyroscope data
+
+You can run the configuration and compilation procedure::
+
+  $ ./tools/configure.sh lckfb-szpi-esp32s3:qmi8658
+  $ make flash -j$(nproc) ESPTOOL_PORT=/dev/ttyUSB0
+
+Then test the IMU sensor::
+
+  # Check available sensor devices
+  nsh> ls /dev/uorb/
+  /dev/uorb:
+   sensor_accel0
+   sensor_gyro0
+
+  nsh> uorb_listener
+
+  Monitor objects num:2
+  object_name:sensor_gyro, object_instance:0
+  object_name:sensor_accel, object_instance:0
+  sensor_gyro(now:113510000):timestamp:113510000,x:1.468750,y:1.562500,z:-0.093750,temperature:22.855469
+  sensor_accel(now:113510000):timestamp:113510000,x:-0.810913,y:0.027343,z:0.571167,temperature:22.855469
+
+sdmmc
+-----
+
+Basic NuttShell configuration console and SD card enabled via SDMMC peripheral
+in 1-bit mode. The SD card pin mapping is as follows:
+
+===== ======
+Pin   GPIO
+===== ======
+CLK   GPIO47
+CMD   GPIO48
+D0    GPIO21
+===== ======
+
+You can run the configuration and compilation procedure::
+
+  $ ./tools/configure.sh lckfb-szpi-esp32s3:sdmmc
+  $ make flash -j$(nproc) ESPTOOL_PORT=/dev/ttyUSB0
+
+Then format and mount the SD card::
+
+  # Format the SD card with FAT32
+  nsh> mkfatfs -F 32 /dev/mmcsd1
+
+  # Create mount point and mount
+  nsh> mkdir -p /mnt/sd
+  nsh> mount -t vfat /dev/mmcsd1 /mnt/sd
+
+  # Verify
+  nsh> df
+    Block  Number
+    Size   Blocks     Used Available Mounted on
+       0        0        0         0 /proc
+     512 124702720        0 124702720 /mnt/sd
+
+  nsh> echo "hello" > /mnt/sd/test.txt
+  nsh> cat /mnt/sd/test.txt
+  hello
