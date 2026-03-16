@@ -83,7 +83,6 @@ struct video_format_s
   uint16_t width;
   uint16_t height;
   uint32_t pixelformat;
-  uint32_t sizeimage;
 };
 
 typedef struct video_format_s video_format_t;
@@ -656,12 +655,12 @@ static void convert_to_imgdatafmt(FAR video_format_t *video,
         data->pixelformat = IMGDATA_PIX_FMT_RGB565;
         break;
 
-      case V4L2_PIX_FMT_JPEG:
-        data->pixelformat = IMGDATA_PIX_FMT_JPEG;
+      case V4L2_PIX_FMT_RGB565X:
+        data->pixelformat = IMGDATA_PIX_FMT_RGB565X;
         break;
 
-      case V4L2_PIX_FMT_ENTROPY:
-        data->pixelformat = IMGDATA_PIX_FMT_ENTROPY;
+      case V4L2_PIX_FMT_JPEG:
+        data->pixelformat = IMGDATA_PIX_FMT_JPEG;
         break;
 
       default: /* V4L2_PIX_FMT_JPEG_WITH_SUBIMG */
@@ -699,12 +698,12 @@ static void convert_to_imgsensorfmt(FAR video_format_t *video,
         sensor->pixelformat = IMGSENSOR_PIX_FMT_RGB565;
         break;
 
-      case V4L2_PIX_FMT_JPEG:
-        sensor->pixelformat = IMGSENSOR_PIX_FMT_JPEG;
+      case V4L2_PIX_FMT_RGB565X:
+        sensor->pixelformat = IMGSENSOR_PIX_FMT_RGB565X;
         break;
 
-      case V4L2_PIX_FMT_ENTROPY:
-        sensor->pixelformat = IMGSENSOR_PIX_FMT_ENTROPY;
+      case V4L2_PIX_FMT_JPEG:
+        sensor->pixelformat = IMGSENSOR_PIX_FMT_JPEG;
         break;
 
       default: /* V4L2_PIX_FMT_JPEG_WITH_SUBIMG */
@@ -1339,11 +1338,6 @@ static size_t get_bufsize(FAR video_format_t *vf)
   uint32_t height = vf->height;
   size_t ret = width * height;
 
-  if (vf->sizeimage)
-    {
-      return vf->sizeimage;
-    }
-
   switch (vf->pixelformat)
     {
       case V4L2_PIX_FMT_NV12:
@@ -1352,11 +1346,10 @@ static size_t get_bufsize(FAR video_format_t *vf)
       case V4L2_PIX_FMT_YUYV:
       case V4L2_PIX_FMT_UYVY:
       case V4L2_PIX_FMT_RGB565:
+      case V4L2_PIX_FMT_RGB565X:
+      case V4L2_PIX_FMT_JPEG:
       default:
         return ret * 2;
-      case V4L2_PIX_FMT_JPEG:
-      case V4L2_PIX_FMT_ENTROPY:
-        return ret;
     }
 }
 
@@ -2196,6 +2189,11 @@ static int capture_reqbufs(FAR struct file *filep,
       return -EINVAL;
     }
 
+  if (reqbufs->count == 0)
+    {
+      return 0;
+    }
+
   imgdata  = cmng->imgdata;
   type_inf = get_capture_type_inf(cmng, reqbufs->type);
   if (type_inf == NULL)
@@ -2493,7 +2491,6 @@ static int capture_g_fmt(FAR struct file *filep,
   fmt->fmt.pix.width = type_inf->fmt[CAPTURE_FMT_MAIN].width;
   fmt->fmt.pix.height = type_inf->fmt[CAPTURE_FMT_MAIN].height;
   fmt->fmt.pix.pixelformat = type_inf->fmt[CAPTURE_FMT_MAIN].pixelformat;
-  fmt->fmt.pix.sizeimage = type_inf->fmt[CAPTURE_FMT_MAIN].sizeimage;
 
   return OK;
 }
@@ -2540,7 +2537,6 @@ static int capture_s_fmt(FAR struct file *filep,
 
         type_inf->fmt[CAPTURE_FMT_SUB].width  = fmt->fmt.pix.width;
         type_inf->fmt[CAPTURE_FMT_SUB].height = fmt->fmt.pix.height;
-        type_inf->fmt[CAPTURE_FMT_SUB].sizeimage = fmt->fmt.pix.sizeimage;
         type_inf->fmt[CAPTURE_FMT_SUB].pixelformat =
             fmt->fmt.pix.pixelformat == V4L2_PIX_FMT_SUBIMG_UYVY ?
               V4L2_PIX_FMT_UYVY : V4L2_PIX_FMT_RGB565;
@@ -2550,7 +2546,6 @@ static int capture_s_fmt(FAR struct file *filep,
       default:
         type_inf->fmt[CAPTURE_FMT_MAIN].width  = fmt->fmt.pix.width;
         type_inf->fmt[CAPTURE_FMT_MAIN].height = fmt->fmt.pix.height;
-        type_inf->fmt[CAPTURE_FMT_MAIN].sizeimage = fmt->fmt.pix.sizeimage;
         type_inf->fmt[CAPTURE_FMT_MAIN].pixelformat =
                                           fmt->fmt.pix.pixelformat;
         type_inf->nr_fmt = 1;
@@ -2604,7 +2599,6 @@ static int capture_try_fmt(FAR struct file *filep,
                sizeof(video_format_t));
         vf[CAPTURE_FMT_SUB].width       = fmt->fmt.pix.width;
         vf[CAPTURE_FMT_SUB].height      = fmt->fmt.pix.height;
-        vf[CAPTURE_FMT_SUB].sizeimage   = fmt->fmt.pix.sizeimage;
         vf[CAPTURE_FMT_SUB].pixelformat =
             fmt->fmt.pix.pixelformat == V4L2_PIX_FMT_SUBIMG_UYVY ?
               V4L2_PIX_FMT_UYVY : V4L2_PIX_FMT_RGB565;
@@ -2614,14 +2608,13 @@ static int capture_try_fmt(FAR struct file *filep,
       case V4L2_PIX_FMT_YUYV:
       case V4L2_PIX_FMT_UYVY:
       case V4L2_PIX_FMT_RGB565:
+      case V4L2_PIX_FMT_RGB565X:
       case V4L2_PIX_FMT_JPEG:
-      case V4L2_PIX_FMT_ENTROPY:
       case V4L2_PIX_FMT_JPEG_WITH_SUBIMG:
         nr_fmt = 1;
         vf[CAPTURE_FMT_MAIN].width       = fmt->fmt.pix.width;
         vf[CAPTURE_FMT_MAIN].height      = fmt->fmt.pix.height;
         vf[CAPTURE_FMT_MAIN].pixelformat = fmt->fmt.pix.pixelformat;
-        vf[CAPTURE_FMT_MAIN].sizeimage   = fmt->fmt.pix.sizeimage;
         break;
 
       default:
@@ -3473,7 +3466,7 @@ static int capture_enum_fmt(FAR struct file *filep,
 
   if (cmng->imgsensor && cmng->imgsensor->fmtdescs)
     {
-      if (f->index > cmng->imgsensor->fmtdescs_num)
+      if (f->index >= cmng->imgsensor->fmtdescs_num)
         {
           return -EINVAL;
         }
@@ -3511,7 +3504,7 @@ static int capture_enum_frmsize(FAR struct file *filep,
 
   if (cmng->imgsensor && cmng->imgsensor->frmsizes)
     {
-      if (f->index > cmng->imgsensor->frmsizes_num)
+      if (f->index >= cmng->imgsensor->frmsizes_num)
         {
           return -EINVAL;
         }
@@ -3556,7 +3549,7 @@ static int capture_enum_frminterval(FAR struct file *filep,
 
   if (cmng->imgsensor && cmng->imgsensor->frmintervals)
     {
-      if (f->index > cmng->imgsensor->frmintervals_num)
+      if (f->index >= cmng->imgsensor->frmintervals_num)
         {
           return -EINVAL;
         }

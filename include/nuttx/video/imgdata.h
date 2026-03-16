@@ -48,7 +48,7 @@
 #define IMGDATA_PIX_FMT_YUYV             (6)
 #define IMGDATA_PIX_FMT_YUV420P          (7)
 #define IMGDATA_PIX_FMT_NV12             (8)
-#define IMGDATA_PIX_FMT_ENTROPY          (9)
+#define IMGDATA_PIX_FMT_RGB565X          (9)
 
 /* Method access helper macros */
 
@@ -57,7 +57,7 @@
 #define IMGDATA_UNINIT(d) \
   ((d)->ops->uninit ? (d)->ops->uninit(d) : -ENOTTY)
 #define IMGDATA_SET_BUF(d, n, f, a, s) \
-  ((d)->ops->set_buf ? (d)->ops->set_buf(d, n, f, a, s) : NULL)
+  ((d)->ops->set_buf ? (d)->ops->set_buf(d, n, f, a, s) : -ENOTTY)
 #define IMGDATA_VALIDATE_FRAME_SETTING(d, n, f, i) \
   ((d)->ops->validate_frame_setting ? \
    (d)->ops->validate_frame_setting(d, n, f, i) : -ENOTTY)
