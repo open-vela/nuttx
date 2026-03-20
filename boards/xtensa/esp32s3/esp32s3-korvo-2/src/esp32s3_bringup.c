@@ -33,9 +33,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
-#include <syslog.h>
 #include <debug.h>
-#include <stdio.h>
 
 #include <errno.h>
 #include <nuttx/fs/fs.h>
@@ -47,15 +45,15 @@
 #  include "esp32s3_board_tim.h"
 #endif
 
-#ifdef CONFIG_ESP32S3_WIFI
+#ifdef CONFIG_ESPRESSIF_WIFI
 #  include "esp32s3_board_wlan.h"
 #endif
 
-#ifdef CONFIG_ESP32S3_BLE
+#ifdef CONFIG_ESPRESSIF_BLE
 #  include "esp32s3_ble.h"
 #endif
 
-#ifdef CONFIG_ESP32S3_WIFI_BT_COEXIST
+#ifdef CONFIG_ESPRESSIF_WIFI_BT_COEXIST
 #  include "esp32s3_wifi_adapter.h"
 #endif
 
@@ -67,8 +65,8 @@
 #  include "esp32s3_i2c.h"
 #endif
 
-#ifdef CONFIG_ESP32S3_I2S
-#  include "esp32s3_i2s.h"
+#ifdef CONFIG_ESPRESSIF_I2S
+#  include "espressif/esp_i2s.h"
 #endif
 
 #ifdef CONFIG_WATCHDOG
@@ -83,11 +81,11 @@
 #  include "esp32s3_rtc_lowerhalf.h"
 #endif
 
-#ifdef CONFIG_ESP32S3_EFUSE
-#  include "esp32s3_efuse.h"
+#ifdef CONFIG_ESPRESSIF_EFUSE
+#  include "espressif/esp_efuse.h"
 #endif
 
-#ifdef CONFIG_ESP32S3_LEDC
+#ifdef CONFIG_ESPRESSIF_LEDC
 #  include "esp32s3_board_ledc.h"
 #endif
 
@@ -112,8 +110,8 @@
 #include "esp32s3_board_sdmmc.h"
 #endif
 
-#ifdef CONFIG_ESP32S3_AES_ACCELERATOR
-#  include "esp32s3_aes.h"
+#ifdef CONFIG_ESPRESSIF_AES_ACCELERATOR
+#  include "espressif/esp_aes.h"
 #endif
 
 #ifdef CONFIG_ESP32S3_ADC
@@ -142,11 +140,14 @@
 
 int esp32s3_bringup(void)
 {
-  int ret;
-#if (defined(CONFIG_ESP32S3_I2S0) && !defined(CONFIG_AUDIO_CS4344) && \
-     !defined(CONFIG_AUDIO_ES8311)) || defined(CONFIG_ESP32S3_I2S1)
+  int ret = OK;
+#if (defined(CONFIG_ESPRESSIF_I2S0) && !defined(CONFIG_AUDIO_CS4344) && \
+     !defined(CONFIG_AUDIO_ES8311)) || defined(CONFIG_ESPRESSIF_I2S1)
   bool i2s_enable_tx;
   bool i2s_enable_rx;
+#endif
+#ifdef CONFIG_AUDIO_ES8311
+  struct i2c_master_s *i2c;
 #endif
 
 #if defined(CONFIG_ESP32S3_SPIRAM) && \
@@ -176,8 +177,8 @@ int esp32s3_bringup(void)
   #endif
 #endif
 
-#if defined(CONFIG_ESP32S3_EFUSE)
-  ret = esp32s3_efuse_initialize("/dev/efuse");
+#if defined(CONFIG_ESPRESSIF_EFUSE)
+  ret = esp_efuse_initialize("/dev/efuse");
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to init EFUSE: %d\n", ret);
@@ -205,13 +206,13 @@ int esp32s3_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_ESP32S3_LEDC
+#ifdef CONFIG_ESPRESSIF_LEDC
   ret = esp32s3_pwm_setup();
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: esp32s3_pwm_setup() failed: %d\n", ret);
     }
-#endif /* CONFIG_ESP32S3_LEDC */
+#endif /* CONFIG_ESPRESSIF_LEDC */
 
 #ifdef CONFIG_ESP32S3_TIMER
   /* Configure general purpose timers */
@@ -304,8 +305,8 @@ int esp32s3_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_ESP32S3_I2S
-#  ifdef CONFIG_ESP32S3_I2S0
+#ifdef CONFIG_ESPRESSIF_I2S
+#  ifdef CONFIG_ESPRESSIF_I2S0
 #    ifdef CONFIG_AUDIO_ES8311
 
   /* Configure ES8311 audio on I2C0 and I2S0 */
@@ -313,25 +314,39 @@ int esp32s3_bringup(void)
   esp32s3_configgpio(SPEAKER_ENABLE_GPIO, OUTPUT);
   esp32s3_gpiowrite(SPEAKER_ENABLE_GPIO, true);
 
-  ret = esp32s3_es8311_initialize(ESP32S3_I2C0, ES8311_I2C_ADDR,
-                                  ES8311_I2C_FREQ, ESP32S3_I2S0);
+  i2c = esp32s3_i2cbus_initialize(ESP32S3_I2C0);
+  if (i2c == NULL)
+    {
+      syslog(LOG_ERR, "Failed to initialize I2C%d\n", ESP32S3_I2C0);
+      ret = -ENODEV;
+    }
+  else
+    {
+      ret = esp32s3_es8311_initialize(i2c, ES8311_I2C_ADDR,
+                                      ES8311_I2C_FREQ, ESP32S3_I2S0);
+      if (ret != OK)
+        {
+          syslog(LOG_ERR, "Failed to initialize ES8311 audio: %d\n", ret);
+        }
+    }
+
   if (ret != OK)
     {
       syslog(LOG_ERR, "Failed to initialize ES8311 audio: %d\n", ret);
     }
 
 #    else
-#      ifdef CONFIG_ESP32S3_I2S0_TX
+#      ifdef CONFIG_ESPRESSIF_I2S0_TX
   i2s_enable_tx = true;
 #      else
   i2s_enable_tx = false;
-#      endif /* CONFIG_ESP32S3_I2S0_TX */
+#      endif /* CONFIG_ESPRESSIF_I2S0_TX */
 
-#      ifdef CONFIG_ESP32S3_I2S0_RX
+#      ifdef CONFIG_ESPRESSIF_I2S0_RX
   i2s_enable_rx = true;
 #      else
   i2s_enable_rx = false;
-#      endif /* CONFIG_ESP32S3_I2S0_RX */
+#      endif /* CONFIG_ESPRESSIF_I2S0_RX */
 
   /* Configure I2S generic audio on I2S0 */
 
@@ -342,20 +357,20 @@ int esp32s3_bringup(void)
     }
 
 #    endif /* CONFIG_AUDIO_ES8311 */
-#  endif /* CONFIG_ESP32S3_I2S0 */
+#  endif /* CONFIG_ESPRESSIF_I2S0 */
 
-#  ifdef CONFIG_ESP32S3_I2S1
-#    ifdef CONFIG_ESP32S3_I2S1_TX
+#  ifdef CONFIG_ESPRESSIF_I2S1
+#    ifdef CONFIG_ESPRESSIF_I2S1_TX
   i2s_enable_tx = true;
 #    else
   i2s_enable_tx = false;
-#    endif /* CONFIG_ESP32S3_I2S1_TX */
+#    endif /* CONFIG_ESPRESSIF_I2S1_TX */
 
-#    ifdef CONFIG_ESP32S3_I2S1_RX
+#    ifdef CONFIG_ESPRESSIF_I2S1_RX
   i2s_enable_rx = true;
 #    else
   i2s_enable_rx = false;
-#    endif /* CONFIG_ESP32S3_I2S1_RX */
+#    endif /* CONFIG_ESPRESSIF_I2S1_RX */
 
   /* Configure I2S generic audio on I2S1 */
 
@@ -363,11 +378,11 @@ int esp32s3_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize I2S%d driver: %d\n",
-             CONFIG_ESP32S3_I2S1, ret);
+             CONFIG_ESPRESSIF_I2S1, ret);
     }
 
-#  endif /* CONFIG_ESP32S3_I2S1 */
-#endif /* CONFIG_ESP32S3_I2S */
+#  endif /* CONFIG_ESPRESSIF_I2S1 */
+#endif /* CONFIG_ESPRESSIF_I2S */
 
 #ifdef CONFIG_INPUT_BUTTONS
   /* Register the BUTTON driver */
@@ -379,9 +394,9 @@ int esp32s3_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_ESP32S3_WIRELESS
+#ifdef CONFIG_ESPRESSIF_WIRELESS
 
-#ifdef CONFIG_ESP32S3_WIFI_BT_COEXIST
+#ifdef CONFIG_ESPRESSIF_WIFI_BT_COEXIST
   ret = esp32s3_wifi_bt_coexist_init();
   if (ret)
     {
@@ -389,7 +404,7 @@ int esp32s3_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_ESP32S3_BLE
+#ifdef CONFIG_ESPRESSIF_BLE
   ret = esp32s3_ble_initialize();
   if (ret)
     {
@@ -397,11 +412,11 @@ int esp32s3_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_ESP32S3_WIFI
+#ifdef CONFIG_ESPRESSIF_WIFI
   ret = board_wlan_init();
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ERROR: Failed to initialize wireless subsystem=%d\n",
+      syslog(LOG_ERR, "ERROR: Failed to initialize wlan subsystem=%d\n",
              ret);
     }
 #endif
@@ -424,8 +439,8 @@ int esp32s3_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_ESP32S3_AES_ACCELERATOR
-  ret = esp32s3_aes_init();
+#ifdef CONFIG_ESPRESSIF_AES_ACCELERATOR
+  ret = esp_aes_init();
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to initialize AES: %d\n", ret);
@@ -433,7 +448,7 @@ int esp32s3_bringup(void)
 #ifdef CONFIG_ESP32S3_AES_ACCELERATOR_TEST
   else
     {
-      esp32s3_aes_test();
+      esp_aes_test();
     }
 #endif
 #endif
