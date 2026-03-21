@@ -40,10 +40,9 @@
 
 #include <arch/board/board.h>
 
-#include "esp32s3_clockconfig.h"
-#include "esp32s3_gpio.h"
 #include "esp32s3_dma.h"
-#include "esp32s3_irq.h"
+#include "espressif/esp_gpio.h"
+#include "espressif/esp_irq.h"
 
 #include "xtensa.h"
 #include "hardware/esp32s3_system.h"
@@ -90,7 +89,7 @@ struct esp32s3_cam_s
   uint8_t cpu;
   int32_t dma_channel;
 
-  struct esp32s3_dmadesc_s dmadesc[ESP32S3_CAM_DMADESC_NUM];
+  struct esp32s3_dmadesc_s *dmadesc; /* Heap-allocated DMA descriptors */
 
   uint8_t *fb;                    /* Frame buffer */
   uint32_t fb_size;               /* Frame buffer size */
@@ -196,7 +195,13 @@ static int IRAM_ATTR cam_interrupt(int irq, void *context, void *arg)
               struct timeval ts;
               uint32_t regval;
 
-              /* Stop capture */
+              /* Stop capture and DMA before invoking callback.
+               * The callback may call set_buf() which rewrites DMA
+               * descriptors.  If DMA is still draining the CAM AFIFO
+               * it could read half-written descriptors and follow a
+               * corrupted pbuf pointer, writing pixel data over
+               * unrelated memory (e.g. g_cam_priv.data.ops).
+               */
 
               regval = getreg32(LCD_CAM_CAM_CTRL1_REG);
               regval &= ~LCD_CAM_CAM_START_M;
@@ -206,54 +211,72 @@ static int IRAM_ATTR cam_interrupt(int irq, void *context, void *arg)
               regval |= LCD_CAM_CAM_UPDATE_REG_M;
               putreg32(regval, LCD_CAM_CAM_CTRL_REG);
 
+              /* Stop DMA channel before callback to prevent race */
+
+              esp32s3_dma_reset_channel(priv->dma_channel, false);
+
               gettimeofday(&ts, NULL);
 
               /* Notify frame complete */
 
               priv->cb(0, priv->fb_size, &ts, priv->cb_arg);
 
-              /* Restart capture for next frame */
+              /* Check if callback called stop_capture.  With a
+               * single-buffer FIFO the V4L2 layer stops capture
+               * inside the callback; restarting DMA after that
+               * would run unsynchronized and corrupt memory.
+               */
 
-              priv->vsync_cnt = 0;
+              if (!priv->capturing)
+                {
+                  priv->vsync_cnt = 0;
+                }
+              else
+                {
+                  /* Restart capture for next frame */
 
-              /* Reset DMA */
+                  priv->vsync_cnt = 0;
 
-              esp32s3_dma_reset_channel(priv->dma_channel, false);
+                  /* DMA channel was already reset before the
+                   * callback above.  Reset CAM + AFIFO now.
+                   */
 
-              /* Reset CAM + AFIFO */
+                  /* Reset CAM + AFIFO */
 
-              regval = getreg32(LCD_CAM_CAM_CTRL1_REG);
-              regval |= LCD_CAM_CAM_RESET_M;
-              putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
-              regval &= ~LCD_CAM_CAM_RESET_M;
-              putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
+                  regval = getreg32(LCD_CAM_CAM_CTRL1_REG);
+                  regval |= LCD_CAM_CAM_RESET_M;
+                  putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
+                  regval &= ~LCD_CAM_CAM_RESET_M;
+                  putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
 
-              regval |= LCD_CAM_CAM_AFIFO_RESET_M;
-              putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
-              regval &= ~LCD_CAM_CAM_AFIFO_RESET_M;
-              putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
+                  regval |= LCD_CAM_CAM_AFIFO_RESET_M;
+                  putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
+                  regval &= ~LCD_CAM_CAM_AFIFO_RESET_M;
+                  putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
 
-              /* Re-set REC_DATA_BYTELEN after reset */
+                  /* Re-set REC_DATA_BYTELEN after reset */
 
-              regval &= ~LCD_CAM_CAM_REC_DATA_BYTELEN_M;
-              regval |= ((ESP32S3_CAM_DMA_BUFLEN - 1)
-                         << LCD_CAM_CAM_REC_DATA_BYTELEN_S);
-              putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
+                  regval &= ~LCD_CAM_CAM_REC_DATA_BYTELEN_M;
+                  regval |= ((ESP32S3_CAM_DMA_BUFLEN - 1)
+                             << LCD_CAM_CAM_REC_DATA_BYTELEN_S);
+                  putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
 
-              /* Reload DMA descriptors */
+                  /* Reload DMA descriptors */
 
-              esp32s3_dma_load(priv->dmadesc, priv->dma_channel, false);
-              esp32s3_dma_enable(priv->dma_channel, false);
+                  esp32s3_dma_load(priv->dmadesc, priv->dma_channel,
+                                   false);
+                  esp32s3_dma_enable(priv->dma_channel, false);
 
-              /* Restart */
+                  /* Restart */
 
-              regval = getreg32(LCD_CAM_CAM_CTRL1_REG);
-              regval |= LCD_CAM_CAM_START_M;
-              putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
+                  regval = getreg32(LCD_CAM_CAM_CTRL1_REG);
+                  regval |= LCD_CAM_CAM_START_M;
+                  putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
 
-              regval = getreg32(LCD_CAM_CAM_CTRL_REG);
-              regval |= LCD_CAM_CAM_UPDATE_REG_M;
-              putreg32(regval, LCD_CAM_CAM_CTRL_REG);
+                  regval = getreg32(LCD_CAM_CAM_CTRL_REG);
+                  regval |= LCD_CAM_CAM_UPDATE_REG_M;
+                  putreg32(regval, LCD_CAM_CAM_CTRL_REG);
+                }
             }
         }
     }
@@ -281,61 +304,50 @@ static void esp32s3_cam_gpio_config(void)
 {
   /* Data pins D0-D7 as input via GPIO matrix */
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_D0_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_D0_PIN,
-                         CAM_DATA_IN0_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_D0_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_D0_PIN, CAM_DATA_IN0_IDX, false);
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_D1_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_D1_PIN,
-                         CAM_DATA_IN1_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_D1_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_D1_PIN, CAM_DATA_IN1_IDX, false);
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_D2_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_D2_PIN,
-                         CAM_DATA_IN2_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_D2_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_D2_PIN, CAM_DATA_IN2_IDX, false);
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_D3_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_D3_PIN,
-                         CAM_DATA_IN3_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_D3_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_D3_PIN, CAM_DATA_IN3_IDX, false);
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_D4_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_D4_PIN,
-                         CAM_DATA_IN4_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_D4_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_D4_PIN, CAM_DATA_IN4_IDX, false);
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_D5_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_D5_PIN,
-                         CAM_DATA_IN5_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_D5_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_D5_PIN, CAM_DATA_IN5_IDX, false);
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_D6_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_D6_PIN,
-                         CAM_DATA_IN6_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_D6_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_D6_PIN, CAM_DATA_IN6_IDX, false);
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_D7_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_D7_PIN,
-                         CAM_DATA_IN7_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_D7_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_D7_PIN, CAM_DATA_IN7_IDX, false);
 
   /* PCLK input */
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_PCLK_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_PCLK_PIN,
-                         CAM_PCLK_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_PCLK_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_PCLK_PIN, CAM_PCLK_IDX, false);
 
   /* VSYNC input */
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_VSYNC_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_VSYNC_PIN,
-                         CAM_V_SYNC_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_VSYNC_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_VSYNC_PIN, CAM_V_SYNC_IDX, false);
 
   /* HREF (H_ENABLE) input */
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_HREF_PIN, INPUT);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_HREF_PIN,
-                         CAM_H_ENABLE_IDX, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_HREF_PIN, INPUT);
+  esp_gpio_matrix_in(CONFIG_ESP32S3_CAM_HREF_PIN, CAM_H_ENABLE_IDX, false);
 
   /* XCLK output to sensor */
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_XCLK_PIN, OUTPUT);
-  esp32s3_gpio_matrix_out(CONFIG_ESP32S3_CAM_XCLK_PIN,
-                          CAM_CLK_IDX, false, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_XCLK_PIN, OUTPUT);
+  esp_gpio_matrix_out(CONFIG_ESP32S3_CAM_XCLK_PIN,
+                      CAM_CLK_IDX, false, false);
 }
 
 /****************************************************************************
@@ -463,16 +475,13 @@ static int esp32s3_cam_config(struct esp32s3_cam_s *priv)
 
   /* 1) Map peripheral → CPU interrupt (creates IRQ mapping) */
 
-  priv->cpuint = esp32s3_setup_irq(priv->cpu,
-                                   ESP32S3_PERIPH_LCD_CAM,
-                                   ESP32S3_INT_PRIO_DEF,
-                                   ESP32S3_CPUINT_LEVEL);
+  priv->cpuint = esp_setup_irq(ESP32S3_PERIPH_LCD_CAM,
+                               ESP_IRQ_PRIORITY_DEFAULT,
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               cam_interrupt,
+                               priv);
   DEBUGASSERT(priv->cpuint >= 0);
 
-  /* 2) Attach handler (mapping now exists, so IRQ is valid) */
-
-  ret = irq_attach(ESP32S3_IRQ_LCD_CAM, cam_interrupt, priv);
-  DEBUGASSERT(ret == 0);
   UNUSED(ret);
 
   /* 3) Clear any spurious interrupt that fired during setup */
@@ -512,6 +521,23 @@ static int esp32s3_cam_init(struct imgdata_s *data)
 
   spin_lock_init(&priv->lock);
 
+  /* Allocate DMA descriptors from heap so they are isolated from
+   * the driver struct.  If GDMA ever follows a stale/corrupted
+   * descriptor it will scribble on heap, not on g_cam_priv.
+   */
+
+  if (priv->dmadesc == NULL)
+    {
+      priv->dmadesc = kmm_memalign(4,
+                        sizeof(struct esp32s3_dmadesc_s) *
+                        ESP32S3_CAM_DMADESC_NUM);
+      if (priv->dmadesc == NULL)
+        {
+          snerr("ERROR: Failed to allocate DMA descriptors\n");
+          return -ENOMEM;
+        }
+    }
+
   /* Configure GPIO pins */
 
   esp32s3_cam_gpio_config();
@@ -544,7 +570,7 @@ static int esp32s3_cam_uninit(struct imgdata_s *data)
 
   up_disable_irq(ESP32S3_IRQ_LCD_CAM);
   irq_detach(ESP32S3_IRQ_LCD_CAM);
-  esp32s3_teardown_irq(priv->cpu, ESP32S3_PERIPH_LCD_CAM, priv->cpuint);
+  esp_teardown_irq(ESP32S3_IRQ_LCD_CAM, priv->cpuint);
 
   /* Release DMA */
 
@@ -552,6 +578,14 @@ static int esp32s3_cam_uninit(struct imgdata_s *data)
     {
       esp32s3_dma_release(priv->dma_channel);
       priv->dma_channel = -1;
+    }
+
+  /* Free DMA descriptors */
+
+  if (priv->dmadesc)
+    {
+      kmm_free(priv->dmadesc);
+      priv->dmadesc = NULL;
     }
 
   /* Free frame buffer */
@@ -723,31 +757,6 @@ static int esp32s3_cam_start_capture(struct imgdata_s *data,
 
   priv->capturing = true;
 
-  syslog(LOG_INFO, "CAM start: CTRL=0x%08lx CTRL1=0x%08lx ENA=0x%08lx\n",
-         (unsigned long)getreg32(LCD_CAM_CAM_CTRL_REG),
-         (unsigned long)getreg32(LCD_CAM_CAM_CTRL1_REG),
-         (unsigned long)getreg32(LCD_CAM_LC_DMA_INT_ENA_REG));
-
-  /* Debug: poll RAW register to see if VSYNC appears */
-
-  for (int i = 0; i < 50; i++)
-    {
-      up_mdelay(20);
-      uint32_t raw = getreg32(LCD_CAM_LC_DMA_INT_RAW_REG);
-      uint32_t st  = getreg32(LCD_CAM_LC_DMA_INT_ST_REG);
-      if (raw || st)
-        {
-          syslog(LOG_INFO, "CAM poll[%d]: raw=0x%08lx st=0x%08lx\n",
-                 i, (unsigned long)raw, (unsigned long)st);
-          break;
-        }
-
-      if (i == 49)
-        {
-          syslog(LOG_INFO, "CAM poll: no VSYNC after 1s\n");
-        }
-    }
-
   return OK;
 }
 
@@ -799,9 +808,9 @@ struct imgdata_s *esp32s3_cam_initialize(void)
    * sensor I2C communication (e.g. gc0308_initialize).
    */
 
-  esp32s3_configgpio(CONFIG_ESP32S3_CAM_XCLK_PIN, OUTPUT);
-  esp32s3_gpio_matrix_out(CONFIG_ESP32S3_CAM_XCLK_PIN,
-                          CAM_CLK_IDX, false, false);
+  esp_configgpio(CONFIG_ESP32S3_CAM_XCLK_PIN, OUTPUT);
+  esp_gpio_matrix_out(CONFIG_ESP32S3_CAM_XCLK_PIN,
+                      CAM_CLK_IDX, false, false);
   esp32s3_cam_enableclk();
 
   return &g_cam_priv.data;
