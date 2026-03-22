@@ -57,6 +57,14 @@ if(CONFIG_USBDEV)
     list(APPEND SRCS adb.c)
   endif()
 
+  if(CONFIG_USBMTP)
+    list(APPEND SRCS mtp.c)
+  endif()
+
+  if(CONFIG_USBUVC)
+    list(APPEND SRCS uvc.c)
+  endif()
+
   if(CONFIG_NET_CDCECM)
     list(APPEND SRCS cdcecm.c)
   endif()
@@ -67,10 +75,6 @@ if(CONFIG_USBDEV)
 
   if(CONFIG_USBDEV_FS)
     list(APPEND SRCS usbdev_fs.c)
-  endif()
-
-  if(CONFIG_USBMTP)
-    list(APPEND SRCS mtp.c)
   endif()
 
   list(APPEND SRCS composite.c usbdev_desc.c usbdev_req.c)
