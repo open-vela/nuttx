@@ -442,6 +442,35 @@ void esp32s3_dma_disable(int chan, bool tx)
 }
 
 /****************************************************************************
+ * Name: esp32s3_dma_reset_channel
+ *
+ * Description:
+ *   Reset DMA channel by toggling the reset bit in CONF0 register.
+ *
+ * Input Parameters:
+ *   chan - DMA channel
+ *   tx   - true: TX mode; false: RX mode
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+void esp32s3_dma_reset_channel(int chan, bool tx)
+{
+  if (tx)
+    {
+      SET_GDMA_CH_BITS(DMA_OUT_CONF0_CH0_REG, chan, DMA_OUT_RST_CH0_M);
+      CLR_GDMA_CH_BITS(DMA_OUT_CONF0_CH0_REG, chan, DMA_OUT_RST_CH0_M);
+    }
+  else
+    {
+      SET_GDMA_CH_BITS(DMA_IN_CONF0_CH0_REG, chan, DMA_IN_RST_CH0_M);
+      CLR_GDMA_CH_BITS(DMA_IN_CONF0_CH0_REG, chan, DMA_IN_RST_CH0_M);
+    }
+}
+
+/****************************************************************************
  * Name: esp32s3_dma_wait_idle
  *
  * Description:
