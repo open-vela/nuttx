@@ -41,6 +41,11 @@
 #include <nuttx/wireless/bluetooth/bt_driver.h>
 
 #include "probe/bt_probe_hci.h"
+#include "bt_monitor.h"
+
+#ifdef CONFIG_BLUETOOTH_MONITOR
+extern bt_monitor_t g_hci_rx_mon;
+#endif
 
 /****************************************************************************
  * Private Types
@@ -164,6 +169,7 @@ static int uart_bth4_receive(FAR struct bt_driver_s *drv,
       if (ret >= 0)
         {
           bt_probe_hci_h4_rx_irq(htype, buffer, buflen);
+          bt_monitor_push(&g_hci_rx_mon);
           circbuf_write(&dev->circbuf, &htype, H4_HEADER_SIZE);
           circbuf_write(&dev->circbuf, buffer, buflen);
           uart_bth4_pollnotify(dev, POLLIN);
