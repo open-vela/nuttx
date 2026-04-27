@@ -870,6 +870,14 @@ config ESP32S3_LCD
 	---help---
 		LCD controller that outputs parallel data and supports RGB interface.
 
+config ESP32S3_CAM
+	bool "Camera (DVP)"
+	default n
+	select ESP32S3_DMA
+	select DRIVERS_VIDEO
+	---help---
+		Camera controller that receives parallel DVP data from image sensors.
+
 config ESP32S3_AES_ACCELERATOR
 	bool "AES Accelerator"
 	default n
