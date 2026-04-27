@@ -1121,6 +1121,12 @@ static void esp32s3_spi_poll_exchange(struct esp32s3_spi_priv_s *priv,
             {
               memcpy(&w_wd, tp, sizeof(uintptr_t));
 
+              if (priv->nbits > 8)
+                {
+                  w_wd = ((w_wd & 0x00ff00ff) << 8) |
+                         ((w_wd & 0xff00ff00) >> 8);
+                }
+
               tp += sizeof(uintptr_t);
             }
 
@@ -1548,6 +1554,7 @@ static int esp32s3_spi_init(struct spi_dev_s *dev)
 #endif
 
   putreg32(0, SPI_CTRL_REG(priv->config->id));
+
   putreg32(VALUE_MASK(0, SPI_CS_HOLD_TIME),
            SPI_USER1_REG(priv->config->id));
 
