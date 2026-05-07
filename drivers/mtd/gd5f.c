@@ -217,6 +217,8 @@ static void gd5f_write_to_cache(FAR struct gd5f_dev_s *priv,
 static bool gd5f_execute_write(FAR struct gd5f_dev_s *priv,
                                uint32_t position);
 
+static inline void gd5f_set_ecc_unlocked(FAR struct gd5f_dev_s *priv,
+                                         bool enable);
 static inline void gd5f_enable_ecc(FAR struct gd5f_dev_s *priv);
 static inline void gd5f_unlockblocks(FAR struct gd5f_dev_s *priv);
 
@@ -244,6 +246,8 @@ static int gd5f_ioctl(FAR struct mtd_dev_s *dev,
 static int gd5f_erase(FAR struct mtd_dev_s *dev,
                       off_t startblock,
                       size_t nblocks);
+static int gd5f_isbad(FAR struct mtd_dev_s *dev, off_t block);
+static int gd5f_markbad(FAR struct mtd_dev_s *dev, off_t block);
 
 /****************************************************************************
  * Private Functions
@@ -931,19 +935,164 @@ static int gd5f_ioctl(FAR struct mtd_dev_s *dev,
 }
 
 /****************************************************************************
- * Name:  gd5f_enable_ecc
+ * Name: gd5f_isbad
+ *
+ * Description:
+ *   Check if a block is bad by reading the bad block marker from the
+ *   spare area (column 2048) of the first page in the block.
+ *   Returns 0 if good, 1 if bad, or negative errno on error.
+ *
  ****************************************************************************/
 
-static inline void gd5f_enable_ecc(
-                          FAR struct gd5f_dev_s *priv)
+static int gd5f_isbad(FAR struct mtd_dev_s *dev, off_t block)
 {
-#ifdef CONFIG_MTD_GD5F_QSPI
-  uint8_t secure_otp = GD5F_SOTP_ECC | GD5F_SOTP_QE;
-#else
-  uint8_t secure_otp = GD5F_SOTP_ECC;
-#endif
+  FAR struct gd5f_dev_s *priv = (FAR struct gd5f_dev_s *)dev;
+  uint8_t marker = 0xff;
+  uint32_t pageaddr;
+  int ret = 0;
+
+  /* First page of the block */
+
+  pageaddr = block << priv->sectorshift;
 
   gd5f_lock(priv->dev);
+
+  /* Disable on-chip ECC before reading the bad-block marker.  With ECC
+   * enabled the marker byte (0x00 on a factory-marked bad block) would be
+   * treated as parity payload and either flagged as an uncorrectable error
+   * or silently "corrected", producing a wrong isbad() result.
+   */
+
+  gd5f_set_ecc_unlocked(priv, false);
+  if (!gd5f_waitstatus(priv, GD5F_SR_OIP, false))
+    {
+      ferr("isbad: ECC-off settle timeout block=%ld\n", (long)block);
+      ret = -EIO;
+      goto out_restore_ecc;
+    }
+
+  /* Issue PAGE READ to load page into cache */
+
+  gd5f_issue_page_read(priv, pageaddr);
+  if (!gd5f_waitstatus(priv, GD5F_SR_OIP, false))
+    {
+      ferr("isbad: page-read timeout block=%ld\n", (long)block);
+      ret = -EIO;
+      goto out_restore_ecc;
+    }
+
+  /* Read spare area byte 0 (column 2048) -- bad block marker.  memread
+   * returns void; transfer faults are caught by the waitstatus above.
+   * marker is pre-initialised to 0xff so a silent read corruption fails
+   * "good" rather than fabricating a bad marker from stack garbage.
+   */
+
+#ifdef CONFIG_MTD_GD5F_QSPI
+  gd5f_memread(priv, GD5F_READ_FROM_CACHE_X4,
+               (1 << priv->pageshift), 1, true, &marker, 1);
+#else
+  gd5f_memread(priv, GD5F_READ_FROM_CACHE,
+               (1 << priv->pageshift), 1, false, &marker, 1);
+#endif
+
+  /* 0xFF = good block, anything else = bad */
+
+  ret = (marker != 0xff) ? 1 : 0;
+
+out_restore_ecc:
+
+  /* Restore ECC unconditionally so subsequent reads/writes operate
+   * normally even if any step above failed.  A restore failure is
+   * logged but does not overwrite a good/bad verdict.
+   */
+
+  gd5f_set_ecc_unlocked(priv, true);
+  if (!gd5f_waitstatus(priv, GD5F_SR_OIP, false))
+    {
+      ferr("isbad: ECC-restore timeout block=%ld\n", (long)block);
+      if (ret >= 0)
+        {
+          ret = -EIO;
+        }
+    }
+
+  gd5f_unlock(priv->dev);
+
+  return ret;
+}
+
+/****************************************************************************
+ * Name: gd5f_markbad
+ *
+ * Description:
+ *   Mark a block as bad by writing 0x00 to the spare area (column 2048)
+ *   of the first page in the block.
+ *
+ ****************************************************************************/
+
+static int gd5f_markbad(FAR struct mtd_dev_s *dev, off_t block)
+{
+#ifdef CONFIG_MTD_READONLY
+  return -EACCES;
+#else
+  FAR struct gd5f_dev_s *priv = (FAR struct gd5f_dev_s *)dev;
+  uint8_t marker = 0x00;
+  uint32_t pageaddr;
+  uint32_t row;
+
+  pageaddr = block << priv->sectorshift;
+  row = pageaddr >> priv->pageshift;
+
+  gd5f_lock(priv->dev);
+
+  gd5f_writeenable(priv);
+
+  /* Write 0x00 to spare area byte 0 (column 2048) */
+
+  gd5f_memwrite(priv, GD5F_PROGRAM_LOAD,
+                (1 << priv->pageshift), false, &marker, 1);
+
+  /* Execute program */
+
+  gd5f_cmd(priv, GD5F_PROGRAM_EXECUTE, row, 3,
+           NULL, 0, GD5F_CMD_ADDRESS);
+
+  if (!gd5f_waitstatus(priv, GD5F_SR_P_FAIL, false))
+    {
+      ferr("markbad program failed block=%ld\n", (long)block);
+      gd5f_unlock(priv->dev);
+      return -EIO;
+    }
+
+  gd5f_unlock(priv->dev);
+
+  return OK;
+#endif /* CONFIG_MTD_READONLY */
+}
+
+/****************************************************************************
+ * Name:  gd5f_set_ecc_unlocked
+ *
+ * Description:
+ *   Enable or disable the on-chip ECC engine by writing the Secure OTP
+ *   feature register. The caller must already hold the SPI bus lock.
+ *
+ ****************************************************************************/
+
+static inline void gd5f_set_ecc_unlocked(FAR struct gd5f_dev_s *priv,
+                                         bool enable)
+{
+#ifdef CONFIG_MTD_GD5F_QSPI
+  uint8_t secure_otp = GD5F_SOTP_QE;
+#else
+  uint8_t secure_otp = 0;
+#endif
+
+  if (enable)
+    {
+      secure_otp |= GD5F_SOTP_ECC;
+    }
+
   gd5f_writeenable(priv);
 
   gd5f_cmd(priv, GD5F_SET_FEATURE, GD5F_SECURE_OTP, 1,
@@ -951,6 +1100,17 @@ static inline void gd5f_enable_ecc(
            GD5F_CMD_ADDRESS | GD5F_CMD_WRITEDATA);
 
   gd5f_writedisable(priv);
+}
+
+/****************************************************************************
+ * Name:  gd5f_enable_ecc
+ ****************************************************************************/
+
+static inline void gd5f_enable_ecc(
+                          FAR struct gd5f_dev_s *priv)
+{
+  gd5f_lock(priv->dev);
+  gd5f_set_ecc_unlocked(priv, true);
   gd5f_unlock(priv->dev);
 }
 
@@ -1005,13 +1165,15 @@ FAR struct mtd_dev_s *gd5f_initialize(FAR struct spi_dev_s *dev,
        * nullified by kmm_zalloc).
        */
 
-      priv->mtd.erase  = gd5f_erase;
-      priv->mtd.bread  = gd5f_bread;
-      priv->mtd.bwrite = gd5f_bwrite;
-      priv->mtd.ioctl  = gd5f_ioctl;
-      priv->mtd.name   = "gd5f";
-      priv->dev        = dev;
-      priv->spi_devid  = spi_devid;
+      priv->mtd.erase   = gd5f_erase;
+      priv->mtd.bread   = gd5f_bread;
+      priv->mtd.bwrite  = gd5f_bwrite;
+      priv->mtd.ioctl   = gd5f_ioctl;
+      priv->mtd.isbad   = gd5f_isbad;
+      priv->mtd.markbad = gd5f_markbad;
+      priv->mtd.name    = "gd5f";
+      priv->dev         = dev;
+      priv->spi_devid   = spi_devid;
 
       /* De-select the FLASH */
 
@@ -1072,12 +1234,14 @@ FAR struct mtd_dev_s *gd5f_qspi_initialize(
   priv = kmm_zalloc(sizeof(struct gd5f_dev_s));
   if (priv)
     {
-      priv->mtd.erase  = gd5f_erase;
-      priv->mtd.bread  = gd5f_bread;
-      priv->mtd.bwrite = gd5f_bwrite;
-      priv->mtd.ioctl  = gd5f_ioctl;
-      priv->mtd.name   = "gd5f";
-      priv->dev        = dev;
+      priv->mtd.erase   = gd5f_erase;
+      priv->mtd.bread   = gd5f_bread;
+      priv->mtd.bwrite  = gd5f_bwrite;
+      priv->mtd.ioctl   = gd5f_ioctl;
+      priv->mtd.isbad   = gd5f_isbad;
+      priv->mtd.markbad = gd5f_markbad;
+      priv->mtd.name    = "gd5f";
+      priv->dev         = dev;
 
       /* Reset the flash */
 
