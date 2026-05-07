@@ -1033,7 +1033,7 @@ out_restore_ecc:
 static int gd5f_markbad(FAR struct mtd_dev_s *dev, off_t block)
 {
 #ifdef CONFIG_MTD_READONLY
-  return -EACCES;
+  return -EROFS;
 #else
   FAR struct gd5f_dev_s *priv = (FAR struct gd5f_dev_s *)dev;
   uint8_t marker = 0x00;

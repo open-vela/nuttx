@@ -18,6 +18,15 @@ menuconfig MTD
 
 if MTD
 
+config MTD_READONLY
+	bool "Read-only MTD (disable all write/erase operations)"
+	default n
+	---help---
+		Disable write and erase operations across the entire MTD storage
+		stack: MTD flash drivers, FTL block layer, and MTD partitions.
+		This reduces code size for read-only use cases such as boot
+		loaders that only need to read from flash.
+
 config MTD_PARTITION
 	bool "Support MTD partitions"
 	default n

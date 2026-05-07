@@ -640,6 +640,9 @@ static int mx35_erase(FAR struct mtd_dev_s *dev,
                       off_t startblock,
                       size_t nblocks)
 {
+#ifdef CONFIG_MTD_READONLY
+  return -EROFS;
+#else
   FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
   size_t blocksleft = nblocks;
 
@@ -663,6 +666,7 @@ static int mx35_erase(FAR struct mtd_dev_s *dev,
 
   mx35_unlock(priv->dev);
   return (int)nblocks;
+#endif /* CONFIG_MTD_READONLY */
 }
 
 /****************************************************************************
@@ -859,6 +863,9 @@ static ssize_t mx35_write(FAR struct mtd_dev_s *dev,
                           size_t nbytes,
                           FAR const uint8_t *buffer)
 {
+#ifdef CONFIG_MTD_READONLY
+  return -EROFS;
+#else
   FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
   size_t bytesleft = nbytes;
   uint32_t position = offset;
@@ -897,6 +904,7 @@ static ssize_t mx35_write(FAR struct mtd_dev_s *dev,
   mx35_unlock(priv->dev);
 
   return nbytes - bytesleft;
+#endif /* CONFIG_MTD_READONLY */
 }
 
 static ssize_t mx35_bread(FAR struct mtd_dev_s *dev, off_t startblock,
@@ -920,6 +928,9 @@ static ssize_t mx35_bread(FAR struct mtd_dev_s *dev, off_t startblock,
 static ssize_t mx35_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
                            size_t nblocks, FAR const uint8_t *buffer)
 {
+#ifdef CONFIG_MTD_READONLY
+  return -EROFS;
+#else
   FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
   ssize_t nbytes;
 
@@ -933,6 +944,7 @@ static ssize_t mx35_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
     }
 
   return nbytes;
+#endif /* CONFIG_MTD_READONLY */
 }
 
 /****************************************************************************
@@ -1072,6 +1084,9 @@ static int mx35_isbad(FAR struct mtd_dev_s *dev, off_t block)
 
 static int mx35_markbad(FAR struct mtd_dev_s *dev, off_t block)
 {
+#ifdef CONFIG_MTD_READONLY
+  return -EROFS;
+#else
   FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
   uint8_t marker = 0x00;
   uint32_t pageaddr;
@@ -1104,6 +1119,7 @@ static int mx35_markbad(FAR struct mtd_dev_s *dev, off_t block)
   mx35_unlock(priv->dev);
 
   return OK;
+#endif /* CONFIG_MTD_READONLY */
 }
 
 /****************************************************************************
@@ -1190,7 +1206,9 @@ FAR struct mtd_dev_s *mx35_initialize(FAR struct spi_dev_s *dev,
       priv->mtd.bread  = mx35_bread;
       priv->mtd.bwrite = mx35_bwrite;
       priv->mtd.read   = mx35_read;
+#ifdef CONFIG_MTD_BYTE_WRITE
       priv->mtd.write  = mx35_write;
+#endif
       priv->mtd.ioctl  = mx35_ioctl;
       priv->mtd.isbad  = mx35_isbad;
       priv->mtd.markbad = mx35_markbad;
@@ -1244,7 +1262,9 @@ FAR struct mtd_dev_s *mx35_initialize(FAR struct qspi_dev_s *dev)
       priv->mtd.bread  = mx35_bread;
       priv->mtd.bwrite = mx35_bwrite;
       priv->mtd.read   = mx35_read;
+#ifdef CONFIG_MTD_BYTE_WRITE
       priv->mtd.write  = mx35_write;
+#endif
       priv->mtd.ioctl  = mx35_ioctl;
       priv->mtd.isbad  = mx35_isbad;
       priv->mtd.markbad = mx35_markbad;

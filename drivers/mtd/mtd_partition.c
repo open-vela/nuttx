@@ -201,6 +201,9 @@ static bool part_bytecheck(FAR struct mtd_partition_s *priv, off_t byoff)
 static int part_erase(FAR struct mtd_dev_s *dev, off_t startblock,
                       size_t nblocks)
 {
+#ifdef CONFIG_MTD_READONLY
+  return -EROFS;
+#else
   FAR struct mtd_partition_s *priv = (FAR struct mtd_partition_s *)dev;
   off_t eoffset;
 
@@ -224,6 +227,7 @@ static int part_erase(FAR struct mtd_dev_s *dev, off_t startblock,
   DEBUGASSERT(eoffset * priv->blkpererase == priv->firstblock);
 
   return priv->parent->erase(priv->parent, startblock + eoffset, nblocks);
+#endif /* CONFIG_MTD_READONLY */
 }
 
 /****************************************************************************
@@ -268,6 +272,9 @@ static ssize_t part_bread(FAR struct mtd_dev_s *dev, off_t startblock,
 static ssize_t part_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
                            size_t nblocks, FAR const uint8_t *buf)
 {
+#ifdef CONFIG_MTD_READONLY
+  return -EROFS;
+#else
   FAR struct mtd_partition_s *priv = (FAR struct mtd_partition_s *)dev;
 
   DEBUGASSERT(priv && (buf || nblocks == 0));
@@ -286,6 +293,7 @@ static ssize_t part_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
 
   return priv->parent->bwrite(priv->parent, startblock + priv->firstblock,
                               nblocks, buf);
+#endif /* CONFIG_MTD_READONLY */
 }
 
 /****************************************************************************
@@ -337,6 +345,9 @@ static ssize_t part_read(FAR struct mtd_dev_s *dev, off_t offset,
 static ssize_t part_write(FAR struct mtd_dev_s *dev, off_t offset,
                           size_t nbytes, FAR const uint8_t *buffer)
 {
+#ifdef CONFIG_MTD_READONLY
+  return -EROFS;
+#else
   FAR struct mtd_partition_s *priv = (FAR struct mtd_partition_s *)dev;
   off_t newoffset;
 
@@ -367,6 +378,7 @@ static ssize_t part_write(FAR struct mtd_dev_s *dev, off_t offset,
   /* The underlying MTD driver does not support the write() method */
 
   return -ENOSYS;
+#endif /* CONFIG_MTD_READONLY */
 }
 #endif
 
@@ -508,6 +520,9 @@ static int part_isbad(FAR struct mtd_dev_s *dev, off_t block)
 
 static int part_markbad(FAR struct mtd_dev_s *dev, off_t block)
 {
+#ifdef CONFIG_MTD_READONLY
+  return -EROFS;
+#else
   FAR struct mtd_partition_s *priv = (FAR struct mtd_partition_s *)dev;
 
   DEBUGASSERT(priv);
@@ -523,6 +538,7 @@ static int part_markbad(FAR struct mtd_dev_s *dev, off_t block)
   /* The underlying MTD driver does not support the markbad() method */
 
   return -ENOSYS;
+#endif /* CONFIG_MTD_READONLY */
 }
 
 #if defined(CONFIG_FS_PROCFS) && !defined(CONFIG_PROCFS_EXCLUDE_PARTITIONS)
