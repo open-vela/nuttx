@@ -1502,6 +1502,31 @@ config MTD_GD5F_QSPI
 
 endif # MTD_GD5F
 
+config MTD_F50L
+	bool "SPI-based ESMT F50L/F50D SPI NAND FLASH"
+	default n
+	select SPI
+
+if MTD_F50L
+
+config F50L_SPIMODE
+	int "F50L SPI Mode"
+	default 0
+
+config F50L_SPIFREQUENCY
+	int "F50L SPI Frequency"
+	default 100000000
+
+config MTD_F50L_QSPI
+	bool "Use QSPI interface for F50L"
+	default n
+	---help---
+		Use QSPI Quad I/O interface instead of standard SPI
+		for higher read throughput.  Write uses single-line
+		PROGRAM LOAD (0x02).
+
+endif # MTD_F50L
+
 config MTD_DHARA
 	bool "MTD Nandflash use dhara map"
 	default n

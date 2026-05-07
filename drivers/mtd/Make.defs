@@ -143,6 +143,10 @@ ifeq ($(CONFIG_MTD_GD5F),y)
 CSRCS += gd5f.c
 endif
 
+ifeq ($(CONFIG_MTD_F50L),y)
+CSRCS += f50l.c
+endif
+
 ifeq ($(CONFIG_MTD_AT25),y)
 CSRCS += at25.c
 endif
