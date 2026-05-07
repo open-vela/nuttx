@@ -705,10 +705,6 @@ static bool mx35_wait_page_ready(FAR struct mx35_dev_s *priv)
   uint8_t status;
   int polls = 0;
 
-  /* Poll OIP bit and capture status in one pass — avoids the extra
-   * SPI transaction that mx35_eccstatusread() would add.
-   */
-
   do
     {
       mx35_cmd(priv, MX35_GET_FEATURE, MX35_STATUS, 1,
@@ -732,15 +728,12 @@ static bool mx35_wait_page_ready(FAR struct mx35_dev_s *priv)
       return false;
     }
 
-  /* Reuse the final status for ECC check */
+  /* Reuse the final status for ECC check; caller decides how to handle
+   * ECC uncorrectable after inspecting the page contents (an all-0xff
+   * erased page legitimately returns ECC uncorrectable on this device).
+   */
 
   priv->eccstatus = status;
-
-  if ((status & MX35_FEATURE_ECC_MASK) == MX35_FEATURE_ECC_INCORRECTABLE)
-    {
-      return false;
-    }
-
   return true;
 }
 
@@ -789,6 +782,60 @@ static ssize_t mx35_read(FAR struct mtd_dev_s *dev,
         }
 
       mx35_readbuffer(priv, position, buffer, chunklength);
+
+      /* ECC uncorrectable is a false positive on erased pages (all 0xff)
+       * because the Macronix MX35 on-die ECC engine protects the full
+       * 2KiB page and the spare parity bytes are also 0xff on an erased
+       * page.  The status is latched once per page in
+       * mx35_wait_page_ready(), so we must validate the entire page (not
+       * just the caller's chunk) before swallowing the error.  Scan once
+       * per page by re-reading the on-chip cache in small bursts; clear
+       * the ECC flag on success so subsequent chunks of the same page
+       * skip the check.  If any non-0xff byte is found it is genuine
+       * corruption and the read must stop.
+       */
+
+      if ((priv->eccstatus & MX35_FEATURE_ECC_MASK) ==
+          MX35_FEATURE_ECC_INCORRECTABLE)
+        {
+          const uint32_t pagesize = 1 << priv->pageshift;
+          uint8_t scratch[64];
+          uint32_t scanpos;
+          bool corrupt = false;
+
+          for (scanpos = 0; scanpos < pagesize && !corrupt;
+               scanpos += sizeof(scratch))
+            {
+              size_t burst = pagesize - scanpos < sizeof(scratch) ?
+                             pagesize - scanpos : sizeof(scratch);
+              size_t i;
+
+              mx35_readbuffer(priv, pageaddress + scanpos, scratch, burst);
+
+              for (i = 0; i < burst; i++)
+                {
+                  if (scratch[i] != 0xff)
+                    {
+                      corrupt = true;
+                      break;
+                    }
+                }
+            }
+
+          if (corrupt)
+            {
+              ferr("ECC uncorrectable at pos=%" PRIu32
+                   " page=%" PRIu32 "\n",
+                   position, pageaddress);
+              break;
+            }
+
+          /* Erased page confirmed; clear the latched ECC flag so the
+           * remaining chunks of this page do not redo the scan.
+           */
+
+          priv->eccstatus &= ~MX35_FEATURE_ECC_MASK;
+        }
 
       /* Pipeline: issue next PAGE_READ after reading current cache */
 
@@ -888,7 +935,6 @@ static ssize_t mx35_write(FAR struct mtd_dev_s *dev,
       mx35_writeenable(priv);
       mx35_write_to_cache(priv, position, buffer, chunklength);
       mx35_issue_execute_write(priv, pageaddress);
-
       if (!mx35_wait_write_complete(priv))
         {
           ferr("P_FAIL at pos=%" PRIu32 " page=%" PRIu32 "\n",
