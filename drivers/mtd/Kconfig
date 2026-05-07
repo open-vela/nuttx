@@ -834,6 +834,13 @@ config MX35_SPIFREQUENCY
 	---help---
 		SPI frequency for MX35 is 104 MHz.
 
+config MX35_QSPI
+	bool "Use QSPI interface for MX35"
+	default n
+	---help---
+		Use QSPI Quad I/O interface instead of standard SPI
+		for higher throughput.
+
 endif # MTD_MX35
 
 config MTD_S25FL1
@@ -1476,6 +1483,13 @@ config GD5F_SPIMODE
 config GD5F_SPIFREQUENCY
 	int "GD5F SPI Frequency"
 	default 20000000
+
+config MTD_GD5F_QSPI
+	bool "Use QSPI interface for GD5F"
+	default n
+	---help---
+		Use QSPI Quad I/O interface instead of standard SPI
+		for higher throughput.
 
 endif # MTD_GD5F
 

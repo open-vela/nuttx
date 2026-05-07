@@ -33,11 +33,14 @@
 #include <unistd.h>
 #include <errno.h>
 #include <debug.h>
-
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
 #include <nuttx/fs/ioctl.h>
-#include <nuttx/spi/spi.h>
+#ifdef CONFIG_MX35_QSPI
+#  include <nuttx/spi/qspi.h>
+#else
+#  include <nuttx/spi/spi.h>
+#endif
 #include <nuttx/mtd/mtd.h>
 
 /****************************************************************************
@@ -128,6 +131,14 @@
 #define MX35_RESET                  0xFF   /* Reset the device     0  0  0      */
 #define MX35_DUMMY                  0x00   /* No Operation         0  0  0      */
 
+/* Bus abstraction flags -- values match QSPICMD_* so QSPI path
+ * can forward directly; SPI path interprets them independently.
+ */
+
+#define MX35_CMD_ADDRESS    (1 << 0)
+#define MX35_CMD_READDATA   (1 << 1)
+#define MX35_CMD_WRITEDATA  (1 << 2)
+
 /* Feature register *********************************************************/
 
 /* Register address */
@@ -184,21 +195,31 @@
 
 struct mx35_dev_s
 {
-  struct mtd_dev_s mtd;      /* MTD interface */
-  FAR struct spi_dev_s *dev; /* Saved SPI interface instance */
+  struct mtd_dev_s mtd;
+#ifdef CONFIG_MX35_QSPI
+  FAR struct qspi_dev_s *dev;
+#else
+  FAR struct spi_dev_s  *dev;
+  uint32_t              spi_devid;
+#endif
   uint8_t highcapacity;
-  uint8_t  sectorshift;      /* 17 */
-  uint16_t nsectors;         /* 1024 or 2048 */
-  uint8_t  pageshift;        /* 11 */
-  uint8_t eccstatus;         /* Internal ECC status */
+  uint8_t  sectorshift;
+  uint16_t nsectors;
+  uint8_t  pageshift;
+  uint8_t eccstatus;
 };
 
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
 
+#ifdef CONFIG_MX35_QSPI
+static inline void mx35_lock(FAR struct qspi_dev_s *dev);
+static inline void mx35_unlock(FAR struct qspi_dev_s *dev);
+#else
 static inline void mx35_lock(FAR struct spi_dev_s *dev);
 static inline void mx35_unlock(FAR struct spi_dev_s *dev);
+#endif
 
 static int mx35_readid(FAR struct mx35_dev_s *priv);
 static bool mx35_waitstatus(FAR struct mx35_dev_s *priv, uint8_t mask,
@@ -219,19 +240,25 @@ static int mx35_erase(FAR struct mtd_dev_s *dev,
 static void mx35_readbuffer(FAR struct mx35_dev_s *priv,
                             uint32_t address,
                             uint8_t *buffer, size_t length);
-static bool mx35_read_page(FAR struct mx35_dev_s *priv,
-                           uint32_t position);
+static void mx35_issue_page_read(FAR struct mx35_dev_s *priv,
+                                 uint32_t pageaddress);
+static bool mx35_wait_page_ready(FAR struct mx35_dev_s *priv);
 static ssize_t mx35_read(FAR struct mtd_dev_s *dev,
                          off_t offset,
                          size_t nbytes,
                          FAR uint8_t *buffer);
+static ssize_t mx35_bread(FAR struct mtd_dev_s *dev, off_t startblock,
+                          size_t nblocks, FAR uint8_t *buffer);
+static ssize_t mx35_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
+                           size_t nblocks, FAR const uint8_t *buffer);
 
 static void mx35_write_to_cache(FAR struct mx35_dev_s *priv,
                                 uint32_t address,
                                 const uint8_t *buffer,
                                 size_t length);
-static bool mx35_execute_write(FAR struct mx35_dev_s *priv,
-                               uint32_t position);
+static void mx35_issue_execute_write(FAR struct mx35_dev_s *priv,
+                                     uint32_t pageaddress);
+static bool mx35_wait_write_complete(FAR struct mx35_dev_s *priv);
 static ssize_t mx35_write(FAR struct mtd_dev_s *dev,
                           off_t offset,
                           size_t nbytes,
@@ -240,6 +267,8 @@ static ssize_t mx35_write(FAR struct mtd_dev_s *dev,
 static int mx35_ioctl(FAR struct mtd_dev_s *dev,
                       int cmd,
                       unsigned long arg);
+static int mx35_isbad(FAR struct mtd_dev_s *dev, off_t block);
+static int mx35_markbad(FAR struct mtd_dev_s *dev, off_t block);
 static inline void mx35_eccstatusread(struct mx35_dev_s *priv);
 static inline void mx35_enableecc(struct mx35_dev_s *priv);
 static inline void mx35_unlockblocks(struct mx35_dev_s *priv);
@@ -249,43 +278,171 @@ static inline void mx35_unlockblocks(struct mx35_dev_s *priv);
  ****************************************************************************/
 
 /****************************************************************************
- * Name: mx35_lock
+ * Bus Abstraction Layer
  ****************************************************************************/
+
+#ifdef CONFIG_MX35_QSPI
+
+static inline void mx35_lock(FAR struct qspi_dev_s *dev)
+{
+  QSPI_LOCK(dev, true);
+  QSPI_SETFREQUENCY(dev, CONFIG_MX35_SPIFREQUENCY);
+  QSPI_SETMODE(dev, CONFIG_MX35_SPIMODE);
+  QSPI_SETBITS(dev, 8);
+}
+
+static inline void mx35_unlock(FAR struct qspi_dev_s *dev)
+{
+  QSPI_LOCK(dev, false);
+}
+
+static inline void mx35_cmd(FAR struct mx35_dev_s *priv,
+                            uint8_t cmd, uint32_t addr,
+                            uint8_t addrlen, FAR void *buf,
+                            size_t buflen, uint32_t flags)
+{
+  struct qspi_cmdinfo_s cmdinfo;
+
+  cmdinfo.flags   = flags;
+  cmdinfo.addrlen = addrlen;
+  cmdinfo.cmd     = cmd;
+  cmdinfo.addr    = addr;
+  cmdinfo.buflen  = buflen;
+  cmdinfo.buffer  = buf;
+
+  QSPI_COMMAND(priv->dev, &cmdinfo);
+}
+
+static inline void mx35_memread(FAR struct mx35_dev_s *priv,
+                                uint8_t cmd, uint16_t addr,
+                                uint8_t dummies, bool quadio,
+                                FAR void *buf, size_t buflen)
+{
+  struct qspi_meminfo_s meminfo;
+
+  meminfo.flags   = QSPIMEM_READ |
+                    (quadio ? QSPIMEM_QUADIO : 0);
+  meminfo.addrlen = 2;
+  meminfo.dummies = dummies;
+  meminfo.cmd     = cmd;
+  meminfo.addr    = addr;
+  meminfo.buflen  = buflen;
+  meminfo.buffer  = buf;
+  meminfo.key     = 0;
+
+  QSPI_MEMORY(priv->dev, &meminfo);
+}
+
+static inline void mx35_memwrite(FAR struct mx35_dev_s *priv,
+                                 uint8_t cmd, uint16_t addr,
+                                 bool quadio,
+                                 FAR const void *buf,
+                                 size_t buflen)
+{
+  struct qspi_meminfo_s meminfo;
+
+  meminfo.flags   = QSPIMEM_WRITE |
+                    (quadio ? QSPIMEM_QUADIO : 0);
+  meminfo.addrlen = 2;
+  meminfo.dummies = 0;
+  meminfo.cmd     = cmd;
+  meminfo.addr    = addr;
+  meminfo.buflen  = buflen;
+  meminfo.buffer  = (FAR void *)buf;
+  meminfo.key     = 0;
+
+  QSPI_MEMORY(priv->dev, &meminfo);
+}
+
+#else /* SPI mode */
 
 static inline void mx35_lock(FAR struct spi_dev_s *dev)
 {
-  /* On SPI buses where there are multiple devices, it will be necessary to
-   * lock SPI to have exclusive access to the buses for a sequence of
-   * transfers.  The bus should be locked before the chip is selected.
-   *
-   * This is a blocking call and will not return until we have exclusive
-   * access to the SPI bus.
-   * We will retain that exclusive access until the bus is unlocked.
-   */
-
   SPI_LOCK(dev, true);
-
-  /* After locking the SPI bus, the we also need call the setfrequency,
-   * setbits, and setmode methods to make sure that the SPI is properly
-   * configured for the device.
-   * If the SPI bus is being shared, then it may have been left in an
-   * incompatible state.
-   */
-
   SPI_SETMODE(dev, CONFIG_MX35_SPIMODE);
   SPI_SETBITS(dev, 8);
   SPI_HWFEATURES(dev, 0);
   SPI_SETFREQUENCY(dev, CONFIG_MX35_SPIFREQUENCY);
 }
 
-/****************************************************************************
- * Name: mx35_unlock
- ****************************************************************************/
-
 static inline void mx35_unlock(FAR struct spi_dev_s *dev)
 {
   SPI_LOCK(dev, false);
 }
+
+static inline void mx35_cmd(FAR struct mx35_dev_s *priv,
+                            uint8_t cmd, uint32_t addr,
+                            uint8_t addrlen, FAR void *buf,
+                            size_t buflen, uint32_t flags)
+{
+  int i;
+
+  SPI_SELECT(priv->dev,
+             SPIDEV_FLASH(priv->spi_devid), true);
+
+  SPI_SEND(priv->dev, cmd);
+
+  if ((flags & MX35_CMD_ADDRESS) && addrlen > 0)
+    {
+      for (i = addrlen - 1; i >= 0; i--)
+        {
+          SPI_SEND(priv->dev, (addr >> (i * 8)) & 0xff);
+        }
+    }
+
+  if ((flags & MX35_CMD_READDATA) && buflen > 0)
+    {
+      SPI_RECVBLOCK(priv->dev, buf, buflen);
+    }
+  else if ((flags & MX35_CMD_WRITEDATA) && buflen > 0)
+    {
+      SPI_SNDBLOCK(priv->dev, buf, buflen);
+    }
+
+  SPI_SELECT(priv->dev,
+             SPIDEV_FLASH(priv->spi_devid), false);
+}
+
+static inline void mx35_memread(FAR struct mx35_dev_s *priv,
+                                uint8_t cmd, uint16_t addr,
+                                uint8_t dummies, bool quadio,
+                                FAR void *buf, size_t buflen)
+{
+  int i;
+
+  SPI_SELECT(priv->dev,
+             SPIDEV_FLASH(priv->spi_devid), true);
+  SPI_SEND(priv->dev, cmd);
+  SPI_SEND(priv->dev, (addr >> 8) & 0xff);
+  SPI_SEND(priv->dev, addr & 0xff);
+
+  for (i = 0; i < dummies; i++)
+    {
+      SPI_SEND(priv->dev, 0x00);
+    }
+
+  SPI_RECVBLOCK(priv->dev, buf, buflen);
+  SPI_SELECT(priv->dev,
+             SPIDEV_FLASH(priv->spi_devid), false);
+}
+
+static inline void mx35_memwrite(FAR struct mx35_dev_s *priv,
+                                 uint8_t cmd, uint16_t addr,
+                                 bool quadio,
+                                 FAR const void *buf,
+                                 size_t buflen)
+{
+  SPI_SELECT(priv->dev,
+             SPIDEV_FLASH(priv->spi_devid), true);
+  SPI_SEND(priv->dev, cmd);
+  SPI_SEND(priv->dev, (addr >> 8) & 0xff);
+  SPI_SEND(priv->dev, addr & 0xff);
+  SPI_SNDBLOCK(priv->dev, buf, buflen);
+  SPI_SELECT(priv->dev,
+             SPIDEV_FLASH(priv->spi_devid), false);
+}
+
+#endif /* CONFIG_MX35_QSPI */
 
 /****************************************************************************
  * Name: m25p_readid
@@ -295,24 +452,18 @@ static int mx35_readid(struct mx35_dev_s *priv)
 {
   uint16_t manufacturer;
   uint16_t capacity;
+  uint8_t idbuf[2];
 
   mx35info("priv: %p\n", priv);
 
-  /* Lock the SPI bus, configure the bus, and select this FLASH part. */
-
   mx35_lock(priv->dev);
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
 
-  /* Send the "Read ID" command and read two ID bytes */
+  mx35_cmd(priv, MX35_READ_ID, 0x00, 1,
+           idbuf, 2, MX35_CMD_ADDRESS | MX35_CMD_READDATA);
 
-  SPI_SEND(priv->dev, MX35_READ_ID);
-  SPI_SEND(priv->dev, MX35_DUMMY);
-  manufacturer = SPI_SEND(priv->dev, MX35_DUMMY);
-  capacity     = SPI_SEND(priv->dev, MX35_DUMMY);
+  manufacturer = idbuf[0];
+  capacity     = idbuf[1];
 
-  /* Deselect the FLASH and unlock the bus */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
   mx35_unlock(priv->dev);
 
   mx35info("manufacturer: %02x capacity: %02x\n",
@@ -358,31 +509,30 @@ static bool mx35_waitstatus(FAR struct mx35_dev_s *priv,
                             bool successif)
 {
   uint8_t status;
-
-  /* Loop as long as the memory is busy with a write cycle */
+  int polls = 0;
 
   do
     {
-      /* Select this FLASH part */
+      mx35_cmd(priv, MX35_GET_FEATURE, MX35_STATUS, 1,
+               &status, 1, MX35_CMD_ADDRESS | MX35_CMD_READDATA);
 
-      SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
+      if ((status & MX35_SR_OIP) == 0)
+        {
+          break;
+        }
 
-      /* Get feature command */
-
-      SPI_SEND(priv->dev, MX35_GET_FEATURE);
-      SPI_SEND(priv->dev, MX35_STATUS);
-      status = SPI_SEND(priv->dev, MX35_DUMMY);
-
-      /* Deselect the FLASH */
-
-      SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
-
-      /* Given that writing could take up to few tens of milliseconds, and
-       * erasing could take more.  The following short delay in the "busy"
-       * case will allow other peripherals to access the SPI bus.
-       */
+      if (++polls > 500)
+        {
+          nxsig_usleep(1000);
+        }
     }
-  while (((status & MX35_SR_OIP) != 0) && (!nxsig_usleep(1000)));
+  while (polls < 10000);
+
+  if (polls >= 10000)
+    {
+      mx35err("waitstatus timeout mask=%02x\n", mask);
+      return false;
+    }
 
   mx35info("Complete\n");
   return successif ? ((status & mask) != 0) : ((status & mask) == 0);
@@ -394,17 +544,7 @@ static bool mx35_waitstatus(FAR struct mx35_dev_s *priv,
 
 static inline void mx35_writeenable(struct mx35_dev_s *priv)
 {
-  /* Select this FLASH part */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-
-  /* Send Write Enable command */
-
-  SPI_SEND(priv->dev, MX35_WRITE_ENABLE);
-
-  /* Deselect the FLASH */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+  mx35_cmd(priv, MX35_WRITE_ENABLE, 0, 0, NULL, 0, 0);
 }
 
 /****************************************************************************
@@ -413,17 +553,7 @@ static inline void mx35_writeenable(struct mx35_dev_s *priv)
 
 static inline void mx35_writedisable(struct mx35_dev_s *priv)
 {
-  /* Select this FLASH part */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-
-  /* Send Write Enable command */
-
-  SPI_SEND(priv->dev, MX35_WRITE_DISABLE);
-
-  /* Deselect the FLASH */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+  mx35_cmd(priv, MX35_WRITE_DISABLE, 0, 0, NULL, 0, 0);
 }
 
 /****************************************************************************
@@ -493,24 +623,10 @@ static bool mx35_sectorerase(FAR struct mx35_dev_s *priv, off_t startsector)
 
   mx35info("sector: %08lx\n", (long)startsector);
 
-  /* Send write enable instruction */
-
   mx35_writeenable(priv);
 
-  /* Select this FLASH part */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-
-  /* Send the Block Erase instruction */
-
-  SPI_SEND(priv->dev, MX35_BLOCK_ERASE);
-  SPI_SEND(priv->dev, (block >> 16) & 0xff);
-  SPI_SEND(priv->dev, (block >> 8) & 0xff);
-  SPI_SEND(priv->dev, block & 0xff);
-
-  /* Deselect the FLASH */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+  mx35_cmd(priv, MX35_BLOCK_ERASE, block, 3,
+           NULL, 0, MX35_CMD_ADDRESS);
 
   mx35info("Erased\n");
   return mx35_waitstatus(priv, MX35_SR_E_FAIL, false);
@@ -558,58 +674,65 @@ static void mx35_readbuffer(FAR struct mx35_dev_s *priv, uint32_t address,
 {
   const uint16_t offset = mx35_addresstocolumn(priv, address);
 
-  /* Select the FLASH */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-
-  SPI_SEND(priv->dev, MX35_READ_FROM_CACHE);
-
-  /* Send the address high byte first. */
-
-  SPI_SEND(priv->dev, (offset >> 8) & 0xff);
-  SPI_SEND(priv->dev, (offset) & 0xff);
-
-  /* Send a dummy byte */
-
-  SPI_SEND(priv->dev, MX35_DUMMY);
-
-  /* Then read all of the requested bytes */
-
-  SPI_RECVBLOCK(priv->dev, buffer, length);
-
-  /* Deselect the FLASH */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+#ifdef CONFIG_MX35_QSPI
+  mx35_memread(priv, MX35_READ_FROM_CACHE_X4, offset, 1, true,
+               buffer, length);
+#else
+  mx35_memread(priv, MX35_READ_FROM_CACHE, offset, 1, false,
+               buffer, length);
+#endif
 }
 
 /****************************************************************************
  * Name: mx35_read_page
  ****************************************************************************/
 
-static bool mx35_read_page(FAR struct mx35_dev_s *priv, uint32_t pageaddress)
+static void mx35_issue_page_read(FAR struct mx35_dev_s *priv,
+                                 uint32_t pageaddress)
 {
   const uint32_t row = mx35_addresstorow(priv, pageaddress);
 
-  /* Select this FLASH part */
+  mx35_cmd(priv, MX35_PAGE_READ, row, 3,
+           NULL, 0, MX35_CMD_ADDRESS);
+}
 
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
+static bool mx35_wait_page_ready(FAR struct mx35_dev_s *priv)
+{
+  uint8_t status;
+  int polls = 0;
 
-  /* Send the Read Page instruction */
+  /* Poll OIP bit and capture status in one pass — avoids the extra
+   * SPI transaction that mx35_eccstatusread() would add.
+   */
 
-  SPI_SEND(priv->dev, MX35_PAGE_READ);
-  SPI_SEND(priv->dev, (row >> 16) & 0xff);
-  SPI_SEND(priv->dev, (row >> 8) & 0xff);
-  SPI_SEND(priv->dev, row & 0xff);
+  do
+    {
+      mx35_cmd(priv, MX35_GET_FEATURE, MX35_STATUS, 1,
+               &status, 1, MX35_CMD_ADDRESS | MX35_CMD_READDATA);
 
-  /* Deselect the FLASH */
+      if ((status & MX35_SR_OIP) == 0)
+        {
+          break;
+        }
 
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+      if (++polls > 500)
+        {
+          nxsig_usleep(1000);
+        }
+    }
+  while (polls < 10000);
 
-  mx35_waitstatus(priv, MX35_SR_OIP, false);
+  if (polls >= 10000)
+    {
+      mx35err("wait_page_ready timeout\n");
+      return false;
+    }
 
-  mx35_eccstatusread(priv);
-  if ((priv->eccstatus & MX35_FEATURE_ECC_MASK) ==
-       MX35_FEATURE_ECC_INCORRECTABLE)
+  /* Reuse the final status for ECC check */
+
+  priv->eccstatus = status;
+
+  if ((status & MX35_FEATURE_ECC_MASK) == MX35_FEATURE_ECC_INCORRECTABLE)
     {
       return false;
     }
@@ -629,6 +752,7 @@ static ssize_t mx35_read(FAR struct mtd_dev_s *dev,
   FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
   size_t bytesleft = nbytes;
   uint32_t position = offset;
+  bool page_issued = false;
 
   mx35info("offset: %08lx nbytes: %d\n", (long)offset, (int)nbytes);
 
@@ -649,12 +773,33 @@ static ssize_t mx35_read(FAR struct mtd_dev_s *dev,
       const size_t chunklength = bytesleft < spaceleft ?
                                  bytesleft : spaceleft;
 
-      if (!mx35_read_page(priv, pageaddress))
+      if (!page_issued)
+        {
+          mx35_issue_page_read(priv, pageaddress);
+          page_issued = true;
+        }
+
+      if (!mx35_wait_page_ready(priv))
         {
           break;
         }
 
       mx35_readbuffer(priv, position, buffer, chunklength);
+
+      /* Pipeline: issue next PAGE_READ after reading current cache */
+
+      if (bytesleft > chunklength)
+        {
+          uint32_t nextpos = position + chunklength;
+          uint32_t nextpage = (nextpos >> priv->pageshift) <<
+                               priv->pageshift;
+          mx35_issue_page_read(priv, nextpage);
+          page_issued = true;
+        }
+      else
+        {
+          page_issued = false;
+        }
 
       position += chunklength;
       buffer += chunklength;
@@ -678,52 +823,30 @@ static void mx35_write_to_cache(FAR struct mx35_dev_s *priv,
 {
   const uint16_t offset = mx35_addresstocolumn(priv, address);
 
-  /* Select the FLASH */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-
-  /* Send the Program Load command */
-
-  SPI_SEND(priv->dev, MX35_PROGRAM_LOAD);
-
-  /* Send the address high byte first. */
-
-  SPI_SEND(priv->dev, (offset >> 8) & 0xff);
-  SPI_SEND(priv->dev, (offset) & 0xff);
-
-  /* Send block of bytes */
-
-  SPI_SNDBLOCK(priv->dev, buffer, length);
-
-  /* Deselect the FLASH */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+#ifdef CONFIG_MX35_QSPI
+  mx35_memwrite(priv, MX35_PROGRAM_LOAD_X4, offset, true,
+                buffer, length);
+#else
+  mx35_memwrite(priv, MX35_PROGRAM_LOAD, offset, false,
+                buffer, length);
+#endif
 }
 
 /****************************************************************************
- * Name: mx35_write_to_cache
+ * Name: mx35_issue_execute_write
  ****************************************************************************/
 
-static bool mx35_execute_write(FAR struct mx35_dev_s *priv,
-                               uint32_t pageaddress)
+static void mx35_issue_execute_write(FAR struct mx35_dev_s *priv,
+                                     uint32_t pageaddress)
 {
   const uint32_t row = mx35_addresstorow(priv, pageaddress);
 
-  /* Select this FLASH part */
+  mx35_cmd(priv, MX35_PROGRAM_EXECUTE, row, 3,
+           NULL, 0, MX35_CMD_ADDRESS);
+}
 
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-
-  /* Send the Pragram Execute instruction */
-
-  SPI_SEND(priv->dev, MX35_PROGRAM_EXECUTE);
-  SPI_SEND(priv->dev, (row >> 16) & 0xff);
-  SPI_SEND(priv->dev, (row >> 8) & 0xff);
-  SPI_SEND(priv->dev, row & 0xff);
-
-  /* Deselect the FLASH */
-
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
-
+static bool mx35_wait_write_complete(FAR struct mx35_dev_s *priv)
+{
   return mx35_waitstatus(priv, MX35_SR_P_FAIL, false);
 }
 
@@ -757,9 +880,13 @@ static ssize_t mx35_write(FAR struct mtd_dev_s *dev,
 
       mx35_writeenable(priv);
       mx35_write_to_cache(priv, position, buffer, chunklength);
-      if (!mx35_execute_write(priv, pageaddress))
+      mx35_issue_execute_write(priv, pageaddress);
+
+      if (!mx35_wait_write_complete(priv))
         {
-          continue;
+          ferr("P_FAIL at pos=%" PRIu32 " page=%" PRIu32 "\n",
+               position, pageaddress);
+          break;
         }
 
       position += chunklength;
@@ -772,8 +899,44 @@ static ssize_t mx35_write(FAR struct mtd_dev_s *dev,
   return nbytes - bytesleft;
 }
 
+static ssize_t mx35_bread(FAR struct mtd_dev_s *dev, off_t startblock,
+                          size_t nblocks, FAR uint8_t *buffer)
+{
+  FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
+  ssize_t nbytes;
+
+  nbytes = mx35_read(dev,
+                     startblock << priv->pageshift,
+                     nblocks << priv->pageshift,
+                     buffer);
+  if (nbytes > 0)
+    {
+      return nbytes >> priv->pageshift;
+    }
+
+  return nbytes;
+}
+
+static ssize_t mx35_bwrite(FAR struct mtd_dev_s *dev, off_t startblock,
+                           size_t nblocks, FAR const uint8_t *buffer)
+{
+  FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
+  ssize_t nbytes;
+
+  nbytes = mx35_write(dev,
+                      startblock << priv->pageshift,
+                      nblocks << priv->pageshift,
+                      buffer);
+  if (nbytes > 0)
+    {
+      return nbytes >> priv->pageshift;
+    }
+
+  return nbytes;
+}
+
 /****************************************************************************
- * Name: mx25l_ioctl
+ * Name: mx35_ioctl
  ****************************************************************************/
 
 static int mx35_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
@@ -860,16 +1023,98 @@ static int mx35_ioctl(FAR struct mtd_dev_s *dev, int cmd, unsigned long arg)
 }
 
 /****************************************************************************
+ * Name: mx35_isbad
+ *
+ * Description:
+ *   Check if a block is bad by reading the bad block marker from the
+ *   spare area (column 2048) of the first page in the block.
+ *   Returns 0 if good, 1 if bad, or negative errno on error.
+ *
+ ****************************************************************************/
+
+static int mx35_isbad(FAR struct mtd_dev_s *dev, off_t block)
+{
+  FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
+  uint8_t marker;
+  uint32_t pageaddr;
+
+  mx35_lock(priv->dev);
+
+  /* First page of the block */
+
+  pageaddr = block << priv->sectorshift;
+
+  /* Issue PAGE READ to load page into cache */
+
+  mx35_issue_page_read(priv, pageaddr);
+  mx35_waitstatus(priv, MX35_SR_OIP, false);
+
+  /* Read spare area byte 0 (column 2048) -- bad block marker */
+
+  mx35_memread(priv, MX35_READ_FROM_CACHE_X1,
+               (1 << priv->pageshift), 1, false, &marker, 1);
+
+  mx35_unlock(priv->dev);
+
+  /* 0xFF = good block, anything else = bad */
+
+  return marker != 0xff ? 1 : 0;
+}
+
+/****************************************************************************
+ * Name: mx35_markbad
+ *
+ * Description:
+ *   Mark a block as bad by writing 0x00 to the spare area (column 2048)
+ *   of the first page in the block.
+ *
+ ****************************************************************************/
+
+static int mx35_markbad(FAR struct mtd_dev_s *dev, off_t block)
+{
+  FAR struct mx35_dev_s *priv = (FAR struct mx35_dev_s *)dev;
+  uint8_t marker = 0x00;
+  uint32_t pageaddr;
+  uint32_t row;
+
+  mx35_lock(priv->dev);
+
+  pageaddr = block << priv->sectorshift;
+  row = mx35_addresstorow(priv, pageaddr);
+
+  mx35_writeenable(priv);
+
+  /* Write 0x00 to spare area byte 0 (column 2048) */
+
+  mx35_memwrite(priv, MX35_PROGRAM_LOAD,
+                (1 << priv->pageshift), false, &marker, 1);
+
+  /* Execute program */
+
+  mx35_cmd(priv, MX35_PROGRAM_EXECUTE, row, 3,
+           NULL, 0, MX35_CMD_ADDRESS);
+
+  if (!mx35_waitstatus(priv, MX35_SR_P_FAIL, false))
+    {
+      mx35err("markbad program failed block=%ld\n", (long)block);
+      mx35_unlock(priv->dev);
+      return -EIO;
+    }
+
+  mx35_unlock(priv->dev);
+
+  return OK;
+}
+
+/****************************************************************************
  * Name:  mx35_eccstatusread
  ****************************************************************************/
 
 static inline void mx35_eccstatusread(struct mx35_dev_s *priv)
 {
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-  SPI_SEND(priv->dev, MX35_GET_FEATURE);
-  SPI_SEND(priv->dev, MX35_STATUS);
-  priv->eccstatus = SPI_SEND(priv->dev, MX35_DUMMY);
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+  mx35_cmd(priv, MX35_GET_FEATURE, MX35_STATUS, 1,
+           &priv->eccstatus, 1,
+           MX35_CMD_ADDRESS | MX35_CMD_READDATA);
 }
 
 /****************************************************************************
@@ -878,16 +1123,18 @@ static inline void mx35_eccstatusread(struct mx35_dev_s *priv)
 
 static inline void mx35_enableecc(struct mx35_dev_s *priv)
 {
+#ifdef CONFIG_MX35_QSPI
+  uint8_t secureotp = MX35_SOTP_ECC | MX35_SOTP_QE;
+#else
   uint8_t secureotp = MX35_SOTP_ECC;
+#endif
 
   mx35_lock(priv->dev);
   mx35_writeenable(priv);
 
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-  SPI_SEND(priv->dev, MX35_SET_FEATURE);
-  SPI_SEND(priv->dev, MX35_SECURE_OTP);
-  SPI_SEND(priv->dev, secureotp);
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+  mx35_cmd(priv, MX35_SET_FEATURE, MX35_SECURE_OTP, 1,
+           &secureotp, 1,
+           MX35_CMD_ADDRESS | MX35_CMD_WRITEDATA);
 
   mx35_writedisable(priv);
   mx35_unlock(priv->dev);
@@ -904,11 +1151,9 @@ static inline void mx35_unlockblocks(struct mx35_dev_s *priv)
   mx35_lock(priv->dev);
   mx35_writeenable(priv);
 
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-  SPI_SEND(priv->dev, MX35_SET_FEATURE);
-  SPI_SEND(priv->dev, MX35_BLOCK_PROTECTION);
-  SPI_SEND(priv->dev, blockprotection);
-  SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+  mx35_cmd(priv, MX35_SET_FEATURE, MX35_BLOCK_PROTECTION, 1,
+           &blockprotection, 1,
+           MX35_CMD_ADDRESS | MX35_CMD_WRITEDATA);
 
   mx35_writedisable(priv);
   mx35_unlock(priv->dev);
@@ -919,7 +1164,7 @@ static inline void mx35_unlockblocks(struct mx35_dev_s *priv)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: mx35_initialize
+ * Name: mx35_initialize / mx35_qspi_initialize
  *
  * Description:
  *   Create an initialize MTD device instance. MTD devices are not
@@ -929,43 +1174,37 @@ static inline void mx35_unlockblocks(struct mx35_dev_s *priv)
  *
  ****************************************************************************/
 
-FAR struct mtd_dev_s *mx35_initialize(FAR struct spi_dev_s *dev)
+#ifndef CONFIG_MX35_QSPI
+FAR struct mtd_dev_s *mx35_initialize(FAR struct spi_dev_s *dev,
+                                      uint32_t spi_devid)
 {
   FAR struct mx35_dev_s *priv;
   int ret;
 
   mx35info("dev: %p\n", dev);
 
-  /* Allocate a state structure (we allocate the structure instead of using
-   * a fixed, static allocation so that we can handle multiple FLASH devices.
-   * The current implementation would handle only one FLASH part per SPI
-   * device (only because of the SPIDEV_FLASH(0) definition) and so would
-   * have to be extended to handle multiple FLASH parts on the same SPI bus.
-   */
-
   priv = kmm_zalloc(sizeof(struct mx35_dev_s));
   if (priv)
     {
-      /* Initialize the allocated structure. (unsupported methods were
-       * nullified by kmm_zalloc).
-       */
-
       priv->mtd.erase  = mx35_erase;
+      priv->mtd.bread  = mx35_bread;
+      priv->mtd.bwrite = mx35_bwrite;
       priv->mtd.read   = mx35_read;
       priv->mtd.write  = mx35_write;
       priv->mtd.ioctl  = mx35_ioctl;
+      priv->mtd.isbad  = mx35_isbad;
+      priv->mtd.markbad = mx35_markbad;
       priv->mtd.name   = "mx35";
       priv->dev        = dev;
+      priv->spi_devid  = spi_devid;
 
-      /* Deselect the FLASH */
+      /* De-select the FLASH */
 
-      SPI_SELECT(dev, SPIDEV_FLASH(0), false);
+      SPI_SELECT(dev, SPIDEV_FLASH(spi_devid), false);
 
       /* Reset the flash */
 
-      SPI_SELECT(priv->dev, SPIDEV_FLASH(0), true);
-      SPI_SEND(priv->dev, MX35_RESET);
-      SPI_SELECT(priv->dev, SPIDEV_FLASH(0), false);
+      mx35_cmd(priv, MX35_RESET, 0, 0, NULL, 0, 0);
 
       /* Wait reset complete */
 
@@ -976,10 +1215,6 @@ FAR struct mtd_dev_s *mx35_initialize(FAR struct spi_dev_s *dev)
       ret = mx35_readid(priv);
       if (ret != OK)
         {
-          /* Unrecognized! Discard all of that work we just did and
-           * return NULL
-           */
-
           mx35err("ERROR: Unrecognized\n");
           kmm_free(priv);
           return NULL;
@@ -989,8 +1224,56 @@ FAR struct mtd_dev_s *mx35_initialize(FAR struct spi_dev_s *dev)
       mx35_unlockblocks(priv);
     }
 
-  /* Return the implementation-specific state structure as the MTD device */
+  mx35info("Return %p\n", priv);
+  return (FAR struct mtd_dev_s *)priv;
+}
+
+#else /* CONFIG_MX35_QSPI */
+
+FAR struct mtd_dev_s *mx35_initialize(FAR struct qspi_dev_s *dev)
+{
+  FAR struct mx35_dev_s *priv;
+  int ret;
+
+  mx35info("dev: %p\n", dev);
+
+  priv = kmm_zalloc(sizeof(struct mx35_dev_s));
+  if (priv)
+    {
+      priv->mtd.erase  = mx35_erase;
+      priv->mtd.bread  = mx35_bread;
+      priv->mtd.bwrite = mx35_bwrite;
+      priv->mtd.read   = mx35_read;
+      priv->mtd.write  = mx35_write;
+      priv->mtd.ioctl  = mx35_ioctl;
+      priv->mtd.isbad  = mx35_isbad;
+      priv->mtd.markbad = mx35_markbad;
+      priv->mtd.name   = "mx35";
+      priv->dev        = dev;
+
+      /* Reset the flash */
+
+      mx35_cmd(priv, MX35_RESET, 0, 0, NULL, 0, 0);
+
+      /* Wait reset complete */
+
+      mx35_waitstatus(priv, MX35_SR_OIP, false);
+
+      /* Identify the FLASH chip and get its capacity */
+
+      ret = mx35_readid(priv);
+      if (ret != OK)
+        {
+          mx35err("ERROR: Unrecognized\n");
+          kmm_free(priv);
+          return NULL;
+        }
+
+      mx35_enableecc(priv);
+      mx35_unlockblocks(priv);
+    }
 
   mx35info("Return %p\n", priv);
   return (FAR struct mtd_dev_s *)priv;
 }
+#endif /* CONFIG_MX35_QSPI */

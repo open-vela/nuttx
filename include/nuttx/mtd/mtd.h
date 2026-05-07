@@ -509,10 +509,16 @@ FAR struct mtd_dev_s *m25p_initialize(FAR struct spi_dev_s *dev);
  * Name: mx35_initialize
  *
  * Description:
+ *   Initializes the driver for SPI-based MX35 SPI NAND FLASH
  *
  ****************************************************************************/
 
-FAR struct mtd_dev_s *mx35_initialize(FAR struct spi_dev_s *dev);
+#ifndef CONFIG_MX35_QSPI
+FAR struct mtd_dev_s *mx35_initialize(FAR struct spi_dev_s *dev,
+                                      uint32_t spi_devid);
+#else
+FAR struct mtd_dev_s *mx35_initialize(FAR struct qspi_dev_s *dev);
+#endif
 
 /****************************************************************************
  * Name: rammtd_initialize
@@ -652,8 +658,13 @@ FAR struct mtd_dev_s *gd25_initialize(FAR struct spi_dev_s *dev,
  *
  ****************************************************************************/
 
+#ifndef CONFIG_MTD_GD5F_QSPI
 FAR struct mtd_dev_s *gd5f_initialize(FAR struct spi_dev_s *dev,
                                       uint32_t spi_devid);
+#else
+FAR struct mtd_dev_s *gd5f_qspi_initialize(
+                                FAR struct qspi_dev_s *dev);
+#endif
 
 /****************************************************************************
  * Name: s25fl1_initialize
