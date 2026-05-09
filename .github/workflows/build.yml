@@ -111,7 +111,7 @@ jobs:
         run: tar zcf sources.tar.gz sources
 
       - name: Archive Source Bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: source-bundle
           path: sources.tar.gz
@@ -187,7 +187,7 @@ jobs:
                 ./cibuild.sh -c -A -N -R -S testlist/${{matrix.boards}}.dat
             fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
           name: linux-${{matrix.boards}}-builds
@@ -248,7 +248,7 @@ jobs:
           cd sources/nuttx/tools/ci
           ./cibuild.sh -i -c -A -R testlist/${{matrix.boards}}.dat
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-${{matrix.boards}}-builds
           path: buildartifacts/
@@ -329,7 +329,7 @@ jobs:
           cd sources/nuttx/tools/ci
           ./cibuild.sh -g -i -A -C -R testlist/${{matrix.boards}}.dat
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: msys2-${{matrix.boards}}-builds
           path: buildartifacts/
@@ -380,7 +380,7 @@ jobs:
           cmake -B vs2022 -DBOARD_CONFIG=sim/windows -G"Visual Studio 17 2022" -A Win32
           cmake --build vs2022
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: msvc-builds
           path: buildartifacts/
