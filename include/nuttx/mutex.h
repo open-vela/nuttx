@@ -471,6 +471,18 @@ static inline_function int nxrmutex_lock(FAR rmutex_t *rmutex)
               break;
             }
         }
+
+      if (ret >= 0)
+        {
+          /* We have just acquired the underlying mutex from a non-held
+           * state.  Reset count to zero in case the previous holder was
+           * killed/cancelled while still holding the mutex (recovered via
+           * the dead-holder path in nxsem_wait_slow): in that case the
+           * count was left non-zero and would otherwise leak forever.
+           */
+
+          rmutex->count = 0;
+        }
     }
 
   if (ret >= 0)
@@ -557,6 +569,10 @@ int nxrmutex_trylock(FAR rmutex_t *rmutex)
   if (!nxrmutex_is_hold(rmutex))
     {
       ret = nxmutex_trylock(&rmutex->mutex);
+      if (ret >= 0)
+        {
+          rmutex->count = 0;
+        }
     }
 
   if (ret >= 0)
@@ -606,6 +622,10 @@ int nxrmutex_ticklock(FAR rmutex_t *rmutex, uint32_t delay)
   if (!nxrmutex_is_hold(rmutex))
     {
       ret = nxmutex_ticklock(&rmutex->mutex, delay);
+      if (ret >= 0)
+        {
+          rmutex->count = 0;
+        }
     }
 
   if (ret >= 0)
@@ -656,6 +676,10 @@ int nxrmutex_clocklock(FAR rmutex_t *rmutex, clockid_t clockid,
   if (!nxrmutex_is_hold(rmutex))
     {
       ret = nxmutex_clocklock(&rmutex->mutex, clockid, abstime);
+      if (ret >= 0)
+        {
+          rmutex->count = 0;
+        }
     }
 
   if (ret >= 0)
@@ -704,6 +728,10 @@ int nxrmutex_timedlock(FAR rmutex_t *rmutex, unsigned int timeout)
   if (!nxrmutex_is_hold(rmutex))
     {
       ret = nxmutex_timedlock(&rmutex->mutex, timeout);
+      if (ret >= 0)
+        {
+          rmutex->count = 0;
+        }
     }
 
   if (ret >= 0)
