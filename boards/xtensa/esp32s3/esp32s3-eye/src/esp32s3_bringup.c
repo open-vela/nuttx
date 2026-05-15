@@ -85,6 +85,10 @@
 #include "esp32s3_board_sdmmc.h"
 #endif
 
+#ifdef CONFIG_ESP32S3_I2S
+#  include "esp32s3_i2s.h"
+#endif
+
 #include "esp32s3-eye.h"
 
 /****************************************************************************
@@ -262,6 +266,24 @@ int esp32s3_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: board_camera_initialize failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ESP32S3_I2S0
+  ret = board_i2sdev_initialize(ESP32S3_I2S0,
+#ifdef CONFIG_ESP32S3_I2S0_TX
+                                true,
+#else
+                                false,
+#endif
+#ifdef CONFIG_ESP32S3_I2S0_RX
+                                true);
+#else
+                                false);
+#endif
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize I2S0 driver: %d\n", ret);
     }
 #endif
 
