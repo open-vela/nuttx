@@ -685,8 +685,16 @@ config ESP32S3_BLE
 	bool "BLE"
 	default n
 	select ESP32S3_WIRELESS
+	select ESPRESSIF_BLE
 	---help---
 		Enable BLE support
+
+config ESPRESSIF_BLE
+	bool
+	default n
+	---help---
+		Hidden symbol selected by ESP32S3_BLE to enable Bluetooth LE
+		stack initialization in esp-hal-3rdparty sdkconfig.h.
 
 config ESP32S3_I2C0
 	bool "I2C 0"
