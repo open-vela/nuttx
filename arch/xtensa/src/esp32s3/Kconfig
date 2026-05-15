@@ -878,6 +878,62 @@ config ESP32S3_CAM
 	---help---
 		Camera controller that receives parallel DVP data from image sensors.
 
+if ESP32S3_CAM
+
+config ESP32S3_CAM_XCLK_PIN
+	int "CAM XCLK pin"
+	default 15
+
+config ESP32S3_CAM_PCLK_PIN
+	int "CAM PCLK pin"
+	default 13
+
+config ESP32S3_CAM_VSYNC_PIN
+	int "CAM VSYNC pin"
+	default 6
+
+config ESP32S3_CAM_HREF_PIN
+	int "CAM HREF pin"
+	default 7
+
+config ESP32S3_CAM_D0_PIN
+	int "CAM D0 pin"
+	default 11
+
+config ESP32S3_CAM_D1_PIN
+	int "CAM D1 pin"
+	default 9
+
+config ESP32S3_CAM_D2_PIN
+	int "CAM D2 pin"
+	default 8
+
+config ESP32S3_CAM_D3_PIN
+	int "CAM D3 pin"
+	default 10
+
+config ESP32S3_CAM_D4_PIN
+	int "CAM D4 pin"
+	default 12
+
+config ESP32S3_CAM_D5_PIN
+	int "CAM D5 pin"
+	default 18
+
+config ESP32S3_CAM_D6_PIN
+	int "CAM D6 pin"
+	default 17
+
+config ESP32S3_CAM_D7_PIN
+	int "CAM D7 pin"
+	default 16
+
+config ESP32S3_CAM_VSYNC_INVERT
+	bool "Invert VSYNC polarity"
+	default n
+
+endif # ESP32S3_CAM
+
 config ESP32S3_AES_ACCELERATOR
 	bool "AES Accelerator"
 	default n

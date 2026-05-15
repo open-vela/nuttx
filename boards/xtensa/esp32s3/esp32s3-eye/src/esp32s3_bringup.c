@@ -257,6 +257,14 @@ int esp32s3_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_ESP32S3_CAM
+  ret = board_camera_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: board_camera_initialize failed: %d\n", ret);
+    }
+#endif
+
   /* If we got here then perhaps not all initialization was successful, but
    * at least enough succeeded to bring-up NSH with perhaps reduced
    * capabilities.
