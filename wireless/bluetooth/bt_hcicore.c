@@ -51,6 +51,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
+#include <syslog.h>
 
 #include <sys/param.h>
 
@@ -339,6 +340,14 @@ static void hci_cmd_done(uint16_t opcode, uint8_t status,
 
   g_btdev.sent_cmd = NULL;
 
+  if (status != 0)
+    {
+      syslog(LOG_ERR,
+             "[BT] HCI cmd opcode 0x%04x rejected, status 0x%02x %s\n",
+             sent->u.hci.opcode, status,
+             (sent->u.hci.sync != NULL) ? "(sync)" : "(async)");
+    }
+
   /* If the command was synchronous wake up bt_hci_cmd_send_sync() */
 
   if (sent->u.hci.sync != NULL)
@@ -347,7 +356,6 @@ static void hci_cmd_done(uint16_t opcode, uint8_t status,
 
       if (status != 0)
         {
-          wlwarn("WARNING: status %u\n", status);
           sent->u.hci.sync = NULL;
         }
       else
@@ -686,8 +694,9 @@ static void le_conn_complete(FAR struct bt_buf_s *buf)
   FAR struct bt_conn_s *conn;
   FAR struct bt_keys_s *keys;
 
-  wlinfo("status %u handle %u role %u %s\n", evt->status, handle,
-         evt->role, bt_addr_le_str(&evt->peer_addr));
+  syslog(LOG_ERR,
+         "[BT] LE_CONN_COMPLETE: status=0x%02x handle=%u role=%u peer=%s\n",
+         evt->status, handle, evt->role, bt_addr_le_str(&evt->peer_addr));
 
   /* Make lookup to check if there's a connection object in CONNECT state
    * associated with passed peer LE address.
@@ -1441,8 +1450,12 @@ static int hci_initialize(void)
   ret = bt_hci_cmd_send_sync(BT_HCI_OP_SET_CTL_TO_HOST_FLOW, buf, NULL);
   if (ret < 0)
     {
-      wlerr("ERROR:  bt_hci_cmd_send_sync failed: %d\n", ret);
-      return ret;
+      /* Some controllers (e.g. ESP32-S3 Bluedroid) don't support
+       * SET_CTL_TO_HOST_FLOW. Treat it as non-fatal so init can continue.
+       */
+
+      wlwarn("WARNING: SET_CTL_TO_HOST_FLOW unsupported (ret=%d), "
+             "continuing without flow control\n", ret);
     }
 
   if (lmp_bredr_capable(g_btdev))
