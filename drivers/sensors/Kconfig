@@ -655,6 +655,16 @@ config KXTJ9_I2C_BUS_SPEED
 
 endif # SENSORS_KXTJ9
 
+config SENSORS_QMA7981
+	bool "QST QMA7981 Three-Axis Accelerometer support"
+	default n
+	select I2C
+	---help---
+		Enable driver support for the QST QMA7981 I2C three-axis
+		accelerometer (used on the ESP32-S3-EYE board for screen
+		orientation, tilt and tap detection).  Default I2C address
+		is 0x12.
+
 config SENSORS_LIS2DH
 	bool "STMicro LIS2DH device support"
 	default n
