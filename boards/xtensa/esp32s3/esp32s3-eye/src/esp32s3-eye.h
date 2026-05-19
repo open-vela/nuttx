@@ -159,9 +159,5 @@ void board_lcd_uninitialize(void);
 int board_i2c_init(void);
 #endif
 
-#ifdef CONFIG_ESP32S3_I2S
-int board_i2sdev_initialize(int port, bool enable_tx, bool enable_rx);
-#endif
-
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_ESP32S3_EYE_SRC_ESP32S3_EYE_H */

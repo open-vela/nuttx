@@ -72,16 +72,6 @@
 #  include <nuttx/input/buttons.h>
 #endif
 
-#ifdef CONFIG_USERLED_LOWER
-#  include <nuttx/leds/userled.h>
-#endif
-
-#ifdef CONFIG_SENSORS_QMA7981
-#  include <nuttx/sensors/qma7981.h>
-#  include <nuttx/i2c/i2c_master.h>
-#  include "esp32s3_i2c.h"
-#endif
-
 #ifdef CONFIG_ESP32S3_SPI
 #  include "esp32s3_spi.h"
 #endif
@@ -93,10 +83,6 @@
 
 #ifdef CONFIG_ESP32S3_SDMMC
 #include "esp32s3_board_sdmmc.h"
-#endif
-
-#ifdef CONFIG_ESP32S3_I2S
-#  include "esp32s3_i2s.h"
 #endif
 
 #include "esp32s3-eye.h"
@@ -192,16 +178,6 @@ int esp32s3_bringup(void)
     }
 #endif
 
-#ifdef CONFIG_USERLED_LOWER
-  /* Register the LED driver (Module Power LED on GPIO3, open-drain) */
-
-  ret = userled_lower_initialize("/dev/userleds");
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "Failed to initialize LED driver: %d\n", ret);
-    }
-#endif
-
 #ifdef CONFIG_ESP32S3_SPIFLASH
   ret = board_spiflash_init();
   if (ret)
@@ -278,51 +254,6 @@ int esp32s3_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to initialize SDMMC: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_ESP32S3_CAM
-  ret = board_camera_initialize();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: board_camera_initialize failed: %d\n", ret);
-    }
-#endif
-
-#ifdef CONFIG_SENSORS_QMA7981
-  {
-    FAR struct i2c_master_s *qma_i2c = esp32s3_i2cbus_initialize(0);
-    if (qma_i2c == NULL)
-      {
-        syslog(LOG_ERR, "ERROR: Failed to get I2C0 bus for QMA7981\n");
-      }
-    else
-      {
-        ret = qma7981_register("/dev/accel0", qma_i2c, QMA7981_I2C_ADDR);
-        if (ret < 0)
-          {
-            syslog(LOG_ERR,
-                   "ERROR: qma7981_register failed: %d\n", ret);
-          }
-      }
-  }
-#endif
-
-#ifdef CONFIG_ESP32S3_I2S0
-  ret = board_i2sdev_initialize(ESP32S3_I2S0,
-#ifdef CONFIG_ESP32S3_I2S0_TX
-                                true,
-#else
-                                false,
-#endif
-#ifdef CONFIG_ESP32S3_I2S0_RX
-                                true);
-#else
-                                false);
-#endif
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "Failed to initialize I2S0 driver: %d\n", ret);
     }
 #endif
 
