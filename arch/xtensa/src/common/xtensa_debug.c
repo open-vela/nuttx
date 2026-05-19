@@ -545,6 +545,19 @@ uint32_t *xtensa_debug_handler(uint32_t *regs)
     {
       xtensa_singlestep_handler();
     }
+  else if (cause & (XCHAL_DEBUGCAUSE_BREAK_MASK |
+                    XCHAL_DEBUGCAUSE_BREAKN_MASK))
+    {
+      /* BREAK / BREAK.N instruction triggered the debug exception.
+       * Skip past the instruction (3 bytes for BREAK, 2 for BREAK.N)
+       * to avoid an infinite re-execution loop on chips that don't
+       * have an external debugger attached.  Without this, EPC stays
+       * pointing at the BREAK instruction and the handler returns
+       * straight back into it.
+       */
+
+      regs[REG_PC] += (cause & XCHAL_DEBUGCAUSE_BREAKN_MASK) ? 2 : 3;
+    }
   else
     {
       _alert("Unhandled debug cause 0x%x\n", cause);

@@ -41,6 +41,8 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
+#include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/clock.h>
 #include <nuttx/semaphore.h>
 #include <nuttx/spinlock.h>
