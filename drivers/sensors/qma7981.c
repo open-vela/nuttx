@@ -191,8 +191,7 @@ static int qma7981_chip_init(FAR struct qma7981_dev_s *priv)
 
   if (chip_id < QMA7981_CHIP_ID_MIN || chip_id > QMA7981_CHIP_ID_MAX)
     {
-      snerr("ERROR: unexpected QMA7981 CHIP_ID 0x%02x (expected 0xe0..0xe9)\n",
-            chip_id);
+      snerr("ERROR: unexpected QMA7981 CHIP_ID 0x%02x\n", chip_id);
       return -ENODEV;
     }
 
