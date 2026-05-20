@@ -130,5 +130,5 @@ Known issues with this driver:
 
 To enable xHCI support on QEMU, we have to add ``-device qemu-xhci`` argument.
 All supported USB devices in QEMU can be found in
-`<https://qemu-project.gitlab.io/qemu/system/devices/usb.html> QEMU documentation`__,
+`QEMU documentation <https://qemu-project.gitlab.io/qemu/system/devices/usb.html>`_,
 but not all classes are supported in NuttX.
