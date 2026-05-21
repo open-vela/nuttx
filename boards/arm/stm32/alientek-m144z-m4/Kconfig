@@ -1,0 +1,22 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_BOARD_ALIENTEK_M144Z_M4
+
+config ALIENTEK_M144Z_M4_BOOT_TIMING
+	bool "Boot-path timing trace"
+	default n
+	---help---
+		Record DWT cycle-counter snapshots at well-known boot landmarks
+		(stm32_boardinitialize, stm32_bringup sub-systems, ...) and dump
+		them through syslog at the end of stm32_bringup().  Useful for
+		measuring boot latency before/after kernel optimisations.
+
+		The implementation lives entirely inside the board source tree
+		(src/stm32_boot_timing.c, ~30 lines of .text + 256 B of .bss for
+		the mark table) so it adds zero footprint when disabled and does
+		not touch any upstream-shared file.
+
+endif
