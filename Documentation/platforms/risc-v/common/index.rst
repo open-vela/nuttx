@@ -162,7 +162,7 @@ This extension helps protect against Return-Oriented Programming (ROP) and Jump-
 Programming (JOP) attacks by adding hardware checks for indirect branch targets.
 
 Zicfilp Extension Basics
-^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 The Zicfilp extension provides:
 
