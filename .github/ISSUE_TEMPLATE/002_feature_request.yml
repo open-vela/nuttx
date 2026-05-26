@@ -11,19 +11,19 @@
 # limitations under the License.
 #
 name: Feature request
-description: Request an enhancement for NuttX
+description: Request an enhancement for openvela
 title: "[FEATURE] <title>"
 labels: ["Type: Enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Hello NuttX Community member! Please keep things tidy by putting your post in the proper place:
+        Hello openvela Community member! Please keep things tidy by putting your post in the proper place:
 
         Requesting a new feature: use this form.
-        Asking a question or getting help: use the [General Help](https://github.com/apache/nuttx/issues/new?assignees=&labels=Community%3A+Question&projects=&template=003_help.yml&title=%5BHELP%5D+%3Ctitle%3E) form or [Mailing list](https://nuttx.apache.org/community/).
-        Reporting a bug: use the [Bug report](https://github.com/apache/nuttx/issues/new?assignees=&labels=%F0%9F%91%80+needs+triage%2CType%3A+Bug&projects=&template=001_bug_report.yml&title=%5BBUG%5D+%3Ctitle%3E) form.
-     
+        Asking a question or getting help: use the [General Help](./new?assignees=&labels=Community%3A+Question&projects=&template=003_help.yml&title=%5BHELP%5D+%3Ctitle%3E) form.
+        Reporting a bug: use the [Bug report](./new?assignees=&labels=%F0%9F%91%80+needs+triage%2CType%3A+Bug&projects=&template=001_bug_report.yml&title=%5BBUG%5D+%3Ctitle%3E) form.
+
   - type: textarea
     id: question-description
     attributes:
@@ -52,11 +52,4 @@ body:
         ### Before You Submit
 
         Please verify that you've followed these steps:
-          - Search [existing feature requests](https://github.com/apache/nuttx/issues) (including [closed](https://github.com/apache/nuttx/issues?q=is%3Aissue+is%3Aclosed))
-
-  - type: checkboxes
-    attributes:
-      label: "Verification"
-      options:
-        - label: "I have verified before submitting the report."
-          required: true
+          - Search [existing feature requests](./) (including [closed](./?q=is%3Aissue+is%3Aclosed))

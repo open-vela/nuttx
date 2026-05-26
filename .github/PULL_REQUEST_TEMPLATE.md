@@ -1,4 +1,4 @@
-*Note: Please adhere to [Contributing Guidelines](https://github.com/apache/nuttx/blob/master/CONTRIBUTING.md).*
+*Note: Please adhere to [Contributing Guidelines](https://github.com/open-vela/docs/blob/dev/CONTRIBUTING.md).*
 
 ## Summary
 
@@ -17,5 +17,4 @@
  what Host was used for build (OS, CPU, compiler, ..), what Target was
  used for verification (arch, board:config, ..), etc. Providing build
  and runtime logs from before and after change is highly appreciated.*
-
 

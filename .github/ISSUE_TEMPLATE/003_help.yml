@@ -11,23 +11,23 @@
 # limitations under the License.
 #
 name: General Help
-description: Get general support regarding NuttX
+description: Get general support regarding openvela
 title: "[HELP] <title>"
 labels: ["Community: Question"]
 body:
   - type: markdown
     attributes:
       value: |
-        Hello NuttX Community member! Please keep things tidy by putting your post in the proper place:
+        Hello openvela Community member! Please keep things tidy by putting your post in the proper place:
 
-        Asking a question or getting help: use this form or [Mailing list](https://nuttx.apache.org/community/).
-        Reporting a bug: use the [Bug report](https://github.com/apache/nuttx/issues/new?assignees=&labels=%F0%9F%91%80+needs+triage%2CType%3A+Bug&projects=&template=001_bug_report.yml&title=%5BBUG%5D+%3Ctitle%3E) form.
-        Requesting a new feature: use the [Feature request](https://github.com/apache/nuttx/issues/new?assignees=&labels=Type%3A+Enhancement&projects=&template=002_feature_request.yml&title=%5BFEATURE%5D+%3Ctitle%3E) form
+        Asking a question or getting help: use this form.
+        Reporting a bug: use the [Bug report](./new?assignees=&labels=%F0%9F%91%80+needs+triage%2CType%3A+Bug&projects=&template=001_bug_report.yml&title=%5BBUG%5D+%3Ctitle%3E) form.
+        Requesting a new feature: use the [Feature request](./new?assignees=&labels=Type%3A+Enhancement&projects=&template=002_feature_request.yml&title=%5BFEATURE%5D+%3Ctitle%3E) form
 
   - type: markdown
     attributes:
       value: |
-        ### Whether you're a beginner or an experienced developer, NuttX Help is here to assist you with all your NuttX questions and concerns.
+        ### Whether you're a beginner or an experienced developer, openvela Help is here to assist you with all your openvela questions and concerns.
 
   - type: textarea
     id: question-description
@@ -43,12 +43,5 @@ body:
         ### Before You Submit
 
         Please verify that you've followed these steps:
-          - I have searched [NuttX Documentation](https://nuttx.apache.org/docs/latest/) and didn't find an answer to my question.
-          - Search [existing issues](https://github.com/apache/nuttx/issues) (including [closed](https://github.com/apache/nuttx/issues?q=is%3Aissue+is%3Aclosed))
-
-  - type: checkboxes
-    attributes:
-      label: "Verification"
-      options:
-        - label: "I have verified before submitting the report."
-          required: true
+          - I have searched [openvela Documentation](../) and didn't find an answer to my question.
+          - Search [existing issues](./) (including [closed](./?q=is%3Aissue+is%3Aclosed))
