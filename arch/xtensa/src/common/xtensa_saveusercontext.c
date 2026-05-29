@@ -53,6 +53,13 @@ int up_saveusercontext(void *saveregs)
 {
   if (up_interrupt_context())
     {
+      /* Save saveregs to callee-saved register A12 to prevent
+       * up_interrupt_context() return value from clobbering the
+       * parameter register A2. A12-A15 are callee-saved and
+       * won't be destroyed by function calls.
+       */
+
+      register void *regs __asm__("a12") = saveregs;
       __asm__ __volatile__
         (
           "   s32i a0, %0, (4 * " STRINGIFY(REG_A0) ")\n"
@@ -92,7 +99,7 @@ int up_saveusercontext(void *saveregs)
           "   s32i a2, %0, (4 * " STRINGIFY(REG_LCOUNT) ")\n"
 #endif
           :
-          : "a" (saveregs)
+          : "a" (regs)
         );
       return 0;
     }
