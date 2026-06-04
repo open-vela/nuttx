@@ -52,6 +52,13 @@ config ARM_TOOLCHAIN_GHS
 
 endchoice # ARM Toolchain Selection
 
+config ARM_DECODEFIQ
+	bool
+	default n
+	---help---
+		Select this option if your platform supports the function
+		arm_decodefiq().
+
 choice
 	prompt "ARM MCU selection"
 	default ARCH_CHIP_STM32
@@ -883,6 +890,7 @@ config ARCH_ARMV7A
 	select ARCH_HAVE_DEBUG
 	select ARCH_HAVE_PERF_EVENTS_USER_ACCESS if !SMP
 	select ARM_HAVE_WFE_SEV
+	select ARM_DECODEFIQ if ARCH_TRUSTZONE_SECURE || ARCH_HIPRI_INTERRUPT
 
 config ARCH_CORTEXA5
 	bool
