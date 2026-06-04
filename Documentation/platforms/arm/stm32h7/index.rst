@@ -38,7 +38,7 @@ Value lines:
 MCU          Support Note
 ===========  ======= ================
 STM32H7B0    No
-STM32H750    No
+STM32H750    Yes     STM32H750XB on the STM32H750B-DK Discovery Kit
 STM32H730    No
 ===========  ======= ================
 
