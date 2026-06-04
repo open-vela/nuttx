@@ -108,6 +108,20 @@ config ARCH_CHIP_ESP32S3
 		802.11 b/g/n Wi-Fi and Bluetooth 5 (LE) connectivity that provides long-range
 		support.
 
+config ARCH_CHIP_T113_DSP
+	bool "Allwinner T113-S3 HiFi4 DSP"
+	select ARCH_FAMILY_LX7
+	select XTENSA_HAVE_INTERRUPTS
+	select XTENSA_HAVE_ICACHE
+	select XTENSA_HAVE_DCACHE
+	select ARCH_HAVE_DEBUG
+	select ARCH_HAVE_RESET
+	select LIBC_ATOMIC_IRQ
+	---help---
+		Allwinner T113-S3 HiFi4 audio DSP coprocessor running NuttX
+		alongside an AP NuttX. Single-core (HiFi4 is one Xtensa LX7
+		core), no audio TIE or SIMD acceleration.
+
 config ARCH_CHIP_XTENSA_CUSTOM
 	bool "Custom XTENSA chip"
 	select ARCH_CHIP_CUSTOM
@@ -177,6 +191,7 @@ config XTENSA_DCACHE_LOCK
 config XTENSA_PERCPU_TCB_IN_MISC0
 	bool "Use misc0 register to store the percpu tcb"
 	default n if ARCH_CHIP_ESP32
+	default n if ARCH_CHIP_T113_DSP
 	default y
 
 config XTENSA_ONESHOT
@@ -205,6 +220,7 @@ config ARCH_CHIP
 	default "esp32" if ARCH_CHIP_ESP32
 	default "esp32s2" if ARCH_CHIP_ESP32S2
 	default "esp32s3" if ARCH_CHIP_ESP32S3
+	default "t113" if ARCH_CHIP_T113_DSP
 
 config XTENSA_CP_LAZY
 	bool "Lazy co-processor state restoration"
@@ -319,7 +335,23 @@ config XTENSA_TOOLCHAIN_ESP
 	bool "ESP toolchain for xtensa"
 	select ARCH_TOOLCHAIN_GCC
 
+config XTENSA_TOOLCHAIN_GNU
+	bool "Generic GNU toolchain for xtensa"
+	select ARCH_TOOLCHAIN_GCC
+	---help---
+		A generic GNU (crosstool-NG) toolchain whose command prefix is
+		given by XTENSA_TOOLCHAIN_PREFIX, e.g. the prebuilt
+		xtensa-hifi4-elf- toolchain used for the T113 HiFi4 DSP.
+
 endchoice
+
+config XTENSA_TOOLCHAIN_PREFIX
+	string "Generic GNU toolchain prefix"
+	default "xtensa-hifi4-elf-"
+	depends on XTENSA_TOOLCHAIN_GNU
+	---help---
+		Command prefix of the generic GNU toolchain, e.g.
+		"xtensa-hifi4-elf-" for the prebuilt T113 HiFi4 toolchain.
 
 source "arch/xtensa/src/lx6/Kconfig"
 
@@ -335,6 +367,10 @@ endif
 
 if ARCH_CHIP_ESP32S3
 source "arch/xtensa/src/esp32s3/Kconfig"
+endif
+
+if ARCH_CHIP_T113_DSP
+source "arch/xtensa/src/t113/Kconfig"
 endif
 
 endif # ARCH_XTENSA

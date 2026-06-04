@@ -82,6 +82,21 @@ set(NO_LTO "-fno-lto")
 
 add_compile_options(-mlongcalls)
 
+if(CONFIG_ARCH_CHIP_T113_DSP)
+  # Place each function's literal pool INTERLEAVED with its own .text (into
+  # .text.<fn>) instead of one front-of-section .literal pool.  The Xtensa
+  # `l32r` literal load is a backward-only PC-relative load with a 256 KB reach;
+  # once the DSP image .text grows past 256 KB (the TFLite-Micro KWS demo is
+  # ~384 KB) a function landing beyond that offset can no longer reach the
+  # single front pool -> "l32r: literal target out of range".  Folding the
+  # literals into each function's own section keeps every l32r in range
+  # regardless of total image size.  The prebuilt libgcc/libstdc++/libsupc++
+  # objects keep their own small front .literal sections, which the linker
+  # script places first and which stay within reach.  GNU binutils 2.36.1 here
+  # predates link-time --auto-litpools, so this is the robust build-flag fix.
+  add_compile_options(-mtext-section-literals)
+endif()
+
 if(CONFIG_MM_KASAN_INSTRUMENT_ALL)
   add_compile_options(-fsanitize=kernel-address)
   set(KASAN_PARAM "")

@@ -1,0 +1,33 @@
+if ARCH_BOARD_T113_EVB_DSP
+
+config BOARD_LATE_INITIALIZE
+	bool
+	default y
+
+config T113_INTC_PROBE
+	bool "Probe DSP_INTC source IDs at boot"
+	default n
+	---help---
+		Run a boot-time silicon probe that enables all DSP_INTC sources
+		simultaneously, attaches a recording handler to each, and waits
+		for the first source to fire.  The captured source ID is logged
+		via syslog and the probe disables all sources before NSH starts.
+
+		Used to discover the per-peripheral source ID assignment for
+		the T113-S3 DSP_INTC, since the datasheet does not publish it.
+		Trigger by sending a byte to UART2 within the timeout window.
+
+		Leave disabled in normal builds.
+
+if T113_INTC_PROBE
+
+config T113_INTC_PROBE_TIMEOUT
+	int "Probe wait window (seconds)"
+	default 30
+	range 1 120
+	---help---
+		How long the probe waits for a source to fire before giving up.
+
+endif # T113_INTC_PROBE
+
+endif # ARCH_BOARD_T113_EVB_DSP

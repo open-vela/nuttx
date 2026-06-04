@@ -1477,6 +1477,14 @@ config ARCH_BOARD_T113_EVB
 		the differences are cosmetic.  This port was developed on the v1 board,
 		but the others may be compatible.
 
+config ARCH_BOARD_T113_EVB_DSP
+	bool "T113-S3 HiFi4 DSP EVB"
+	depends on ARCH_CHIP_T113_DSP
+	---help---
+		Allwinner T113-S3 audio DSP evaluation board.  NuttX runs on the
+		Xtensa HiFi4 core, console on UART2 (PE2/PE3 mux 3).  Loaded
+		into DSP IRAM/DDR by the AP-side ELF loader.
+
 config ARCH_BOARD_BEAGLEBONE_BLACK
 	bool "beaglebone black"
 	depends on ARCH_CHIP_AM335X
@@ -3604,6 +3612,7 @@ config ARCH_BOARD
 	default "teensy-4.x"                if ARCH_BOARD_TEENSY_4X
 	default "teensy-lc"                 if ARCH_BOARD_TEENSY_LC
 	default "t113-evb"                  if ARCH_BOARD_T113_EVB
+	default "t113-evb-dsp"              if ARCH_BOARD_T113_EVB_DSP
 	default "tm4c123g-launchpad"        if ARCH_BOARD_TM4C123G_LAUNCHPAD
 	default "tm4c1294-launchpad"        if ARCH_BOARD_TM4C1294_LAUNCHPAD
 	default "tm4c129e-launchpad"        if ARCH_BOARD_TM4C129E_LAUNCHPAD
@@ -3639,7 +3648,6 @@ config ARCH_BOARD
 	default "hpm6750evk2"               if ARCH_BOARD_HPM6750EVK2
 	default "at32f437-mini"             if ARCH_BOARD_AT32F437_MINI
 	default "csk6011a-nano"             if ARCH_BOARD_CSK6011A_NANO
-
 comment "Common Board Options"
 
 config ARCH_HAVE_LEDS
@@ -3688,6 +3696,9 @@ source "boards/arm/a1x/pcduino-a10/Kconfig"
 endif
 if ARCH_BOARD_T113_EVB
 source "boards/arm/t113/t113-evb/Kconfig"
+endif
+if ARCH_BOARD_T113_EVB_DSP
+source "boards/xtensa/t113/t113-evb-dsp/Kconfig"
 endif
 if ARCH_BOARD_BEAGLEBONE_BLACK
 source "boards/arm/am335x/beaglebone-black/Kconfig"

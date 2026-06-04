@@ -1,0 +1,16 @@
+############################################################################
+# arch/xtensa/src/t113/Make.defs
+#
+# SPDX-License-Identifier: Apache-2.0
+############################################################################
+
+include $(TOPDIR)/arch/xtensa/src/common/Make.defs
+
+CHIP_ASRCS  = t113_head.S t113_vectors.S
+CHIP_CSRCS  = t113_start.c t113_irq.c t113_serial.c
+CHIP_CSRCS += t113_timerisr.c t113_allocateheap.c
+CHIP_CSRCS += t113_idle.c t113_clock.c t113_msgbox.c
+
+ifeq ($(CONFIG_RPTUN),y)
+CHIP_CSRCS += t113_dsp_rptun.c t113_rsctable.c t113_addrenv.c
+endif

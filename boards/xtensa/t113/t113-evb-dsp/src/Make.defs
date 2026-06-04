@@ -1,0 +1,11 @@
+############################################################################
+# boards/xtensa/t113/t113-evb-dsp/src/Make.defs
+#
+# SPDX-License-Identifier: Apache-2.0
+############################################################################
+
+CSRCS = t113_boardinit.c
+
+DEPPATH += --dep-path board
+VPATH   += :board
+CFLAGS  += $(shell $(INCDIR) "$(CC)" $(TOPDIR)/arch/xtensa/src/board)

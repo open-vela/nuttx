@@ -1,0 +1,54 @@
+#
+# T113-S3 HiFi4 DSP chip options
+#
+
+if ARCH_CHIP_T113_DSP
+
+# T113 UART ports.  The UART driver (arch/arm/src/t113/t113_serial.c) is
+# shared between the ARM AP and this Xtensa DSP build; these options gate
+# which ports the DSP instantiates.  Only UART0..3 have a DSP-side R_INTC
+# source on this silicon.  Clock/pinmux are owned by the AP, so enabling a
+# port here only wires up the IRQ-driven driver, not SoC bring-up.
+
+config T113_UART0
+	bool "UART 0"
+	default n
+	select UART0_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config T113_UART1
+	bool "UART 1"
+	default n
+	select UART1_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config T113_UART2
+	bool "UART 2"
+	default n
+	select UART2_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config T113_UART3
+	bool "UART 3"
+	default n
+	select UART3_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config T113_HEAP_SIZE
+	hex "Primary heap size (bytes)"
+	default 0x00400000
+	---help---
+		Bytes of DDR allocated to the NuttX primary heap.  Must be
+		<= 5 MB (the DSP DDR reservation).  Code/data/stack consume
+		the remainder.
+
+config T113_TRACE
+	bool "DSP boot breadcrumb trace ring"
+	default n
+	---help---
+		Lightweight breadcrumb ring in DSP non-cacheable shmem
+		(0x17A04400) for early-boot debugging.  The AP reads it via its
+		non-cacheable mapping.  Each TRACE_BC expands to a few stores,
+		no stack, no library calls.  Leave disabled in normal builds.
+
+endif # ARCH_CHIP_T113_DSP

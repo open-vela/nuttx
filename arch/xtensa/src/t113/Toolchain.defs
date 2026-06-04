@@ -1,0 +1,30 @@
+############################################################################
+# arch/xtensa/src/t113/Toolchain.defs
+#
+# Override CROSSDEV used by lx7/Toolchain.defs.  The default rule there
+# derives CROSSDEV = xtensa-$(CONFIG_ARCH_CHIP)-elf-, which would yield
+# xtensa-t113-elf-.  The prebuilt xtensa-hifi4-elf crosstool-NG GCC for
+# the T113 HiFi4 ships under the xtensa-hifi4-elf- prefix, so we include
+# the parent first and then re-bind CROSSDEV (and the binary names that
+# were captured against it) using immediate assignment.
+#
+# SPDX-License-Identifier: Apache-2.0
+############################################################################
+
+include $(TOPDIR)/arch/xtensa/src/lx7/Toolchain.defs
+
+ifeq ($(CONFIG_XTENSA_TOOLCHAIN_ESP), y)
+  CROSSDEV := xtensa-hifi4-elf-
+
+  CC      := $(CROSSDEV)gcc
+  CXX     := $(CROSSDEV)g++
+  CPP     := $(CROSSDEV)gcc -E -P -x c
+  LD      := $(CROSSDEV)ld
+  STRIP   := $(CROSSDEV)strip --strip-unneeded
+  AR      := $(CROSSDEV)ar rcs
+  NM      := $(CROSSDEV)nm
+  OBJCOPY := $(CROSSDEV)objcopy
+  OBJDUMP := $(CROSSDEV)objdump
+
+  EXTRA_LIBS := $(wildcard $(shell $(CC) $(ARCHCPUFLAGS) --print-libgcc-file-name))
+endif
