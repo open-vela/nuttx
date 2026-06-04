@@ -1821,4 +1821,12 @@ config LCD_TDA19988
 		Phone and Ultra-Mobile Personal Computer (UM PC), new PC tablet and
 		MID where size and power are key for battery autonomy.
 
+config LCD_GC9503CV_DSI
+	bool "GC9503CV MIPI DSI panel (X4B / R528 HMI EVB4)"
+	default n
+	depends on MIPI_DSI
+	---help---
+		GC9503CV 480x800 MIPI DSI 2-lane panel driver.
+		Used by the X4B screen on R528 HMI EVB4 board.
+
 endmenu # LCD Driver Support
