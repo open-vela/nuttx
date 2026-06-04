@@ -28,8 +28,11 @@
  * Included Files
  ****************************************************************************/
 
+#include <nuttx/config.h>
 #include <sys/types.h>
 #include <math.h>
+
+#ifndef CONFIG_LIBM_ARCH_SINF
 
 /****************************************************************************
  * Private Data
@@ -101,3 +104,5 @@ float sinf(float x)
 
   return sin_x;
 }
+
+#endif /* CONFIG_LIBM_ARCH_SINF */

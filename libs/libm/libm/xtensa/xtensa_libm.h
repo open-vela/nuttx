@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libm/libm/xtensa/xtensa_libm.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -20,34 +20,33 @@
  *
  ****************************************************************************/
 
+#ifndef __LIBS_LIBM_LIBM_XTENSA_XTENSA_LIBM_H
+#define __LIBS_LIBM_LIBM_XTENSA_XTENSA_LIBM_H
+
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
-
-#include <math.h>
 
 /****************************************************************************
- * Public Functions
+ * Pre-processor Definitions
  ****************************************************************************/
 
-float asinhf(float x)
-{
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
+/* HiFi4 LX7 single-precision audio-TIE FP (VFPU2) on the aed0..aed15
+ * register file.  Unlike ARM there is no compiler macro (__ARM_FP) that
+ * advertises this datapath, so the capability is gated on the same Kconfig
+ * symbol that enables the libc soft-float helper overrides: it implies the
+ * CP1 audio coprocessor is present and enabled (CONFIG_XTENSA_CP_INITSET
+ * bit 1), which is the prerequisite for mul.s / madd.s / abs.s / trunc.s.
+ *
+ * The float<->aed bridge uses ae_movda32 / ae_movad32.l (no stack
+ * round-trip); GCC cannot bind a C float to an aed register, so each helper
+ * moves bits explicitly inside inline asm.
+ */
 
-  if (isnanf(x) || isinff(x) || x == 0.0F)
-    {
-      return x;
-    }
+#if defined(__XTENSA__) && defined(CONFIG_XTENSA_LX7_HIFI4_FLOAT)
+#  define XTENSA_LIBM_HAVE_VFPU2 1
+#endif
 
-  return logf(x + sqrtf(x * x + 1.0F));
-}
+#endif /* __LIBS_LIBM_LIBM_XTENSA_XTENSA_LIBM_H */

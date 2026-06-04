@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libc/machine/xtensa/lx7hifi4_negsf2.S
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -21,33 +21,24 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Included Files
+ * Single-precision float negate.
+ *
+ * Overrides libgcc's __negsf2.  Negation is just a sign-bit flip on the
+ * IEEE-754 bit pattern, so this is pure integer (no TIE/aed needed) and
+ * matches libgcc's own approach (xor with 0x80000000).  Windowed ABI:
+ * operand bits in a2, result in a2.
  ****************************************************************************/
 
-#include <nuttx/config.h>
-#include <nuttx/compiler.h>
+	.text
+	.align 4
+	.global __negsf2
+	.type   __negsf2, @function
 
-#include <math.h>
+__negsf2:
+	entry a1, 16
+	movi  a3, 1
+	slli  a3, a3, 31          /* a3 = 0x80000000 (sign bit) */
+	xor   a2, a2, a3          /* flip sign */
+	retw.n
 
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-float asinhf(float x)
-{
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
-
-  if (isnanf(x) || isinff(x) || x == 0.0F)
-    {
-      return x;
-    }
-
-  return logf(x + sqrtf(x * x + 1.0F));
-}
+	.size __negsf2, .-__negsf2

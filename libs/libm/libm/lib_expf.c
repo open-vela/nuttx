@@ -33,6 +33,8 @@
 
 #include "libm.h"
 
+#ifndef CONFIG_LIBM_ARCH_EXPF
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -109,3 +111,5 @@ float expf(float x)
       return value;
     }
 }
+
+#endif /* CONFIG_LIBM_ARCH_EXPF */

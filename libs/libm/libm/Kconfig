@@ -78,8 +78,56 @@ config LIBM_ARCH_SQRTF
 	bool
 	default n
 
+config LIBM_ARCH_FMAF
+	bool
+	default n
+
+config LIBM_ARCH_EXPF
+	bool
+	default n
+
+config LIBM_ARCH_LOGF
+	bool
+	default n
+
+config LIBM_ARCH_SINF
+	bool
+	default n
+
+config LIBM_ARCH_COSF
+	bool
+	default n
+
+config LIBM_ARCH_POWF
+	bool
+	default n
+
+config LIBM_ARCH_ASINF
+	bool
+	default n
+
+config LIBM_ARCH_EXP2F
+	bool
+	default n
+
+config LIBM_ARCH_CBRTF
+	bool
+	default n
+
+config LIBM_ARCH_HYPOTF
+	bool
+	default n
+
+config LIBM_ARCH_ERFF
+	bool
+	default n
+
 # One or more the of above may be selected by architecture specific logic
 
 if ARCH_ARM
 source "libs/libm/libm/arm/Kconfig"
+endif
+
+if ARCH_XTENSA
+source "libs/libm/libm/xtensa/Kconfig"
 endif

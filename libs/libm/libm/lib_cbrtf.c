@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libm/libm/lib_cbrtf.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -25,29 +25,29 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
 
 #include <math.h>
+
+#ifndef CONFIG_LIBM_ARCH_CBRTF
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-float asinhf(float x)
+/****************************************************************************
+ * Name: cbrtf
+ *
+ * Description:
+ *   Compute the (real) cube root of x.  cbrt is an odd function, defined for
+ *   all reals: cbrtf(-x) = -cbrtf(x).  This generic fallback computes the
+ *   result in double precision and rounds to float, which is correctly
+ *   rounded for the float range.
+ *
+ ****************************************************************************/
+
+float cbrtf(float x)
 {
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
-
-  if (isnanf(x) || isinff(x) || x == 0.0F)
-    {
-      return x;
-    }
-
-  return logf(x + sqrtf(x * x + 1.0F));
+  return (float)cbrt((double)x);
 }
+
+#endif /* CONFIG_LIBM_ARCH_CBRTF */

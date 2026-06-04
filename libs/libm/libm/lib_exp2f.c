@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libm/libm/lib_exp2f.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -25,29 +25,63 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
 
 #include <math.h>
+
+#ifndef CONFIG_LIBM_ARCH_EXP2F
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-float asinhf(float x)
-{
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
+/****************************************************************************
+ * Name: exp2f
+ *
+ * Description:
+ *   Compute 2 raised to the power x.  Range-reduce to 2^x = 2^n * 2^r with
+ *   n = floorf(x + 0.5) an integer and r = x - n in [-0.5, 0.5]; evaluate
+ *   2^r with the cephes degree-6 minimax polynomial and scale by 2^n.  This
+ *   mirrors lib_expf.c's style with the base-2 reduction (no log2e factor),
+ *   and is faithful to ~1 ULP versus the simpler but less accurate
+ *   expf(x * ln2) form (whose argument rounding costs tens of ULP).
+ *
+ ****************************************************************************/
 
-  if (isnanf(x) || isinff(x) || x == 0.0F)
+float exp2f(float x)
+{
+  float n;
+  float r;
+  float p;
+
+  if (isnan(x))
     {
       return x;
     }
 
-  return logf(x + sqrtf(x * x + 1.0F));
+  if (x >= 128.0f)
+    {
+      return (float)INFINITY;
+    }
+
+  if (x <= -150.0f)
+    {
+      return 0.0f;
+    }
+
+  n = floorf(x + 0.5f);
+  r = x - n;
+
+  /* 2^r, cephes exp2f degree-6 minimax over r in [-0.5, 0.5]. */
+
+  p = 1.535336188319500e-4f;
+  p = p * r + 1.339887440266574e-3f;
+  p = p * r + 9.618437357674640e-3f;
+  p = p * r + 5.550332471162809e-2f;
+  p = p * r + 2.402264791363012e-1f;
+  p = p * r + 6.931472028550421e-1f;
+  p = p * r + 1.0f;
+
+  return ldexpf(p, (int)n);
 }
+
+#endif /* CONFIG_LIBM_ARCH_EXP2F */

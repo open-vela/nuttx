@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libm/libm/xtensa/arch_roundf.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -25,29 +25,34 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
-
 #include <math.h>
+
+#include "xtensa_libm.h"
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-float asinhf(float x)
+/* roundf rounds to nearest, ties AWAY from zero -- which is exactly what the
+ * HiFi4 firound.s round-to-integral instruction does (silicon-verified:
+ * firound(2.5)=3, firound(-2.5)=-3, NOT the round-half-even that rintf
+ * wants).  So roundf is a single instruction; inf/nan/zero and already-
+ * integral values pass through unchanged.
+ */
+
+#if XTENSA_LIBM_HAVE_VFPU2
+float roundf(float x)
 {
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
+  float result;
 
-  if (isnanf(x) || isinff(x) || x == 0.0F)
-    {
-      return x;
-    }
+  __asm__ volatile
+  (
+    "ae_movda32   aed0, %1\n"
+    "firound.s    aed1, aed0\n"
+    "ae_movad32.l %0, aed1\n"
+    : "=r" (result) : "r" (x)
+  );
 
-  return logf(x + sqrtf(x * x + 1.0F));
+  return result;
 }
+#endif

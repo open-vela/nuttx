@@ -28,8 +28,11 @@
  * Included Files
  ****************************************************************************/
 
+#include <nuttx/config.h>
 #include <math.h>
 #include <float.h>
+
+#ifndef CONFIG_LIBM_ARCH_ASINF
 
 /****************************************************************************
  * Private Functions
@@ -88,3 +91,5 @@ float asinf(float x)
 
   return y;
 }
+
+#endif /* CONFIG_LIBM_ARCH_ASINF */

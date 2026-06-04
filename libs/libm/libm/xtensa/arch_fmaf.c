@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libm/libm/xtensa/arch_fmaf.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -25,29 +25,41 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
-
 #include <math.h>
+
+#include "xtensa_libm.h"
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-float asinhf(float x)
+/* fmaf via the HiFi4 madd.s fused multiply-add: a single silicon op with
+ * one rounding, replacing the expensive double-precision soft-float
+ * fallback (lib_fmaf.c).  madd.s is inout on its first operand
+ * (aedD += aedA*aedB), so z is moved into the accumulator aed2, x into
+ * aed0, y into aed1.  ae_movda32 / ae_movad32.l bridge the a-register
+ * float bits to/from the aed FP file with no stack round-trip; aed
+ * registers cannot appear in the clobber list (GCC rejects the names),
+ * which is safe here as the sequence neither spans a call nor leaves live
+ * compiler-allocated aed state.
+ */
+
+#if XTENSA_LIBM_HAVE_VFPU2
+float fmaf(float x, float y, float z)
 {
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
+  float result;
 
-  if (isnanf(x) || isinff(x) || x == 0.0F)
-    {
-      return x;
-    }
+  __asm__ volatile
+  (
+    "ae_movda32   aed0, %1\n"   /* aed0 = x */
+    "ae_movda32   aed1, %2\n"   /* aed1 = y */
+    "ae_movda32   aed2, %3\n"   /* aed2 = z (accumulator) */
+    "madd.s       aed2, aed0, aed1\n"
+    "ae_movad32.l %0, aed2\n"
+    : "=r" (result)
+    : "r" (x), "r" (y), "r" (z)
+  );
 
-  return logf(x + sqrtf(x * x + 1.0F));
+  return result;
 }
+#endif

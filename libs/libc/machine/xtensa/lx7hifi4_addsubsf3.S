@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libc/machine/xtensa/lx7hifi4_addsubsf3.S
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -21,33 +21,40 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Included Files
+ * Single-precision float add / subtract, HiFi4 audio-TIE accelerated.
+ *
+ * Overrides libgcc's soft-float __addsf3 / __subsf3.  Same scheme as
+ * lx7hifi4_mulsf3.S: windowed ABI (entry/retw.n, call site call8), operands
+ * as bits in a2/a3, result bits in a2; ae_movda32 moves bits into the aed
+ * FP register file with no stack round-trip, one silicon FP op, ae_movad32.l
+ * back.  Requires CP1 (CONFIG_XTENSA_CP_INITSET bit 1).
  ****************************************************************************/
 
-#include <nuttx/config.h>
-#include <nuttx/compiler.h>
+	.text
+	.align 4
+	.global __addsf3
+	.type   __addsf3, @function
 
-#include <math.h>
+__addsf3:
+	entry        a1, 16
+	ae_movda32   aed0, a2          /* aed0 = a (float bits) */
+	ae_movda32   aed1, a3          /* aed1 = b */
+	add.s        aed2, aed0, aed1  /* aed2 = a + b */
+	ae_movad32.l a2, aed2
+	retw.n
 
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
+	.size __addsf3, .-__addsf3
 
-float asinhf(float x)
-{
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
+	.align 4
+	.global __subsf3
+	.type   __subsf3, @function
 
-  if (isnanf(x) || isinff(x) || x == 0.0F)
-    {
-      return x;
-    }
+__subsf3:
+	entry        a1, 16
+	ae_movda32   aed0, a2          /* aed0 = a */
+	ae_movda32   aed1, a3          /* aed1 = b */
+	sub.s        aed2, aed0, aed1  /* aed2 = a - b */
+	ae_movad32.l a2, aed2
+	retw.n
 
-  return logf(x + sqrtf(x * x + 1.0F));
-}
+	.size __subsf3, .-__subsf3

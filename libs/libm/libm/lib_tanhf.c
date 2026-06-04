@@ -36,8 +36,31 @@
 
 float tanhf(float x)
 {
-  float x0 = expf(x);
-  float x1 = 1.0F / x0;
+  float x0;
+  float x1;
+
+  /* tanh saturates to +-1 well before expf overflows: |x| >= 9 already
+   * rounds to +-1.0F in single precision, and at +-inf the e^x/e^-x ratio
+   * would otherwise form inf/inf = NaN.  Handle both (and propagate NaN).
+   */
+
+  if (isnanf(x))
+    {
+      return x;
+    }
+
+  if (x >= 9.0F)
+    {
+      return 1.0F;
+    }
+
+  if (x <= -9.0F)
+    {
+      return -1.0F;
+    }
+
+  x0 = expf(x);
+  x1 = 1.0F / x0;
 
   return ((x0 - x1) / (x0 + x1));
 }

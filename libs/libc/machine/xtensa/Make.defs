@@ -56,6 +56,14 @@ ifeq ($(CONFIG_XTENSA_STRCMP),y)
 ASRCS += arch_strcmp.S
 endif
 
+ifeq ($(CONFIG_XTENSA_LX7_HIFI4_FLOAT),y)
+ASRCS += lx7hifi4_mulsf3.S
+ASRCS += lx7hifi4_addsubsf3.S
+ASRCS += lx7hifi4_negsf2.S
+ASRCS += lx7hifi4_fixfloat.S
+ASRCS += lx7hifi4_divsf3.S
+endif
+
 ifeq ($(CONFIG_PROFILE_NONE),)
 CSRCS += arch_mcount.c
 endif

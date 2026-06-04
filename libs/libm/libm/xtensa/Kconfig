@@ -1,0 +1,37 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_XTENSA
+
+config XTENSA_LIBM
+	bool "Architecture specific FPU optimizations"
+	default n
+	select LIBM_ARCH_FMAF
+	select LIBM_ARCH_TRUNCF
+	select LIBM_ARCH_SQRTF
+	select LIBM_ARCH_FLOORF
+	select LIBM_ARCH_CEILF
+	select LIBM_ARCH_RINTF
+	select LIBM_ARCH_ROUNDF
+	select LIBM_ARCH_EXPF
+	select LIBM_ARCH_LOGF
+	select LIBM_ARCH_SINF
+	select LIBM_ARCH_COSF
+	select LIBM_ARCH_POWF
+	select LIBM_ARCH_ASINF
+	select LIBM_ARCH_EXP2F
+	select LIBM_ARCH_CBRTF
+	select LIBM_ARCH_HYPOTF
+	select LIBM_ARCH_ERFF
+	depends on XTENSA_LX7_HIFI4_FLOAT
+	depends on LIBM
+	---help---
+		Enable Xtensa HiFi4 audio-TIE specific single-precision floating
+		point optimizations (e.g. fmaf via the madd.s fused multiply-add).
+		Requires the CP1 audio coprocessor (CONFIG_XTENSA_CP_INITSET bit 1)
+		and the libc HiFi4 float helper overrides
+		(CONFIG_XTENSA_LX7_HIFI4_FLOAT).
+
+endif

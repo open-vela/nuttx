@@ -1,0 +1,96 @@
+############################################################################
+# libs/libm/libm/xtensa/Make.defs
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+############################################################################
+
+ifeq ($(CONFIG_XTENSA_LIBM),y)
+
+ifeq ($(CONFIG_LIBM_ARCH_FMAF),y)
+CSRCS += arch_fmaf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_TRUNCF),y)
+CSRCS += arch_truncf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_SQRTF),y)
+CSRCS += arch_sqrtf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_FLOORF),y)
+CSRCS += arch_floorf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_CEILF),y)
+CSRCS += arch_ceilf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_RINTF),y)
+CSRCS += arch_rintf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_ROUNDF),y)
+CSRCS += arch_roundf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_EXPF),y)
+CSRCS += arch_expf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_LOGF),y)
+CSRCS += arch_logf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_SINF),y)
+CSRCS += arch_sinf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_COSF),y)
+CSRCS += arch_cosf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_POWF),y)
+CSRCS += arch_powf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_ASINF),y)
+CSRCS += arch_asinf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_EXP2F),y)
+CSRCS += arch_exp2f.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_CBRTF),y)
+CSRCS += arch_cbrtf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_HYPOTF),y)
+CSRCS += arch_hypotf.c
+endif
+
+ifeq ($(CONFIG_LIBM_ARCH_ERFF),y)
+CSRCS += arch_erff.c
+endif
+
+endif
+
+DEPPATH += --dep-path libm/xtensa
+VPATH += :libm/xtensa

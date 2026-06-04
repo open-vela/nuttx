@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libm/libm/lib_fmaf.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -25,29 +25,29 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
-
 #include <math.h>
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-float asinhf(float x)
+/* Portable single-precision fused-multiply-add fallback.
+ *
+ * NuttX generic libm does not otherwise provide fmaf, so this is the
+ * default implementation; an architecture may override it by selecting
+ * CONFIG_LIBM_ARCH_FMAF (e.g. the xtensa HiFi4 madd.s version).
+ *
+ * The binary64 product is exact (24+24 significant bits fit in 53), so the
+ * only rounding before the final round-to-float is the double add.  This
+ * matches a true single-rounded FMA for the overwhelming majority of
+ * inputs (a residual double-rounding mismatch is possible only in rare
+ * carry-boundary cases).  Adequate as the portable fallback; the silicon
+ * madd.s override is the single-rounded fast path.
+ */
+
+#ifndef CONFIG_LIBM_ARCH_FMAF
+float fmaf(float x, float y, float z)
 {
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
-
-  if (isnanf(x) || isinff(x) || x == 0.0F)
-    {
-      return x;
-    }
-
-  return logf(x + sqrtf(x * x + 1.0F));
+  return (float)((double)x * (double)y + (double)z);
 }
+#endif

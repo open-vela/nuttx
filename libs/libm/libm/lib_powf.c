@@ -28,12 +28,14 @@
  * Included Files
  ****************************************************************************/
 
+#include <nuttx/config.h>
 #include <math.h>
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
+#ifndef CONFIG_LIBM_ARCH_POWF
 float powf(float b, float e)
 {
   if (b > 0.0f)
@@ -54,3 +56,4 @@ float powf(float b, float e)
 
   return 0.0f;
 }
+#endif

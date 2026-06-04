@@ -56,3 +56,14 @@ config XTENSA_STRNCPY
 	---help---
 		Enable optimized XTENSA specific strncpy() library function
 
+config XTENSA_LX7_HIFI4_FLOAT
+	bool "Enable HiFi4 audio-TIE accelerated soft-float helpers"
+	default n
+	---help---
+		Override libgcc's soft-float helpers (__mulsf3, ...) with
+		hand-written HiFi4 audio-TIE implementations operating on the
+		AE_DR (aed) register file via single silicon FP instructions
+		(mul.s, add.s, ...).  Requires the audio engine coprocessor CP1
+		to be enabled (CONFIG_XTENSA_CP_INITSET must include bit 1).
+		Single-precision only; double precision stays soft-float.
+

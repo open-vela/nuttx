@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libm/libm/lib_hypotf.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -25,29 +25,61 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
 
 #include <math.h>
+
+#ifndef CONFIG_LIBM_ARCH_HYPOTF
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-float asinhf(float x)
-{
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
+/****************************************************************************
+ * Name: hypotf
+ *
+ * Description:
+ *   Compute sqrt(x*x + y*y) without undue overflow or underflow, by scaling
+ *   out the larger magnitude:  m = max(|x|,|y|), t = min/m,
+ *   result = m * sqrtf(1 + t*t).  sqrtf may itself be architecture
+ *   accelerated.
+ *
+ *   Special cases follow IEEE / C99:
+ *     hypot(+-Inf, y) = +Inf  even when y is NaN  (and symmetric)
+ *     either NaN (no Inf)     -> NaN
+ *     hypot(x, 0)             = |x|
+ *
+ ****************************************************************************/
 
-  if (isnanf(x) || isinff(x) || x == 0.0F)
+float hypotf(float x, float y)
+{
+  float ax = fabsf(x);
+  float ay = fabsf(y);
+  float m;
+  float n;
+  float t;
+
+  /* Inf in either argument dominates, even against a NaN. */
+
+  if (isinf(ax) || isinf(ay))
     {
-      return x;
+      return (float)INFINITY;
     }
 
-  return logf(x + sqrtf(x * x + 1.0F));
+  if (isnan(ax) || isnan(ay))
+    {
+      return (float)NAN;
+    }
+
+  m = ax > ay ? ax : ay;
+  n = ax > ay ? ay : ax;
+
+  if (m == 0.0f)
+    {
+      return 0.0f;
+    }
+
+  t = n / m;
+  return m * sqrtf(1.0f + t * t);
 }
+
+#endif /* CONFIG_LIBM_ARCH_HYPOTF */

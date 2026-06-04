@@ -29,6 +29,8 @@
 
 #include <math.h>
 
+#ifndef CONFIG_LIBM_ARCH_ERFF
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -65,3 +67,5 @@ float erff(float x)
       (((((A5 * t + A4) * t) + A3) * t + A2) * t + A1) * t * expf(-z * z);
   return copysignf(t, x);
 }
+
+#endif /* CONFIG_LIBM_ARCH_ERFF */

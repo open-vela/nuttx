@@ -1,5 +1,5 @@
 /****************************************************************************
- * libs/libm/libm/lib_asinhf.c
+ * libs/libm/libm/xtensa/arch_ceilf.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -25,29 +25,33 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <nuttx/compiler.h>
-
 #include <math.h>
+
+#include "xtensa_libm.h"
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
 
-float asinhf(float x)
+/* ceilf via the HiFi4 ficeil.s round-toward-positive-infinity instruction
+ * (aed -> aed, float result).  ficeil.s passes inf/nan/zero through
+ * unchanged and is exact for already-integral and large-magnitude values,
+ * so no special-case screen is needed.
+ */
+
+#if XTENSA_LIBM_HAVE_VFPU2
+float ceilf(float x)
 {
-  /* asinh is odd: asinh(+-inf) = +-inf, asinh(+-0) = +-0.  The formula
-   * log(x + sqrt(x*x + 1)) breaks at x = -inf, where x*x = +inf and
-   * x + sqrt(x*x + 1) = -inf + +inf = NaN.  Screen inf and NaN up front
-   * (return x, which carries the correct sign for both +-inf and propagates
-   * NaN).  The +-0 case must also be screened: the formula collapses to
-   * log(0 + sqrt(1)) = log(1) = +0, dropping the sign of a -0 input, whereas
-   * glibc returns -0 (returning x preserves it).
-   */
+  float result;
 
-  if (isnanf(x) || isinff(x) || x == 0.0F)
-    {
-      return x;
-    }
+  __asm__ volatile
+  (
+    "ae_movda32   aed0, %1\n"
+    "ficeil.s     aed1, aed0\n"
+    "ae_movad32.l %0, aed1\n"
+    : "=r" (result) : "r" (x)
+  );
 
-  return logf(x + sqrtf(x * x + 1.0F));
+  return result;
 }
+#endif

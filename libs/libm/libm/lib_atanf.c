@@ -38,5 +38,19 @@
 
 float atanf(float x)
 {
+  /* At +-inf the x/sqrt(x*x+1) reduction forms inf/inf = NaN, so handle the
+   * finite limit atan(+-inf) = +-pi/2 explicitly (and propagate NaN).
+   */
+
+  if (isnanf(x))
+    {
+      return x;
+    }
+
+  if (isinff(x))
+    {
+      return x > 0.0F ? (float)(M_PI / 2) : -(float)(M_PI / 2);
+    }
+
   return asinf(x / sqrtf(x * x + 1.0F));
 }
