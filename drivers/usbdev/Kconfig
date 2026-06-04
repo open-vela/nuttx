@@ -757,6 +757,22 @@ config CDCACM_PRODUCTSTR
 	default "CDC/ACM Serial"
 
 endif # !CDCACM_COMPOSITE
+
+config CDCACM_SERIAL
+	bool "Register /dev/ttyACMn (uart_dev_s adapter)"
+	default y
+	---help---
+		Layer NuttX uart semantics on top of the CDC ACM device,
+		exposing /dev/ttyACMn for termios / NSH console / serial drivers.
+
+		Disable to use only the chardev /dev/cdcacmN interface and
+		the cdcacm_outstream_open API. Note that uart and chardev
+		access on the same cdcacm instance share the underlying USB
+		bulk endpoint pair -- running NSH on /dev/ttyACMn while a
+		chardev user writes /dev/cdcacm0 results in interleaved data;
+		use a composite USB configuration with two cdcacm instances
+		instead.
+
 endif # CDCACM
 
 menuconfig USBADB

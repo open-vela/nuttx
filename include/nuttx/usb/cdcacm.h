@@ -28,7 +28,11 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+
+#include <stdbool.h>
+
 #include <nuttx/fs/ioctl.h>
+#include <nuttx/streams.h>
 #include <nuttx/usb/usb.h>
 
 /****************************************************************************
@@ -318,6 +322,120 @@ typedef CODE void (*cdcacm_callback_t)(enum cdcacm_event_e event);
 
 struct usbdevclass_driver_s;
 
+/* Forward declaration -- opaque to callers */
+
+struct cdcacm_dev_s;
+struct usbdev_devinfo_s;
+
+/* User callback table.  Any field may be NULL; the cdcacm core no-ops
+ * any unset callback.  Multiple optional groups:
+ *   - CDC ACM class control requests (line coding, etc.)
+ *   - USB lifecycle (connect/suspend)
+ *   - Data plane (only the uart adapter uses these)
+ *   - xmit-buffer alias protocol for the DISABLE_TXBUF zero-copy path
+ */
+
+struct cdcacm_user_ops_s
+{
+  /* Called from cdcacm_setup() when the host issues SET_LINE_CODING.
+   * coding[0..6] holds dwDTERate / bCharFormat / bParityType / bDataBits
+   * per the CDC PSTN spec; len is the byte count actually received
+   * (normally 7).  Return 0 on success or a negated errno.  The cdcacm
+   * core ACKs the control transfer regardless.
+   */
+
+  CODE int  (*set_line_coding)(FAR struct cdcacm_dev_s *dev,
+                               FAR const uint8_t *coding, size_t len);
+
+  /* Called from cdcacm_setup() when the host issues GET_LINE_CODING.
+   * The adapter writes up to cap bytes of the current encoding state
+   * into out.  Return the number of bytes written or a negated errno.
+   */
+
+  CODE int  (*get_line_coding)(FAR struct cdcacm_dev_s *dev,
+                               FAR uint8_t *out, size_t cap);
+
+  /* Called from cdcacm_setup() when the host issues
+   * SET_CONTROL_LINE_STATE.  state bit 0 = DTR, bit 1 = RTS.  Return 0
+   * on success or a negated errno.
+   */
+
+  CODE int  (*set_ctrl_line_state)(FAR struct cdcacm_dev_s *dev,
+                                   uint16_t state);
+
+  /* Called from cdcacm_setup() when the host issues SEND_BREAK.
+   * duration is in milliseconds; 0xffff means continuous, 0 stops an
+   * in-progress break.  Return 0 on success or a negated errno.
+   */
+
+  CODE int  (*send_break)(FAR struct cdcacm_dev_s *dev,
+                          uint16_t duration);
+
+  /* Called when the USB cable is plugged/unplugged or the host issues
+   * SET_CONFIGURATION.  connected == true means data endpoints are
+   * ready for I/O; false means they have been torn down.
+   */
+
+  CODE void (*on_connect)(FAR struct cdcacm_dev_s *dev, bool connected);
+
+  /* Called when the USB bus enters suspend or resumes.  suspended ==
+   * true means the USB clock has been gated and no transfers are
+   * possible until resume.
+   */
+
+  CODE void (*on_suspend)(FAR struct cdcacm_dev_s *dev, bool suspended);
+
+  /* Called when an OUT endpoint request completes carrying len bytes.
+   * buf is valid only for the duration of the call -- the adapter must
+   * copy or consume the data inline.
+   */
+
+  CODE void (*on_rx)(FAR struct cdcacm_dev_s *dev,
+                     FAR const uint8_t *buf, size_t len);
+
+  /* Called when cdcacm needs the next IN packet payload.  The adapter
+   * fills dst with up to cap bytes and returns the number of bytes
+   * written; returning 0 means the adapter has nothing to send right
+   * now and cdcacm will skip the IN packet.
+   */
+
+  CODE int  (*pull_tx)(FAR struct cdcacm_dev_s *dev,
+                       FAR uint8_t *dst, size_t cap);
+
+  /* Called on the DISABLE_TXBUF zero-copy alias path; cdcacm asks the
+   * adapter for the next xmit ring buffer.  The adapter writes the
+   * buffer pointer into *buf and the available capacity into *cap.
+   * Return 0 on success or a negated errno.
+   */
+
+  CODE int  (*claim_xmit_buf)(FAR struct cdcacm_dev_s *dev,
+                              FAR uint8_t **buf, FAR size_t *cap);
+
+  /* Called from wrcomplete to tell the adapter how many bytes from the
+   * previously claimed xmit buffer were actually transmitted, so the
+   * adapter can advance its ring tail.
+   */
+
+  CODE void (*release_xmit_buf)(FAR struct cdcacm_dev_s *dev,
+                                size_t consumed);
+};
+
+/* Outstream -- naming aligns with lib_blkoutstream_open /
+ * lib_mtdoutstream_open and uses the lib_blkoutstream_s / lib_mtdoutstream_s
+ * convention of publishing fields directly (no opaque blob).
+ */
+
+struct cdcacm_outstream_s
+{
+  struct lib_outstream_s    common;
+  FAR struct cdcacm_dev_s  *dev;
+
+  /* puts/putc/flush need no stream-local sync state: blocking and
+   * completion are handled by cdcacm_internal_submit through the device's
+   * tx_waitsem and wrcontainer pool, so only the bound device is held here.
+   */
+};
+
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
@@ -341,7 +459,6 @@ struct usbdevclass_driver_s;
  ****************************************************************************/
 
 #if defined(CONFIG_USBDEV_COMPOSITE) && defined(CONFIG_CDCACM_COMPOSITE)
-struct usbdev_devinfo_s;
 int cdcacm_classobject(int minor, FAR struct usbdev_devinfo_s *devinfo,
                        FAR struct usbdevclass_driver_s **classdev);
 #endif
@@ -364,7 +481,8 @@ int cdcacm_classobject(int minor, FAR struct usbdev_devinfo_s *devinfo,
  *
  ****************************************************************************/
 
-#if !defined(CONFIG_USBDEV_COMPOSITE) || !defined(CONFIG_CDCACM_COMPOSITE)
+#if defined(CONFIG_CDCACM_SERIAL) && \
+    (!defined(CONFIG_USBDEV_COMPOSITE) || !defined(CONFIG_CDCACM_COMPOSITE))
 int cdcacm_initialize(int minor, FAR void **handle);
 #endif
 
@@ -389,7 +507,9 @@ int cdcacm_initialize(int minor, FAR void **handle);
  *
  ****************************************************************************/
 
+#ifdef CONFIG_CDCACM_SERIAL
 void cdcacm_uninitialize(FAR struct usbdevclass_driver_s *classdev);
+#endif
 
 /****************************************************************************
  * Name: cdcacm_get_composite_devdesc
@@ -445,6 +565,171 @@ ssize_t cdcacm_write(FAR const char *buffer, size_t buflen);
 #ifdef CONFIG_SYSLOG_CDCACM
 void cdcacm_disable_syslog(void);
 #endif
+
+/****************************************************************************
+ * Name: cdcacm_register
+ *
+ * Description:
+ *   Allocate a cdcacm instance, install the supplied user ops table, and
+ *   register the underlying USB device class driver.  Returns the opaque
+ *   device handle through dev_out for use with the rest of the layered
+ *   API.
+ *
+ * Input Parameters:
+ *   minor     - Device minor number; same meaning as cdcacm_initialize().
+ *   ops       - User callback table.  Any field may be NULL.
+ *   user_priv - Opaque pointer stored in the instance and returned from
+ *               cdcacm_get_user_priv().
+ *   devinfo   - Composite endpoint/interface descriptor info, or NULL
+ *               when running standalone.
+ *   dev_out   - Location to receive the new device handle on success.
+ *
+ * Returned Value:
+ *   Zero (OK) on success, a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int  cdcacm_register(int minor,
+                     FAR const struct cdcacm_user_ops_s *ops,
+                     FAR void *user_priv,
+                     FAR struct usbdev_devinfo_s *devinfo,
+                     FAR struct cdcacm_dev_s **dev_out);
+
+/****************************************************************************
+ * Name: cdcacm_unregister
+ *
+ * Description:
+ *   Tear down a cdcacm instance previously created by cdcacm_register().
+ *   Once all in-flight users have released the device, the underlying USB
+ *   device class driver is unregistered and the instance is freed.
+ *
+ * Input Parameters:
+ *   dev - Device handle returned by cdcacm_register().
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+void cdcacm_unregister(FAR struct cdcacm_dev_s *dev);
+
+/****************************************************************************
+ * Name: cdcacm_acquire
+ *
+ * Description:
+ *   Increment the cdcacm instance refcount, preventing teardown while the
+ *   caller holds a reference.  Fails (without taking a reference) once the
+ *   instance is closing, so the caller must abort whatever it was opening
+ *   rather than pair the failed acquire with a later cdcacm_release().
+ *
+ * Input Parameters:
+ *   dev - Device handle returned by cdcacm_register().
+ *
+ * Returned Value:
+ *   true if a reference was taken; false if the instance is closing (or dev
+ *   is NULL) -- in which case the caller holds no reference and must not
+ *   call cdcacm_release().
+ *
+ ****************************************************************************/
+
+bool cdcacm_acquire(FAR struct cdcacm_dev_s *dev);
+
+/****************************************************************************
+ * Name: cdcacm_release
+ *
+ * Description:
+ *   Drop a reference previously taken by cdcacm_acquire().  When the
+ *   refcount reaches zero and the instance is in the closing state, the
+ *   instance is freed.
+ *
+ * Input Parameters:
+ *   dev - Device handle returned by cdcacm_register().
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+void cdcacm_release(FAR struct cdcacm_dev_s *dev);
+
+/****************************************************************************
+ * Name: cdcacm_get_user_priv
+ *
+ * Description:
+ *   Retrieve the opaque user_priv pointer that the adapter passed to
+ *   cdcacm_register().
+ *
+ * Input Parameters:
+ *   dev - Device handle returned by cdcacm_register().
+ *
+ * Returned Value:
+ *   The stored user_priv pointer, or NULL if none was set.
+ *
+ ****************************************************************************/
+
+FAR void *cdcacm_get_user_priv(FAR struct cdcacm_dev_s *dev);
+
+/****************************************************************************
+ * Name: cdcacm_send_serial_state
+ *
+ * Description:
+ *   Intended to send a SERIAL_STATE notification on the interrupt IN
+ *   endpoint when the modem-status lines (DCD/DSR/RI/CTS) change.
+ *
+ *   Currently a stub that returns -ENOSYS.  The live notification path is
+ *   cdcacm_serialstate(), reached through the uart adapter's CAIOC_NOTIFY
+ *   ioctl when CONFIG_CDCACM_IFLOWCONTROL is enabled.
+ *
+ * Input Parameters:
+ *   dev   - Device handle returned by cdcacm_register().
+ *   state - Bitmap of UART state bits, see "Table 69: UART State Bitmap
+ *           Values" in the CDC PSTN spec and CDC_UART_definitions in
+ *           include/nuttx/usb/cdc.h.
+ *
+ * Returned Value:
+ *   -ENOSYS (not implemented).
+ *
+ ****************************************************************************/
+
+int  cdcacm_send_serial_state(FAR struct cdcacm_dev_s *dev, uint16_t state);
+
+/****************************************************************************
+ * Name: cdcacm_outstream_open
+ *
+ * Description:
+ *   Initialize a cdcacm_outstream_s so it can be used with the standard
+ *   lib_outstream_s puts/putc/flush operations.  Naming aligns with
+ *   lib_blkoutstream_open() / lib_mtdoutstream_open().
+ *
+ * Input Parameters:
+ *   stream - Caller-allocated stream object to initialize.
+ *   dev    - Device handle returned by cdcacm_register().
+ *
+ * Returned Value:
+ *   Zero (OK) on success, a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int  cdcacm_outstream_open(FAR struct cdcacm_outstream_s *stream,
+                           FAR struct cdcacm_dev_s *dev);
+
+/****************************************************************************
+ * Name: cdcacm_outstream_close
+ *
+ * Description:
+ *   Release any resources owned by stream and detach it from the cdcacm
+ *   instance.  After this call the stream object must not be used.
+ *
+ * Input Parameters:
+ *   stream - Stream object previously initialized by
+ *            cdcacm_outstream_open().
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+void cdcacm_outstream_close(FAR struct cdcacm_outstream_s *stream);
 
 #undef EXTERN
 #if defined(__cplusplus)

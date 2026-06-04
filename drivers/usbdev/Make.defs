@@ -32,6 +32,10 @@ ifeq ($(CONFIG_CDCACM),y)
   CSRCS += cdcacm.c cdcacm_desc.c
 endif
 
+ifeq ($(CONFIG_CDCACM_SERIAL),y)
+  CSRCS += cdcacm_serial.c
+endif
+
 ifeq ($(CONFIG_USBMSC),y)
   CSRCS += usbmsc.c usbmsc_desc.c usbmsc_scsi.c
 endif

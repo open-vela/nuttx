@@ -132,19 +132,29 @@ static inline int
               break;                         /* There is no CDC/ACM initialization */
 
             case BOARDIOC_USBDEV_CONNECT:    /* Connect the CDC/ACM device */
-#ifndef CONFIG_CDCACM_COMPOSITE
+#if defined(CONFIG_CDCACM_SERIAL) && !defined(CONFIG_CDCACM_COMPOSITE)
               {
                 DEBUGASSERT(ctrl->handle != NULL);
                 ret = cdcacm_initialize(ctrl->instance, ctrl->handle);
               }
+#else
+              /* No uart adapter is built (chardev-only or composite); there
+               * is no ttyACM device to bring up via this action.
+               */
+
+              ret = -ENOSYS;
 #endif
               break;
 
             case BOARDIOC_USBDEV_DISCONNECT: /* Disconnect the CDC/ACM device */
+#ifdef CONFIG_CDCACM_SERIAL
               {
                 DEBUGASSERT(ctrl->handle != NULL && *ctrl->handle != NULL);
                 cdcacm_uninitialize(*ctrl->handle);
               }
+#else
+              ret = -ENOSYS;
+#endif
               break;
 
             default:

@@ -33,6 +33,10 @@ if(CONFIG_USBDEV)
     list(APPEND SRCS cdcacm.c cdcacm_desc.c)
   endif()
 
+  if(CONFIG_CDCACM_SERIAL)
+    list(APPEND SRCS cdcacm_serial.c)
+  endif()
+
   if(CONFIG_USBMSC)
     list(APPEND SRCS usbmsc.c usbmsc_desc.c usbmsc_scsi.c)
   endif()
