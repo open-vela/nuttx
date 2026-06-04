@@ -638,6 +638,56 @@ config INPUT_GT9XX_I2C_FREQUENCY
 
 endif # INPUT_GT9XX
 
+config INPUT_TLSC6X
+	bool "TLSC6X capacitive touch panel"
+	default n
+	select I2C
+	select INPUT_TOUCHSCREEN
+	---help---
+		Enable support for the TLSC6X capacitive touch panel
+		controller.  Up to 5 simultaneous contacts are reported via the
+		standard touch_lowerhalf_s framework at /dev/inputN.
+
+if INPUT_TLSC6X
+
+config INPUT_TLSC6X_DEFAULT_MAX_X
+	int "Default screen max X"
+	default 800
+	---help---
+		Logical screen width used when the board config leaves
+		max_x = 0.  The IC reports raw 12-bit coordinates; this value
+		is only used when applying the revert_x transform.
+
+config INPUT_TLSC6X_DEFAULT_MAX_Y
+	int "Default screen max Y"
+	default 480
+
+config INPUT_TLSC6X_DEFAULT_EXCHANGE_XY
+	bool "Swap X/Y by default"
+	default y
+	---help---
+		Default swaps reported X and Y after read to match the
+		typical 800x480 landscape panel orientation.
+
+config INPUT_TLSC6X_DEFAULT_REVERT_X
+	bool "Mirror X by default"
+	default y
+
+config INPUT_TLSC6X_DEFAULT_REVERT_Y
+	bool "Mirror Y by default"
+	default n
+
+config INPUT_TLSC6X_STATS
+	bool "Report parse statistics to syslog"
+	default n
+	---help---
+		Periodically log a one-line counter of total / pollution /
+		invalid frames (every 200 reports).  Useful when bringing up a
+		new panel to confirm the IC is producing clean data; noisy on
+		a healthy system.
+
+endif # INPUT_TLSC6X
+
 config INPUT_BUTTONS
 	bool "Button Inputs"
 	default n
