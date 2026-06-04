@@ -1362,6 +1362,14 @@ int rptun_initialize(FAR struct rptun_dev_s *dev)
 
               nxrmutex_lock(&g_rptun_lock);
               dq_addlast(&priv->entry, &g_rptun_priv);
+
+              /* priv (and its embedded rproc) is now permanently live; only
+               * here is it safe to publish the back-pointer to the device.
+               * On every failure path above, priv is freed and dev->rproc
+               * stays NULL, leaving no dangling reference.
+               */
+
+              priv->dev->rproc = &priv->rproc;
               nxrmutex_unlock(&g_rptun_lock);
             }
         }

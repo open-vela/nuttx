@@ -375,7 +375,32 @@ struct rptun_dev_s
   FAR const struct rptun_ops_s *ops;
   FAR void *stack;
   size_t stack_size;
+
+  /* Back-pointer to the owning remoteproc, set by rptun_initialize() ONLY
+   * after the device is successfully registered and enqueued.  NULL until
+   * then (and on any registration-failure path), so an ops->start that
+   * dereferences it must treat NULL defensively.  Mirrors Linux remoteproc
+   * where .start(rproc) reads rproc->bootaddr directly.
+   */
+
+  FAR struct remoteproc *rproc;
 };
+
+/****************************************************************************
+ * Name: rptun_dev_to_rproc
+ *
+ * Description:
+ *   Return the remoteproc associated with an rptun device, or NULL if the
+ *   device has not been successfully registered yet.  Board ops->start uses
+ *   this to read rproc->bootaddr (the ELF e_entry resolved by the loader).
+ *
+ ****************************************************************************/
+
+static inline FAR struct remoteproc *
+rptun_dev_to_rproc(FAR struct rptun_dev_s *dev)
+{
+  return dev->rproc;
+}
 
 /****************************************************************************
  * Public Function Prototypes
