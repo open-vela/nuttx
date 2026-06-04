@@ -29,6 +29,10 @@ if(CONFIG_XTENSA_TOOLCHAIN_ESP)
   set(TOOLCHAIN_PREFIX xtensa-${CONFIG_ARCH_CHIP}-elf-)
 endif()
 
+if(CONFIG_XTENSA_TOOLCHAIN_GNU)
+  set(CROSSDEV ${CONFIG_XTENSA_TOOLCHAIN_PREFIX})
+endif()
+
 # Default toolchain
 if(CONFIG_XTENSA_TOOLCHAIN_XCC)
 
@@ -175,8 +179,13 @@ add_compile_options(
   -Wno-attributes
   -Wno-unknown-pragmas
   -Wno-atomic-alignment
-  $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
-  $<$<COMPILE_LANGUAGE:CXX>:-nostdinc++>)
+  $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>)
+
+# When using the toolchain's own libstdc++ (LIBCXXTOOLCHAIN), the toolchain's
+# C++ standard headers must be visible, so do not pass -nostdinc++.
+if(NOT CONFIG_LIBCXXTOOLCHAIN)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-nostdinc++>)
+endif()
 
 if(NOT ${CONFIG_ARCH_TOOLCHAIN_CLANG})
   add_compile_options(-Wno-psabi)
