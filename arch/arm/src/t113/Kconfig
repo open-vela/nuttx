@@ -1,0 +1,771 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_T113
+
+comment "T113-S3 Configuration Options"
+
+choice
+	prompt "Allwinner T113 Chip Selection"
+	default ARCH_CHIP_T113S3
+
+config ARCH_CHIP_T113S3
+	bool "T113-S3"
+	select ARCH_HAVE_MULTICPU
+	select ARCH_HAVE_RESET
+	select ARCH_HAVE_TICKLESS
+	select ARCH_HAVE_TRUSTZONE
+	select ARCH_HAVE_PERF_EVENTS
+	select ARCH_HAVE_I2CRESET
+	select ARM_HAVE_GICv2
+	select ARM_HAVE_PTM
+	---help---
+		Allwinner T113-S3 (also known as R528). Dual ARM Cortex-A7,
+		GIC-400 (GICv2), DDR3, SPI-NAND boot.
+
+endchoice # Allwinner T113 Chip Selection
+
+menu "Allwinner T113 Peripheral Support"
+
+config T113_UART0
+	bool "UART 0"
+	default n
+	select UART0_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Enable T113 UART0.  Default pins: PE2=TX, PE3=RX (Function 6).
+
+config T113_UART1
+	bool "UART 1"
+	default n
+	select UART1_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Enable T113 UART1.  Default pins: PG6=TX, PG7=RX (Function 2).
+
+config T113_UART2
+	bool "UART 2"
+	default n
+	select UART2_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Enable T113 UART2.  Default pins: PB0=TX, PB1=RX (Function 2).
+
+config T113_UART3
+	bool "UART 3"
+	default n
+	select UART3_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Enable T113 UART3.  Default pins: PB6=TX, PB7=RX (Function 7).
+
+config T113_UART4
+	bool "UART 4"
+	default n
+	select UART4_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Enable T113 UART4.  Default pins: PB2=TX, PB3=RX (Function 7).
+
+config T113_UART5
+	bool "UART 5"
+	default n
+	select UART5_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Enable T113 UART5.  Default pins: PB4=TX, PB5=RX (Function 7).
+
+config T113_DMA
+	bool "DMA Controller"
+	default n
+	select ARCH_DMA
+	---help---
+		Enable T113 DMAC driver (16 channels).
+		Required by T113_SPI_DMA.
+
+config T113_UART_DMA
+	bool "UART DMA (TX and RX on all enabled UARTs)"
+	default n
+	depends on T113_DMA
+	select SERIAL_RXDMA
+	select SERIAL_TXDMA
+	---help---
+		Route every enabled UART's RX and TX traffic through the
+		DMAC instead of the CPU ISR path.  Enables both directions
+		on every UARTn whose CONFIG_T113_UARTn=y.
+
+		At high baud rates (>= 1 Mbaud) this dramatically reduces
+		CPU load and eliminates the ERBFI IRQ storm that affects
+		interrupt-mode RX on SMP.  At low baud (<= 115200) the
+		overhead vs interrupt mode is negligible.
+
+config T113_UART_DMA_BOUNCE_SIZE
+	int "UART DMA bounce buffer size (bytes)"
+	default 4096
+	range 256 32767
+	depends on T113_UART_DMA
+	---help---
+	  Size of the per-channel DMA bounce buffer used for UART TX and
+	  RX DMA transfers.  Larger values reduce DMA completion interrupt
+	  rate proportionally.
+
+	  TX: one interrupt fires per bounce-sized chunk.  With 4096 bytes
+	  the interrupt rate drops 16x vs the 256-byte default for typical
+	  4 KiB writes.
+
+	  RX: the DMA callback fires when the bounce buffer is full; partial
+	  transfers are drained by the poll worker so short-packet latency is
+	  unaffected.
+
+	  Must not exceed CONFIG_UARTn_RXBUFSIZE (currently 32767) to avoid
+	  data loss when the DMA callback tries to deliver more bytes than
+	  the RX ring buffer can hold.
+
+config T113_SPI0
+	bool "SPI 0"
+	default n
+	select SPI
+	select ARCH_HAVE_SPI_CSNCONTROL
+	---help---
+		Enable T113 SPI0 master controller.
+		Default pins: PC2=SCK, PC3=MOSI, PC4=MISO, PC5=CS0 (Function 2).
+
+config T113_SPI1
+	bool "SPI 1"
+	default n
+	select SPI
+	select ARCH_HAVE_SPI_CSNCONTROL
+	---help---
+		Enable T113 SPI1 master controller.
+		Default pins: PD10=SCK, PD11=MOSI, PD12=MISO, PD13=CS0 (Function 4).
+
+config T113_SPI0_DMA
+	bool "SPI 0 DMA support"
+	default y
+	depends on T113_SPI0 && T113_DMA
+
+config T113_SPI1_DMA
+	bool "SPI 1 DMA support"
+	default y
+	depends on T113_SPI1 && T113_DMA
+
+config T113_GPIO_IRQ
+	bool "GPIO External Interrupts (PD port)"
+	default n
+	---help---
+		Enable per-pin external interrupt support on the PD port.
+		Adds t113_gpio_irq_attach/detach/enable APIs for consumer
+		drivers (e.g. touch panel CTP INT pin).  Other ports are not
+		wired in this commit.
+
+config T113_TWI0
+	bool "I2C 0 (TWI0)"
+	default n
+	select I2C
+	---help---
+		Enable T113 TWI0 master controller.
+		Default pins: PE4=SCK, PE5=SDA (Function 4).
+
+config T113_TWI1
+	bool "I2C 1 (TWI1)"
+	default n
+	select I2C
+	---help---
+		Enable T113 TWI1 master controller.
+		Default pins: PE6=SCK, PE7=SDA (Function 4).
+
+config T113_TWI2
+	bool "I2C 2 (TWI2)"
+	default n
+	select I2C
+	---help---
+		Enable T113 TWI2 master controller.
+		Default pins: PB0=SCK, PB1=SDA (Function 4).
+
+config T113_TWI3
+	bool "I2C 3 (TWI3)"
+	default n
+	select I2C
+	---help---
+		Enable T113 TWI3 master controller.
+		Default pins: PB6=SCK, PB7=SDA (Function 4).
+
+config T113_USBDEV
+	bool "USB Device Controller (MUSB OTG)"
+	default n
+	select USBDEV
+	---help---
+		Enable T113 MUSB OTG USB device controller driver.
+		Supports CDC-ACM and ADB over USB in device mode.
+
+config T113_WDT
+	bool "Watchdog Timer"
+	default n
+	select WATCHDOG
+	select ARCH_HAVE_RESET
+	---help---
+		Enable T113 watchdog timer driver.
+
+config T113_RTC
+	bool "RTC (Real-Time Clock)"
+	default n
+	select RTC
+	select RTC_DRIVER
+	select RTC_DATETIME
+	---help---
+		Enable T113 RTC driver.  Uses the on-chip LOSC-based
+		RTC with YMD/HMS registers.
+
+config T113_PWM
+	bool "PWM Controller"
+	default n
+	select PWM
+	---help---
+		Enable T113 PWM driver.  8 channels, 24MHz HOSC clock source.
+
+config T113_GPADC
+	bool "GPADC (General Purpose ADC)"
+	default n
+	select ANALOG
+	select ADC
+	---help---
+		Enable T113 12-bit GPADC driver.  Up to 4 channels.
+
+config T113_LRADC
+	bool "LRADC (Low Resolution ADC, 6-bit key scan)"
+	default n
+	select ANALOG
+	select ADC
+	---help---
+		Enable T113-S3 / R528 LRADC driver.  6-bit resolution,
+		interrupt-driven single-channel sampler intended for
+		resistor-ladder keypad scanning.  Registers as /dev/lradc0
+		and delivers raw 6-bit codes (0..63) through the standard
+		NuttX ADC upper half.  On the t113-evb board the LRADC pin
+		is wired to a 5-button voltage-ladder keypad; a board-level
+		keypad driver consumes these samples via the ADC callback.
+
+config T113_AUDIO
+	bool "Audio Codec (HPOUT + MICIN)"
+	default n
+	select AUDIO
+	select DRIVERS_AUDIO
+	select T113_DMA
+	---help---
+		Enable T113 internal audio codec driver.
+		Provides /dev/audio1 (analog mic capture, P2)
+		and /dev/audio2 (HPOUT playback, P3).
+		Uses DRQ_CODEC=7 on the system DMA controller.
+
+config T113_DMIC
+	bool "PDM DMIC Controller"
+	default n
+	select AUDIO
+	select DRIVERS_AUDIO
+	select T113_DMA
+	---help---
+		Enable T113 PDM DMIC controller driver.
+		Provides /dev/audio0 (PDM mic capture, P1).
+		Pins: PD19 (DATA0), PD20 (CLK), Func 4.
+
+config T113_CE
+	bool "Crypto Engine (CE)"
+	default n
+	select ARCH_HAVE_RNG
+	---help---
+		Enable T113 Crypto Engine driver.
+		Provides hardware-accelerated AES, SHA-256, and TRNG.
+
+if T113_CE
+
+config T113_CE_SHA256
+	bool "CE SHA-256 support"
+	default y
+	---help---
+		Enable hardware SHA-256 via the Crypto Engine.
+
+config T113_CE_TRNG
+	bool "CE TRNG support (/dev/urandom)"
+	default y
+	select DEV_URANDOM
+	---help---
+		Enable hardware True Random Number Generator via the
+		Crypto Engine.  Registers as /dev/urandom.
+
+endif # T113_CE
+
+config T113_CAN0
+	bool "CAN Bus Controller 0"
+	default n
+	select CAN
+	---help---
+		Enable T113 CAN0 controller (Allwinner sun20i-d1 CAN).
+		GPIO: PB2=TX, PB3=RX (Function 8).
+
+config T113_CAN1
+	bool "CAN Bus Controller 1"
+	default n
+	select CAN
+	---help---
+		Enable T113 CAN1 controller (Allwinner sun20i-d1 CAN).
+		GPIO: PB4=TX, PB5=RX (Function 8).
+
+if T113_CAN0 || T113_CAN1
+
+config T113_CAN_BITRATE
+	int "CAN bus bitrate (bps)"
+	default 500000
+	range 10000 1000000
+	---help---
+		CAN bus bit rate in bits per second.
+		Common values: 125000, 250000, 500000, 1000000.
+
+endif # T113_CAN0 || T113_CAN1
+
+config T113_HSTIMER0
+	bool "HSTimer 0 (High Speed Timer 0)"
+	default n
+	depends on TIMER
+	---help---
+		Enable T113 High-Speed Timer channel 0.
+		56-bit down counter clocked from AHB0 (typ 200 MHz).
+		Registered as /dev/timer0.
+
+config T113_HSTIMER1
+	bool "HSTimer 1 (High Speed Timer 1)"
+	default n
+	depends on TIMER
+	---help---
+		Enable T113 High-Speed Timer channel 1.
+		56-bit down counter clocked from AHB0 (typ 200 MHz).
+		Registered as /dev/timer1.
+
+config T113_USBHOST
+	bool "T113 USB1 Host controller (EHCI + OHCI)"
+	default n
+	depends on USBHOST
+	select USBHOST_HAVE_ASYNCH
+	---help---
+		Enable the T113-S3 USB1 port as a USB host, with EHCI (HS)
+		and OHCI (FS/LS companion) controllers sharing one root port.
+		Requires USBHOST core.
+
+if T113_USBHOST
+
+config T113_EHCI
+	bool "Enable USB1 EHCI (High Speed)"
+	default y
+
+config T113_EHCI_PREALLOCATE
+	bool "Pre-allocate EHCI QH/QTD descriptor pools"
+	default y
+	depends on T113_EHCI
+	---help---
+		Allocate EHCI queue heads and qTDs statically at build time
+		rather than lazily from the heap. Matches the SoC-specific
+		convention used by SAMA5/IMXRT/LPC43 EHCI ports.
+
+config T113_EHCI_NQHS
+	int "Number of EHCI QH structures"
+	depends on T113_EHCI
+	default 4
+
+config T113_EHCI_NQTDS
+	int "Number of EHCI QTD structures"
+	depends on T113_EHCI
+	default 12
+	help
+		Preallocated qTD descriptors shared across all queued async
+		transfers.  The EHCI driver chains multiple qTDs for any
+		data-phase > 16 KiB (see T113_QTD_MAX_XFER in t113_ehci.c),
+		so the required pool size is roughly:
+
+		    ceil(max_bulk_xfer / 16 KiB) * concurrent_transfers
+		        + 4  (SETUP + STATUS + slack)
+
+		USB MSC forceformat issues ~34 KiB SCSI data phases (3 qTDs)
+		and CD/DVD MSC can go larger; 12 covers typical two-device
+		(MSC + FT232R or MSC + HUB) workloads.  Raise if concurrent
+		USB I/O reports EHCI_TRACE1_QTDALLOC_FAILED.
+
+config T113_EHCI_BUFSIZE
+	int "EHCI internal data buffer size"
+	depends on T113_EHCI
+	default 128
+
+config T113_OHCI
+	bool "Enable USB1 OHCI (Full/Low Speed companion)"
+	default y
+
+config T113_OHCI_NEDS
+	int "Number of OHCI Endpoint Descriptor (ED) structures"
+	depends on T113_OHCI
+	default 4
+
+config T113_OHCI_NTDS
+	int "Number of OHCI Transfer Descriptor (TD) structures"
+	depends on T113_OHCI
+	default 8
+
+config T113_OHCI_TDBUFFERS
+	int "Number of OHCI request/descriptor buffers"
+	depends on T113_OHCI
+	default 6
+	---help---
+	  Shared pool of small (TDBUFSIZE) buffers used by
+	  DRVR_ALLOC. Each class driver that claims a persistent
+	  ctrlreq consumes one slot for the device's lifetime, plus
+	  enumeration transiently borrows one more. With hub + FT232R
+	  enabled, 2 slots is too tight; 6 leaves headroom for a
+	  compound device and concurrent enumeration.
+
+config T113_OHCI_TDBUFSIZE
+	int "OHCI request/descriptor buffer size (bytes)"
+	depends on T113_OHCI
+	default 128
+
+endif # T113_USBHOST
+
+config T113_HWSPINLOCK
+	bool "T113 hardware spinlock driver"
+	default n
+	---help---
+	  Enables the T113-S3 32-lock hardware spinlock module at
+	  0x03005000. Provides 32 hwspinlock_dev_s instances accessible
+	  via the standard NuttX hwspinlock framework.
+
+config T113_AMP
+	bool "T113 AMP mode (separate NuttX image per CPU, hwspinlock for shared regs)"
+	default n
+	depends on !SMP && !BMP
+	select T113_HWSPINLOCK
+	---help---
+	  Enables Asymmetric Multi-Processing where CPU0 and CPU1 each
+	  run an independent NuttX image with separate kernel state.
+	  Selects T113_HWSPINLOCK so cross-image shared-register access
+	  (CCU, etc.) is serialized via the hardware spinlock module.
+	  Drivers continue to use the t113_ccu_* helpers; the helpers
+	  switch their backing primitive automatically.
+
+	  Mutually exclusive with SMP and BMP: AMP runs two independent
+	  NuttX images, each linked to a different DRAM region, while
+	  SMP/BMP run a single image across both CPUs.
+
+choice
+	prompt "T113 rptun role (this image)"
+	optional
+	depends on RPTUN && !BMP
+	---help---
+		Compile-time rptun role for the multi-image splits.  A master image
+		(core0-NuttX) ELF-loads one or more remote cores; a slave image is the
+		remote core that a master loads.  BMP decides the role at run time by
+		this_cpu() and does not select here; single-core images select none.
+
+config T113_RPTUN_SLAVE
+	bool "slave (this NuttX image is ELF-loaded by a master)"
+	depends on !SMP
+	---help---
+		This image is the remote NuttX slave that a master (Linux remoteproc
+		or core0-NuttX) ELF-loads into the carveout.  It carries a static
+		ver=1 .resource_table section, skips master-owned clock/GIC/DMA
+		bring-up, and needs a Normal-NC remap of the shared vring window.
+		A slave is a single-core image, so it is incompatible with SMP.
+
+endchoice # T113 rptun role
+
+config T113_RPTUN_MASTER
+	bool
+	---help---
+		Derived (no prompt): set automatically by T113_RPTUN_CORE1 and/or
+		T113_RPTUN_DSP via select, so MASTER == (CORE1 || DSP) always holds.
+		core0-NuttX registers an rptun device per remote core it loads and
+		starts each with "rptun start /dev/rptun/<core>".  Coexists with SMP
+		(the AP side may be SMP while still mastering a remote core such as
+		the DSP).  There is no "bare master" with no target to load.
+
+config T113_RPTUN_CORE1
+	bool "master loads the CPU1 NuttX image (core1)"
+	default n
+	depends on RPTUN_LOADER
+	select T113_RPTUN_MASTER
+	---help---
+		Register /dev/rptun/core1 on core0 so the CPU1 NuttX image can be
+		loaded as a standard ELF and started with
+		"rptun start /dev/rptun/core1", the same firmware Linux remoteproc
+		loads.  The loader resolves the entry from the ELF e_entry; CPU1 is
+		released from reset there.
+
+config T113_RPTUN_CORE1_FIRMWARE_PATH
+	string "CPU1 NuttX (core1) firmware ELF path"
+	default "/fw/core1.elf"
+	depends on T113_RPTUN_CORE1
+	---help---
+		Filesystem path to the CPU1 NuttX firmware ELF that the rptun loader
+		opens when core1 is started.  Defaults to /fw/core1.elf, packed into
+		the fwromfs image on NAND mtd1 and mounted read-only at /fw.  This is
+		the same ELF Linux remoteproc loads from /lib/firmware (byte-identical
+		build artifact).
+
+config T113_RPTUN_DSP
+	bool "master loads the HiFi4 DSP"
+	default n
+	depends on RPTUN_LOADER
+	select T113_RPTUN_MASTER
+	---help---
+		Register /dev/rptun/dsp on core0 so the on-chip Cadence HiFi4 DSP
+		(aw_axi_cfg0, LX7.1.4) can be loaded as a standard ELF and started
+		with "rptun start /dev/rptun/dsp".  Enables the DSP clock/reset
+		sequencing (t113_dsp_release / t113_dsp_halt) and the MSGBOX rptun
+		doorbell.  On this board the DSP is brought up only through rptun.
+
+config T113_RPTUN_DSP_FIRMWARE_PATH
+	string "HiFi4 DSP firmware ELF path"
+	default "/fw/dsp.elf"
+	depends on T113_RPTUN_DSP
+	---help---
+		Filesystem path to the HiFi4 DSP firmware ELF that the rptun loader
+		opens when the DSP is started.  Defaults to /fw/dsp.elf, packed into
+		the fwromfs image on NAND mtd1 and mounted read-only at /fw.
+
+config T113_MSGBOX_IRQ
+	int "MSGBOX -> CPUX(ARM) GIC interrupt number"
+	default 32
+	depends on T113_RPTUN_DSP
+	---help---
+		NuttX GIC IRQ number for the ARM-side MSGBOX interrupt.  The MSGBOX is
+		the DSP rptun doorbell.  GIC ID 32 (SPI 0) is verified on hardware.
+
+config T113_RPTUN_CORE1_CARVEOUT_BASE
+	hex "core1 rproc carveout base (vrings + rpmsg buffer pool)"
+	default 0x47E00000
+	depends on T113_RPTUN_SLAVE || T113_RPTUN_CORE1
+	---help---
+	  Physical base of the no-map carveout shared between core0 and the CPU1
+	  NuttX slave (core1).  The bottom 1 MB section holds vring0, vring1 and
+	  the rpmsg buffer pool; the slave image (CONFIG_RAM_START) is linked
+	  above it.  Must equal the master's reserved-memory region and the
+	  vring/carveout addresses in the static resource_table.
+
+	  The carveout extent (size) is owned by the master's reserved-memory
+	  node -- the single source of truth for the DDR split.  NuttX only needs
+	  this base plus its own RAM_START/RAM_SIZE; the linker asserts the image
+	  stays above the shared window and inside installed DRAM.
+
+	  T113_RPTUN_CORE1 (core0 NuttX as the core1 master) reuses this base:
+	  core0 loads the CPU1 ELF into the slave image span above it and shares
+	  the vring window, so it maps [base, DDR top) Non-Cacheable.
+
+menuconfig T113_SMHC
+	bool "SMHC host controller"
+	default n
+	select ARCH_HAVE_SDIO
+	select SDIO_DMA
+	---help---
+		Enable Allwinner SMHC host driver for T113-S3.  Supports
+		SMHC0 (microSD), SMHC1 (SDIO WiFi), SMHC2 (eMMC).
+
+if T113_SMHC
+
+config T113_SMHC0
+	bool "SMHC0 (microSD, PF0-PF5 Func2)"
+	default n
+	---help---
+		Enable SMHC0 instance.  Shares pins with JTAG and UART0
+		on PF0-PF5; when enabled, JTAG probe access is lost.
+
+config T113_SMHC1
+	bool "SMHC1 (SDIO WiFi, PG0-PG5 Func2)"
+	default n
+	---help---
+		Enable SMHC1 instance.  Used by the RTL8723DS WiFi module
+		on R528 HMI EVB4.
+
+config T113_SMHC_DMA_DESC_COUNT
+	int "Number of DMA descriptors per instance"
+	default 128
+	range 4 512
+	---help---
+		Size of the per-instance IDMAC descriptor ring.  Each
+		descriptor transfers up to 8188 bytes (T113_SMHC_DES1_SIZE_MAX),
+		so the ring length caps the maximum single-shot DMA transfer
+		size at COUNT * 8188 bytes.  Default 128 -> ~1 MiB per CMD18 /
+		CMD25, large enough that mmcsd does not slice typical >=256 KiB
+		dd / fread requests.  Each descriptor is 16 bytes so the static
+		array costs COUNT * 16 B per enabled SMHC instance.
+
+config T113_SMHC_SELFTEST
+	bool "SMHC0 self-test (CMD0/CMD8/ACMD41 enumeration on init)"
+	default n
+	depends on T113_SMHC0
+	---help---
+		Bring-up self-test that exercises the command/response path
+		on SMHC0 right after t113_smhc_initialize() returns.  Issues
+		CMD0 (GO_IDLE), CMD8 (SEND_IF_COND, expecting echo 0x1AA) and
+		a 100-iteration CMD55+ACMD41 loop until OCR bit 31 (init done)
+		is observed.  Diagnostic only -- enable when bringing up a
+		new microSD slot to verify wiring before letting mmcsd_sdio
+		take over.  Default n.
+
+config T113_SMHC_SELFTEST_SDIO
+	bool "SMHC0 SDIO self-test (CMD52/CMD53 protocol smoke)"
+	default n
+	depends on T113_SMHC_SELFTEST
+	---help---
+		Additional SDIO-side self-test that issues CMD52 reads against
+		function 0 (CCCR) and an invalid function 7, plus a CMD53
+		byte-mode 4-byte read.  No SDIO device is present on SMHC0 (it
+		is wired to a microSD socket), so the test only proves that the
+		protocol path returns control to the caller in finite time --
+		i.e. the controller never hangs on a non-responsive bus.
+		Diagnostic only.  Default n.
+
+config T113_SMHC_SDCLK_HZ
+	int "SD transfer SDCLK frequency in Hz (HS-SDR25 default 50 MHz)"
+	default 50000000
+	range 25000000 100000000
+	---help---
+		SDCLK frequency for SD CMD17/18/24/25 data-phase transfer.
+		The default 50000000 (50 MHz) is the SD spec ceiling for
+		HS-SDR25 at 3.3V signalling.
+
+		Values above 50 MHz are OUT OF SPEC at 3.3V (SD Physical Layer
+		caps SDR at 50 MHz on the 3.3V rail; the 100 MHz UHS-I SDR50
+		mode requires 1.8V signalling, which the T113-EVB hardware
+		does not support).  Some cards still tolerate 75/100 MHz
+		cleanly; others may produce CRC errors or fail to respond.
+
+		Used as both a production knob (50 MHz, in-spec) and as a
+		diagnostic to bracket whether the throughput plateau is
+		SDCLK-bound or host-side overhead-bound.
+
+		Common values:
+		  50000000  HS-SDR25 in-spec (production)
+		  75000000  Overclock, mild risk
+		  100000000 Overclock, ~2x throughput, card-dependent
+
+endif # T113_SMHC
+
+endmenu # Allwinner T113 Peripheral Support
+
+config T113_DDR_MAPSIZE
+	int "Installed DDR size (bytes)"
+	default 134217728
+	range 134217728 536870912
+	---help---
+		Physical DDR size installed on board.
+		128 MB = 134217728
+		256 MB = 268435456
+		512 MB = 536870912
+
+config T113_BOOT0
+	bool "Build as boot0 (eGON header, SRAM linker script)"
+	default n
+	select LIBC_ATOMIC_IRQ
+	---help---
+		Build this binary as a boot0/SPL for BROM loading.
+		Adds eGON header (t113_boot0.S) at binary start,
+		uses sram.ld (all sections in 160KB SRAM at 0x20000),
+		and runs mksunxi.py to patch the BROM checksum.
+
+		Two sub-modes:
+		- NOOS=y: bare-metal boot0 (t113_load.c: clock/DDR/NAND init)
+		- NOOS=n: minimal NuttX boot0 (uses NuttX SPI/MTD drivers)
+
+		Disable for standard NuttX AP binary (loaded to DDR by
+		boot0 or xfel).
+
+config T113_BOOT0_NOOS
+	bool "Bare-metal boot0 (no NuttX scheduler)"
+	default n
+	depends on T113_BOOT0
+	---help---
+		Link the bare-metal boot0 implementation (t113_load.c)
+		which handles clock init, DDR init, SPI NAND read, and
+		jump to DDR without any NuttX infrastructure.
+		Compiled with -O3 -fno-lto -fno-stack-protector.
+
+		When disabled with T113_BOOT0=y, a minimal NuttX runs
+		from SRAM and uses NuttX drivers for storage access.
+
+config T113_FEL_RESCUE_THRESHOLD
+	int "Abnormal reboot threshold to force FEL"
+	default 0
+	range 0 255
+	---help---
+		Detect crash-loops early in arm_boot() and drop the device
+		into BROM FEL mode after this many consecutive abnormal
+		reboots, so it can always be recovered with `xfel write`.
+
+		An "abnormal" reboot is any reset path that does NOT carry
+		the BOARDIOC_SOFTRESETCAUSE_USER_REBOOT marker AND happens
+		AFTER the system has booted at least once: silent WDT,
+		ASSERT, PANIC (incl. CONFIG_TTY_FORCE_PANIC), HardFault,
+		and xfel reset without USER marker all count.  Cold POR
+		(true power-on, VDD_RTC was lost) does NOT count — it is
+		the first boot, not a crash.  Reboots more than 30 seconds
+		apart are considered cooled-down and reset the counter.
+
+		For host-driven workflows that want to enter boot0 cleanly
+		via xfel reset (e.g. after `xfel spinand write`), pre-write
+		the USER marker so boot0 short-circuits the count path:
+
+		    xfel write32 0x07090100 0x5AA50000   # USER marker
+		    xfel reset
+
+		State persists across WDT in three RTC GP_DATA registers
+		(VDD_RTC domain): GP_DATA[0] boot marker, GP_DATA[1] count
+		+ magic, GP_DATA[2] last boot timestamp.
+
+		Special values:
+		    0  - Disable the feature entirely (Kconfig default).
+		         Set this in production after firmware is stable.
+		    1  - Force FEL on the very first crash after a
+		         successful boot.  This is the recommended value
+		         for development boards (set in the boot0-nuttx
+		         defconfig): any crash → FEL → host can re-flash
+		         via `xfel ddr && xfel write && xfel exec` without
+		         needing JLink.  Combine with CONFIG_TTY_FORCE_PANIC
+		         to force-FEL on demand from serial.  Cold POR is
+		         exempt and boots normally.
+		    N  - Force FEL after N abnormal reboots in <30 s
+		         windows (5 is a reasonable production value if
+		         the rescue is kept enabled at all).
+
+		The chip-level RTC helpers it uses live in t113_rtc.c and
+		access GP_DATA / YMD / HMS / LOSC_CTRL directly via the
+		LOSC ACC handshake, so this option works with or without
+		CONFIG_T113_RTC (the rtc_lowerhalf framework driver).
+
+		Last-resort recovery: if the rescue path itself crashes
+		(e.g. a hardware fault inside RTC MMIO) the device still
+		recovers via the BROM FEL strap — hold the FEL button at
+		POR and `xfel write` always works because BROM scans USB
+		unconditionally on cold boot.
+
+config T113_DE
+	bool "T113 Display Engine (DE v2x)"
+	default n
+	---help---
+		Enable T113 Display Engine driver. Required for any display
+		output. Provides framebuffer interface via /dev/fb0.
+
+config T113_TCON
+	bool "T113 TCON-LCD0"
+	default n
+	depends on T113_DE
+	---help---
+		Enable T113 TCON-LCD0 timing controller. Pairs with the
+		MIPI DSI host for DSI panels.
+
+config T113_DSI
+	bool "T113 MIPI DSI host"
+	default n
+	depends on T113_TCON
+	select MIPI_DSI
+	---help---
+		Enable T113 MIPI DSI host controller driver. Implements the
+		mipi_dsi_host interface from drivers/video/mipidsi/.
+
+endif # ARCH_CHIP_T113

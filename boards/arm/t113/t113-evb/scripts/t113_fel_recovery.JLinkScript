@@ -1,0 +1,41 @@
+/* T113 FEL Recovery — write FEL magic via AHB-AP then WDT reset.
+ * Works even when CPU is completely crashed (data abort, deadlock, etc.)
+ * Requires bootloader firmware on NAND with FEL magic check in boot0.
+ *
+ * Flow: AHB-AP write magic → WDT disable → WDT reset
+ *       → BROM → boot0 → FEL magic check → BROM FEL
+ *
+ * After JLink exits, caller should: sleep 1 && xfel version
+ */
+
+void InitTarget(void) {
+	/* Select AHB-AP (AP[0]) for memory-mapped writes */
+	JLINK_CORESIGHT_WriteDP(2, 0x00000000);
+	JLINK_CORESIGHT_WriteAP(0, 0x23000052);
+
+	/* Write FEL magic to GP_DATA_REG[0] (0x07090100, VDD_RTC domain)
+	 * boot0 checks: [31:16]=0x5AA5 (magic), [15:0]=0x0001 (FEL) */
+	Report(">>> FEL magic -> GP_DATA_REG[0] <<<");
+	JLINK_CORESIGHT_WriteAP(1, 0x07090100);
+	JLINK_CORESIGHT_WriteAP(3, 0x5AA50001);
+
+	/* Disable WDT (required by T113 User Manual 3.6.6.11) */
+	JLINK_CORESIGHT_WriteAP(1, 0x020500B8);
+	JLINK_CORESIGHT_WriteAP(3, 0x16AA0000);
+
+	/* WDT soft reset — chip resets immediately */
+	Report(">>> WDT reset <<<");
+	JLINK_CORESIGHT_WriteAP(1, 0x020500A8);
+	JLINK_CORESIGHT_WriteAP(3, 0x16AA0001);
+
+}
+
+int ConfigTargetSettings(void) {
+	Report("T113 FEL Recovery (AHB-AP)");
+	CPU = CORTEX_A7;
+	CORESIGHT_CoreBaseAddr = 0x81410000;
+	CORESIGHT_AddAP(0, CORESIGHT_AHB_AP);
+	CORESIGHT_AddAP(1, CORESIGHT_APB_AP);
+	CORESIGHT_IndexAPBAPToUse = 1;
+	return 0;
+}

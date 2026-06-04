@@ -1,0 +1,57 @@
+if ARCH_BOARD_T113_EVB
+
+source "boards/arm/t113/t113-evb/uartring/Kconfig"
+
+config T113_LRADC_KEYPAD
+	bool "LRADC resistor-ladder keypad (5 keys)"
+	default n
+	depends on T113_LRADC
+	select INPUT
+	select INPUT_KEYBOARD
+	---help---
+		Register /dev/kbd0 fed by the on-board LRADC 5-button
+		resistor ladder (VOL+/VOL-/MENU/ENTER/HOME).  Maps raw
+		6-bit LRADC samples to standard Linux keycodes via the
+		NuttX keyboard upper-half.
+
+config T113_CTP
+	bool "Capacitive Touch Panel on J27 (TWI2 PD20/PD21)"
+	default n
+	depends on T113_TWI2 && T113_GPIO_IRQ
+	---help---
+		Enable the board glue for the MIPI FFC capacitive touch panel.
+		Drives CTP-RST (PD18) and CTP-INT (PD19), brings up TWI2, and
+		registers either the Goodix GT9xx or FocalTech FT5x06 upper
+		driver as /dev/input0.
+
+if T113_CTP
+
+choice
+	prompt "CTP IC family"
+	default T113_CTP_TLSC6X
+
+config T113_CTP_GT9XX
+	bool "Goodix GT911 / GT9xx (I2C 0x5D)"
+	select INPUT_GT9XX
+	---help---
+		Enable the Goodix GT9xx upper driver; uses the GT911 address
+		latch trick (INT=LOW at reset release -> 0x5D).
+
+config T113_CTP_FT5X06
+	bool "FocalTech FT5x06 / FT6236 (I2C 0x38)"
+	select INPUT_FT5X06
+	---help---
+		Enable the FocalTech FT5x06 upper driver.  No address trick.
+
+config T113_CTP_TLSC6X
+	bool "TLSC6X (I2C 0x2E)"
+	select INPUT_TLSC6X
+	---help---
+		Enable the TLSC6X upper driver for the capacitive touch panel
+		on J27.
+
+endchoice
+
+endif # T113_CTP
+
+endif

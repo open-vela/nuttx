@@ -1,0 +1,27 @@
+if(CONFIG_EXAMPLES_UARTRING)
+  nuttx_add_application(
+    NAME
+    uartring
+    PRIORITY
+    ${CONFIG_EXAMPLES_UARTRING_PRIORITY}
+    STACKSIZE
+    ${CONFIG_EXAMPLES_UARTRING_STACKSIZE}
+    MODULE
+    ${CONFIG_EXAMPLES_UARTRING}
+    SRCS
+    uartring_main.c)
+endif()
+
+if(CONFIG_EXAMPLES_UARTDIAG)
+  nuttx_add_application(
+    NAME
+    uartdiag
+    PRIORITY
+    ${CONFIG_EXAMPLES_UARTDIAG_PRIORITY}
+    STACKSIZE
+    ${CONFIG_EXAMPLES_UARTDIAG_STACKSIZE}
+    MODULE
+    ${CONFIG_EXAMPLES_UARTDIAG}
+    SRCS
+    uartdiag_main.c)
+endif()

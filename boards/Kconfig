@@ -1466,6 +1466,12 @@ config ARCH_BOARD_PCDUINO_A10
 	select ARCH_HAVE_IRQBUTTONS
 	---help---
 		This is the port of NuttX to the Allwinner A10-based pcDuino v1
+
+config ARCH_BOARD_T113_EVB
+	bool "T113-S3 EVB"
+	depends on ARCH_CHIP_T113S3
+	---help---
+		Allwinner T113-S3 evaluation board (also R528). Cortex-A7, DDR3.
 		board.  See http://www.pcduino.com/ for information about pcDuino Lite, v1,
 		and v2.  I have not compared these boards in detail, but I believe that
 		the differences are cosmetic.  This port was developed on the v1 board,
@@ -3597,6 +3603,7 @@ config ARCH_BOARD
 	default "teensy-3.x"                if ARCH_BOARD_TEENSY_3X
 	default "teensy-4.x"                if ARCH_BOARD_TEENSY_4X
 	default "teensy-lc"                 if ARCH_BOARD_TEENSY_LC
+	default "t113-evb"                  if ARCH_BOARD_T113_EVB
 	default "tm4c123g-launchpad"        if ARCH_BOARD_TM4C123G_LAUNCHPAD
 	default "tm4c1294-launchpad"        if ARCH_BOARD_TM4C1294_LAUNCHPAD
 	default "tm4c129e-launchpad"        if ARCH_BOARD_TM4C129E_LAUNCHPAD
@@ -3678,6 +3685,9 @@ comment "Board-Specific Options"
 
 if ARCH_BOARD_PCDUINO_A10
 source "boards/arm/a1x/pcduino-a10/Kconfig"
+endif
+if ARCH_BOARD_T113_EVB
+source "boards/arm/t113/t113-evb/Kconfig"
 endif
 if ARCH_BOARD_BEAGLEBONE_BLACK
 source "boards/arm/am335x/beaglebone-black/Kconfig"

@@ -169,9 +169,19 @@ if(CONFIG_MOTOROLA_SREC)
     COMMENT "Regenerate nuttx.srec")
 endif()
 if(CONFIG_RAW_BINARY)
-  add_custom_command(
-    TARGET final_nuttx
-    POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} -O binary final_nuttx nuttx.bin DEPENDS nuttx-bin
-    COMMENT "Regenerate nuttx.bin")
+  get_property(_mksunxi GLOBAL PROPERTY T113_MKSUNXI_CMD)
+  if(_mksunxi)
+    add_custom_command(
+      TARGET final_nuttx
+      POST_BUILD
+      COMMAND ${CMAKE_OBJCOPY} -O binary final_nuttx nuttx.bin DEPENDS nuttx-bin
+      COMMAND ${_mksunxi} ${CMAKE_BINARY_DIR}/nuttx.bin
+      COMMENT "Regenerate nuttx.bin + eGON checksum")
+  else()
+    add_custom_command(
+      TARGET final_nuttx
+      POST_BUILD
+      COMMAND ${CMAKE_OBJCOPY} -O binary final_nuttx nuttx.bin DEPENDS nuttx-bin
+      COMMENT "Regenerate nuttx.bin")
+  endif()
 endif()

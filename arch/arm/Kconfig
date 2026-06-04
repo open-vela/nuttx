@@ -76,6 +76,22 @@ config ARCH_CHIP_A1X
 	---help---
 		Allwinner A1X family: A10, A10S (A12), A13 (ARM Cortex-A8)
 
+config ARCH_CHIP_T113
+	bool "Allwinner T113-S3"
+	select ARCH_CORTEXA7
+	select ARM_HAVE_NEON
+	select ARCH_HAVE_IRQPRIO
+	select ARCH_HAVE_LOWVECTORS
+	select ARCH_HAVE_FETCHADD
+	select ARCH_HAVE_SDRAM
+	select ARMV7A_HAVE_GICv2
+	depends on BOOT_RUNFROMSDRAM || BOOT_RUNFROMISRAM
+	select ARCH_HAVE_ADDRENV
+	select ARCH_NEED_ADDRENV_MAPPING
+	---help---
+		Allwinner T113-S3 (also R528): ARM Cortex-A7, GIC-400 (GICv2), DDR3.
+		First ARCH_CORTEXA7 chip in community NuttX.
+
 config ARCH_CHIP_AM335X
 	bool "TI AM335X"
 	select ARCH_CORTEXA8
@@ -1101,6 +1117,7 @@ config ARCH_FAMILY_COMMON
 config ARCH_CHIP
 	string
 	default "a1x"		if ARCH_CHIP_A1X
+	default "t113"		if ARCH_CHIP_T113
 	default "am335x"	if ARCH_CHIP_AM335X
 	default "fvp-v8r-aarch32"	if ARCH_CHIP_FVP_ARMV8R_AARCH32
 	default "c5471"		if ARCH_CHIP_C5471
@@ -1512,6 +1529,9 @@ source "arch/arm/src/arm/Kconfig"
 endif
 if ARCH_CHIP_A1X
 source "arch/arm/src/a1x/Kconfig"
+endif
+if ARCH_CHIP_T113
+source "arch/arm/src/t113/Kconfig"
 endif
 if ARCH_CHIP_AM335X
 source "arch/arm/src/am335x/Kconfig"

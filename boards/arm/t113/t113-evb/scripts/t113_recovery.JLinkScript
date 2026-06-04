@@ -1,0 +1,27 @@
+/* T113 Crash Recovery — WDT reset via AHB-AP, no FEL magic.
+ * Use when NAND is empty (WDT → BROM → no eGON → FEL).
+ * If NAND has boot0, use t113_fel_recovery.JLinkScript instead.
+ *
+ * After JLink exits, caller should: sleep 1 && xfel version
+ */
+
+void InitTarget(void) {
+	/* AHB-AP: disable WDT then soft reset (T113 UM 3.6.6.11) */
+	Report(">>> WDT reset for crash recovery <<<");
+	JLINK_CORESIGHT_WriteDP(2, 0x00000000);
+	JLINK_CORESIGHT_WriteAP(0, 0x23000052);
+	JLINK_CORESIGHT_WriteAP(1, 0x020500B8);
+	JLINK_CORESIGHT_WriteAP(3, 0x16AA0000);
+	JLINK_CORESIGHT_WriteAP(1, 0x020500A8);
+	JLINK_CORESIGHT_WriteAP(3, 0x16AA0001);
+}
+
+int ConfigTargetSettings(void) {
+	Report("T113 Recovery (AHB-AP WDT)");
+	CPU = CORTEX_A7;
+	CORESIGHT_CoreBaseAddr = 0x81410000;
+	CORESIGHT_AddAP(0, CORESIGHT_AHB_AP);
+	CORESIGHT_AddAP(1, CORESIGHT_APB_AP);
+	CORESIGHT_IndexAPBAPToUse = 1;
+	return 0;
+}

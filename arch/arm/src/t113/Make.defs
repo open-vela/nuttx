@@ -1,0 +1,138 @@
+############################################################################
+# arch/arm/src/t113/Make.defs
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+############################################################################
+
+include armv7-a/Make.defs
+
+CHIP_ASRCS  =
+CHIP_CSRCS  = t113_boot.c t113_ccu.c t113_clk.c t113_irq.c t113_lowputc.c
+CHIP_CSRCS += t113_serial.c t113_idle.c t113_timerisr.c
+CHIP_CSRCS += t113_systemreset.c
+
+ifeq ($(CONFIG_T113_BOOT0),y)
+CHIP_CSRCS += t113_load.c
+CHIP_ASRCS += t113_boot0.S
+t113_load.c_CFLAGS = -fno-lto -Os -fno-stack-protector
+endif
+
+ifeq ($(CONFIG_T113_DMA),y)
+CHIP_CSRCS += t113_dma.c
+endif
+
+ifneq ($(CONFIG_UP),y)
+CHIP_CSRCS += t113_cpuboot.c
+else ifeq ($(CONFIG_T113_RPTUN_CORE1),y)
+# The cpu1 rptun ELF master runs in CONFIG_UP=y but needs t113_release_cpu1
+# to start CPU1 after the loader resolves the entry.
+CHIP_CSRCS += t113_cpuboot.c
+endif
+
+ifneq (,$(filter y,$(CONFIG_T113_SPI0) $(CONFIG_T113_SPI1)))
+CHIP_CSRCS += t113_spi.c
+endif
+
+ifneq (,$(filter y,$(CONFIG_T113_TWI0) $(CONFIG_T113_TWI1) $(CONFIG_T113_TWI2) $(CONFIG_T113_TWI3)))
+CHIP_CSRCS += t113_i2c.c
+endif
+
+ifeq ($(CONFIG_T113_USBDEV),y)
+CHIP_CSRCS += t113_usbdev.c
+endif
+
+ifeq ($(CONFIG_T113_WDT),y)
+CHIP_CSRCS += t113_wdt.c
+endif
+
+CHIP_CSRCS += t113_gpio.c
+
+T113_RTC_NEEDED :=
+ifeq ($(CONFIG_T113_RTC),y)
+T113_RTC_NEEDED := y
+endif
+ifneq ($(CONFIG_T113_FEL_RESCUE_THRESHOLD),)
+ifneq ($(CONFIG_T113_FEL_RESCUE_THRESHOLD),0)
+T113_RTC_NEEDED := y
+CHIP_CSRCS += t113_fel.c
+endif
+endif
+
+ifeq ($(T113_RTC_NEEDED),y)
+CHIP_CSRCS += t113_rtc.c
+endif
+
+ifeq ($(CONFIG_T113_PWM),y)
+CHIP_CSRCS += t113_pwm.c
+endif
+
+ifeq ($(CONFIG_T113_GPADC),y)
+CHIP_CSRCS += t113_adc.c
+endif
+
+ifneq (,$(filter y,$(CONFIG_T113_CAN0) $(CONFIG_T113_CAN1)))
+CHIP_CSRCS += t113_can.c
+endif
+
+ifeq ($(CONFIG_T113_CE),y)
+CHIP_CSRCS += t113_ce.c
+endif
+
+ifeq ($(CONFIG_T113_DSI),y)
+CHIP_CSRCS += t113_dsi.c
+endif
+
+ifeq ($(CONFIG_T113_TCON),y)
+CHIP_CSRCS += t113_tcon.c
+endif
+
+ifeq ($(CONFIG_T113_DE),y)
+CHIP_CSRCS += t113_de.c
+endif
+
+ifneq (,$(filter y,$(CONFIG_T113_HSTIMER0) $(CONFIG_T113_HSTIMER1)))
+CHIP_CSRCS += t113_hstimer.c
+endif
+
+ifeq ($(CONFIG_T113_USBHOST),y)
+CHIP_CSRCS += t113_usbhost.c t113_usbhost_trace.c
+endif
+
+ifeq ($(CONFIG_T113_EHCI),y)
+CHIP_CSRCS += t113_ehci.c
+endif
+
+ifeq ($(CONFIG_T113_OHCI),y)
+CHIP_CSRCS += t113_ohci.c
+endif
+
+ifeq ($(CONFIG_T113_HWSPINLOCK),y)
+CHIP_CSRCS += t113_hwspinlock.c
+endif
+
+ifeq ($(CONFIG_T113_AUDIO),y)
+CHIP_CSRCS += t113_audio.c
+endif
+
+ifeq ($(CONFIG_T113_DMIC),y)
+CHIP_CSRCS += t113_dmic.c
+endif
+
+ifeq ($(CONFIG_T113_RPTUN_DSP),y)
+CHIP_CSRCS += t113_dsp.c
+endif

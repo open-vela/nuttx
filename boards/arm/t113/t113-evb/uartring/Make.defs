@@ -1,0 +1,3 @@
+ifneq ($(CONFIG_EXAMPLES_UARTRING),)
+CONFIGURED_APPS += $(APPDIR)/examples/uartring
+endif

@@ -1,0 +1,53 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+config EXAMPLES_UARTRING
+	tristate "UART ring test"
+	default n
+	depends on SERIAL_TERMIOS
+	---help---
+		UART ring loopback test.  Wires N UARTs in a ring
+		(each TX to the next RX) and sends a known pattern
+		through the chain to verify data integrity and
+		measure throughput at the configured baud rate.
+
+if EXAMPLES_UARTRING
+
+config EXAMPLES_UARTRING_STACKSIZE
+	int "Stack size"
+	default 4096
+
+config EXAMPLES_UARTRING_PRIORITY
+	int "Task priority"
+	default 100
+
+config EXAMPLES_UARTRING_BAUD
+	int "Default baud rate"
+	default 115200
+
+config EXAMPLES_UARTRING_SIZE
+	int "Default transfer size in bytes"
+	default 1048576
+
+endif
+
+config EXAMPLES_UARTDIAG
+	tristate "UART diagnostic"
+	default n
+	---help---
+		Minimal UART TX/RX diagnostic tool.
+		No threads, no termios — raw open/write/read.
+
+if EXAMPLES_UARTDIAG
+
+config EXAMPLES_UARTDIAG_STACKSIZE
+	int "Stack size"
+	default 4096
+
+config EXAMPLES_UARTDIAG_PRIORITY
+	int "Task priority"
+	default 100
+
+endif
