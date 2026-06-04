@@ -28,7 +28,11 @@
 
 #include "arm.h"
 #include "sctlr.h"
-#include "mmu.h"
+#ifdef CONFIG_ARCH_USE_MMU
+#  include "mmu.h"
+#else
+#  include "cp15_cacheops.h"
+#endif
 #include "chip.h"
 #include "arm_internal.h"
 
@@ -60,6 +64,7 @@
  *    - Clear .bss section
  */
 
+#ifdef CONFIG_ARCH_USE_MMU
 #ifdef CONFIG_BOOT_RUNFROMFLASH
   /* Check for the identity mapping:  For this configuration, this would be
    * the case where the virtual beginning of FLASH is the same as the physical
@@ -124,6 +129,7 @@
 #  endif
 
 #endif
+#endif /* CONFIG_ARCH_USE_MMU */
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -232,6 +238,7 @@ __cpu0_start:
 	mcr		CP15_SCTLR(r0)
 	isb
 
+#ifdef CONFIG_ARCH_USE_MMU
 	/* Clear the 16K level 1 page table */
 
 	ldr		r5, .LCppgtable			/* r5=phys. page table */
@@ -354,6 +361,7 @@ __cpu0_start:
 
 #endif /* CONFIG_BOOT_RUNFROMFLASH && !CONFIG_BOOT_SDRAM_DATA */
 #endif /* CONFIG_ARCH_ROMPGTABLE */
+#endif /* CONFIG_ARCH_USE_MMU */
 
 	/* The following logic will set up the ARMv7-A for normal operation.
 	 *
@@ -383,15 +391,23 @@ __cpu0_start:
 	mcr		CP15_BPIALLIS(r0)	/* Invalidate entire branch prediction array */
 	mcr		CP15_ICIALLUIS(r0)	/* Invalidate I-cache */
 #else
+#  ifdef CONFIG_ARCH_USE_MMU
 	mcr		CP15_TLBIALL(r0,c7)	/* Invalidate the entire unified TLB */
 	mcr		CP15_TLBIALL(r0,c6)
 	mcr		CP15_TLBIALL(r0,c5)
+#  endif
 	mcr		CP15_BPIALL(r0)		/* Invalidate entire branch prediction array */
 	mcr		CP15_ICIALLU(r0)	/* Invalidate I-cache */
 #endif
 
+#ifndef CONFIG_ARCH_USE_MMU
+	mov		r1, CP15_CACHE_INVALIDATE
+	bl		cp15_dcache_op_level
+#endif
+
 	isb
 
+#ifdef CONFIG_ARCH_USE_MMU
 	/* Load the page table address.
 	 *
 	 * NOTES:
@@ -560,10 +576,65 @@ __cpu0_start:
 
 	mov		pc, lr
 
+#else /* CONFIG_ARCH_USE_MMU */
+
+	/* MMU-disabled boot path: no page table is built and the MMU is left
+	 * off (SCTLR.M = 0).  Configure the system control register directly
+	 * and branch to .Lvstart.  All accesses run Strongly-ordered, so the
+	 * D-cache is bypassed and is not enabled here.
+	 */
+
+	mrc		CP15_SCTLR(r0)			/* Get control register */
+
+	/* Clear bits to reset values.  Warm reset is IMPDEF on Cortex-A and
+	 * may leave M set with no valid TTBR0, so clear it explicitly before
+	 * the first memory access.
+	 */
+
+	bic		r0, r0, #(SCTLR_M)
+	bic		r0, r0, #(SCTLR_A  | SCTLR_C)
+	bic		r0, r0, #(SCTLR_SW | SCTLR_I   | SCTLR_V   | SCTLR_RR | SCTLR_HA)
+	bic		r0, r0, #(SCTLR_EE | SCTLR_TRE | SCTLR_AFE | SCTLR_TE)
+
+#ifndef CONFIG_ARCH_CORTEXA5
+	orr		r0, r0, #(SCTLR_Z)
+#endif
+
+#ifndef CONFIG_ARCH_LOWVECTORS
+	orr		r0, r0, #(SCTLR_V)
+#endif
+
+#if !defined(CONFIG_ARMV7A_ICACHE_DISABLE) && !defined(CONFIG_SMP)
+	orr		r0, r0, #(SCTLR_I)
+#endif
+
+#ifdef CONFIG_ARMV7A_ALIGNMENT_TRAP
+	orr		r0, r0, #(SCTLR_A)
+#endif
+
+#ifdef CONFIG_ENDIAN_BIG
+	orr		r0, r0, #(SCTLR_EE)
+#endif
+
+	/* Then write the configured control register */
+
+	mcr		CP15_SCTLR(r0)			/* Write control reg */
+	isb
+	.rept		12				/* Cortex A8 wants lots of NOPs here */
+	nop
+	.endr
+
+	/* Branch to .Lvstart for common boot finalization */
+
+	b		.Lvstart
+
+#endif /* CONFIG_ARCH_USE_MMU */
+
 /****************************************************************************
  * PC_Relative Data
  ****************************************************************************/
 
+#ifdef CONFIG_ARCH_USE_MMU
 	/* The physical base address of the page table */
 
 	.type	.LCppgtable, %object
@@ -645,6 +716,7 @@ __cpu0_start:
 .LCvstart:
 	.long	.Lvstart
 	.size	.LCvstart, . -.LCvstart
+#endif /* CONFIG_ARCH_USE_MMU */
 
 	.size	__start, .-__start
 
@@ -661,7 +733,8 @@ __cpu0_start:
 
 .Lvstart:
 
-#if !defined(CONFIG_ARCH_ROMPGTABLE) && !defined(CONFIG_IDENTITY_TEXTMAP)
+#if defined(CONFIG_ARCH_USE_MMU) && !defined(CONFIG_ARCH_ROMPGTABLE) && \
+    !defined(CONFIG_IDENTITY_TEXTMAP)
 	/* Remove the temporary mapping (if one was made).  The following assumes
 	 * that the total RAM size is > 1Mb and extends that initial mapping to
 	 * cover additional RAM sections.
@@ -671,7 +744,7 @@ __cpu0_start:
 	ldr		r3, .LCptextbase		/* r0=Physical base address of .text section */
 	mov		r0, #0				/* flags + base = 0 */
 	str		r3, [r5, r3, lsr #18]		/* identity mapping */
-#endif /* !CONFIG_ARCH_ROMPGTABLE && !CONFIG_IDENTITY_TEXTMAP */
+#endif /* CONFIG_ARCH_USE_MMU && !CONFIG_ARCH_ROMPGTABLE && !CONFIG_IDENTITY_TEXTMAP */
 
 	/* Set up the stack pointer and clear the frame pointer */
 
@@ -786,7 +859,7 @@ arm_data_initialize:
 	 * to the end of SDRAM.
 	 */
 
-#ifndef CONFIG_ARCH_ROMPGTABLE
+#if defined(CONFIG_ARCH_USE_MMU) && !defined(CONFIG_ARCH_ROMPGTABLE)
 	/* The virtual base address of the page table */
 
 	.type	.LCvpgtable, %object
@@ -794,7 +867,7 @@ arm_data_initialize:
 	.long	PGTABLE_BASE_VADDR			/* Virtual start of page table */
 	.size	.LCvpgtable, . -.LCvpgtable
 
-#endif /* CONFIG_ARCH_ROMPGTABLE */
+#endif /* CONFIG_ARCH_USE_MMU && !CONFIG_ARCH_ROMPGTABLE */
 
 #ifndef CONFIG_ARCH_SKIP_ZERO_BSS
 	.type	.Linitparms, %object
