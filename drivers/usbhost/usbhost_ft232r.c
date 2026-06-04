@@ -76,8 +76,8 @@
 #  ifndef CONFIG_SCHED_LPWORK
 #    warning Low priority work thread support is required (CONFIG_SCHED_LPWORK)
 #  endif
-#  if CONFIG_SCHED_LPNTHREADS < 2
-#    warning Multiple low priority work threads recommended for performance (CONFIG_SCHED_LPNTHREADS > 1)
+#  if CONFIG_SCHED_LPNTHREADS != 1
+#    warning ft232r needs CONFIG_SCHED_LPNTHREADS=1 (USB host stack concurrency limit)
 #  endif
 #endif
 
@@ -874,7 +874,7 @@ static int ft232r_setbaud(FAR struct usbhost_ft232r_s *priv)
   else
     {
       ret = ft232r_ctrlxfer(priv, USBHOST_FT232R_CTRLREQ_SETBAUD,
-              divisor & 0xffff, divisor && 0x10000);
+              divisor & 0xffff, (divisor & 0x10000) ? 1 : 0);
       if (ret < 0)
         {
           uerr("ERROR: ft232r_ctrlxfer failed: %d\n", ret);
@@ -973,7 +973,8 @@ static void usbhost_txdata_work(FAR void *arg)
   FAR struct usbhost_hubport_s *hport;
   FAR struct uart_dev_s *uartdev;
   FAR struct uart_buffer_s *txbuf;
-  ssize_t nwritten;
+  ssize_t nwritten = 0;
+  uint32_t delay;
   int txndx;
   int txtail;
   int ret;
@@ -996,16 +997,29 @@ static void usbhost_txdata_work(FAR void *arg)
       return;
     }
 
-  /* Loop until The UART TX buffer is empty (or we become disconnected) */
+  /* Send at most one bulk OUT per invocation, then yield back to LPWORK. */
 
   txtail = txbuf->tail;
-  txndx  = 0;
+
+  /* Do AT MOST ONE bulk OUT per invocation and then yield back to LPWORK.
+   *
+   * Rationale: DRVR_TRANSFER for a bulk OUT blocks the LPWORK thread until
+   * FT232's 128-byte TX FIFO has accepted the packet, which at 115200 baud
+   * is ~5.5 ms per 64-byte packet once its TX FIFO fills.  For a 320-byte
+   * echo-loopback test that means ~33 ms of LPWORK monopolised by txwork
+   * while PC echoes arrive and FT232's 256-byte RX FIFO fills past
+   * capacity — rxwork never gets scheduled, bytes 256..N-1 are lost, and
+   * the test sees MISMATCH@256 = "last byte" (FT232's overflow signature).
+   *
+   * Sending one packet then rescheduling with delay=0 interleaves txwork
+   * and rxwork on LPWORK so the FT232 RX FIFO gets drained in time.
+   */
 
 #ifdef CONFIG_USBHOST_FT232R_HWFLOWCTRL
-  while (txtail != txbuf->head && priv->txena &&
-          !priv->disconnected && priv->cts)
+  if (txtail != txbuf->head && priv->txena &&
+      !priv->disconnected && priv->cts)
 #else
-  while (txtail != txbuf->head && priv->txena && !priv->disconnected)
+  if (txtail != txbuf->head && priv->txena && !priv->disconnected)
 #endif
     {
       /* Copy data from the UART TX buffer until either 1) the UART TX
@@ -1047,13 +1061,11 @@ static void usbhost_txdata_work(FAR void *arg)
           /* The most likely reason for a failure is that FTDI device
            * NAK'ed our packet OR that the device has been disconnected.
            *
-           * Just break out of the loop, rescheduling the work (unless
-           * the device is disconnected).
+           * Fall through to the rescheduling logic at the bottom.
            */
 
           uerr("ERROR: DRVR_TRANSFER for packet failed: %d\n",
                (int)nwritten);
-          break;
         }
     }
 
@@ -1061,25 +1073,15 @@ static void usbhost_txdata_work(FAR void *arg)
    * nothing more to send, 2) the FTDI device was not ready to accept our
    * data, or the device is no longer available.
    *
-   * If the last packet sent was and even multiple of the packet size, then
-   * we need to send a zero length packet (ZLP).
+   * Upstream NuttX sends a zero-length packet (ZLP) when the last OUT
+   * packet was exactly priv->pktsize, to signal end-of-transfer on class
+   * drivers that care about transfer boundaries.  FT232R's bulk OUT is a
+   * raw UART byte-stream with no transfer-boundary semantics, so a ZLP
+   * is not required and (empirically, on T113 OHCI with uartring @115200
+   * -s 256) triggers an OHCI transfer-state-machine hang where the TD
+   * leaves HCCA.DoneHead set without a corresponding WDH interrupt —
+   * lpwork gets stuck in nxsem_wait_uninterruptible forever.
    */
-
-  if (txndx == priv->pktsize && !priv->disconnected)
-    {
-      /* Send the ZLP to the FTDI device */
-
-      nwritten = DRVR_TRANSFER(hport->drvr, priv->bulkout,
-                               priv->outbuf, 0);
-      if (nwritten < 0)
-        {
-          /* The most likely reason for a failure is that FTDI device
-           * NAK'ed our packet.
-           */
-
-          uerr("ERROR: DRVR_TRANSFER for ZLP failed: %d\n", (int)nwritten);
-        }
-    }
 
   /* Check again if TX reception is enabled and that the device is still
    * connected.  These states could have changed since we started the
@@ -1088,10 +1090,19 @@ static void usbhost_txdata_work(FAR void *arg)
 
   if (priv->txena && !priv->disconnected)
     {
-      /* Schedule TX data work to occur after a delay. */
+      /* If there is still data queued in txbuf, reschedule immediately
+       * (delay=0) so we keep draining; a rxwork item that was queued in
+       * the meantime will run between our invocations because LPWORK
+       * processes one work item at a time.  If txbuf is empty we are
+       * idle, so fall back to the configured TXDELAY to save USB
+       * bandwidth (sharing LPWORK with any other waiting work).
+       */
+
+      delay = (txbuf->tail != txbuf->head) ?
+              0 : USBHOST_FT232R_TXDELAY;
 
       ret = work_queue(LPWORK, &priv->txwork, usbhost_txdata_work, priv,
-                       USBHOST_FT232R_TXDELAY);
+                       delay);
       DEBUGASSERT(ret >= 0);
       UNUSED(ret);
     }
@@ -1118,6 +1129,7 @@ static void usbhost_rxdata_work(FAR void *arg)
   FAR struct uart_dev_s *uartdev;
   FAR struct uart_buffer_s *rxbuf;
   ssize_t nread;
+  uint32_t rxdelay;
   int nxfrd;
   int nexthead;
   int rxndx;
@@ -1169,7 +1181,9 @@ static void usbhost_rxdata_work(FAR void *arg)
 
       if (nexthead == rxbuf->tail)
         {
-          /* Break out of the loop, rescheduling the work */
+          /* Upper uart ringbuf is full; let the user read() drain it,
+           * then we get rescheduled at the end of this function.
+           */
 
           break;
         }
@@ -1218,11 +1232,18 @@ static void usbhost_rxdata_work(FAR void *arg)
             }
 #endif
 
-          /* Ignore ZLPs and RX of only FTDI status */
+          /* Ignore ZLPs and RX of only FTDI status.  Break out here
+           * (not continue) so the work-queue dispatcher can run other
+           * pending work (e.g. usbhost_txdata_work queued from a
+           * concurrent writer) instead of letting us monopolise LPWORK
+           * with back-to-back BULK IN transfers while the FT232 emits
+           * its periodic 2-byte modem/line status frames.  The tail of
+           * this function reschedules us immediately (delay=0).
+           */
 
           if (nread < 3)
             {
-              continue;
+              break;
             }
         }
 
@@ -1285,14 +1306,22 @@ static void usbhost_rxdata_work(FAR void *arg)
   if (priv->rxena && work_available(&priv->rxwork) && !priv->disconnected)
 #endif
     {
-      /* Schedule RX data reception work to occur after a delay.  This will
-       * affect our responsive in certain cases.  The delayed work, however,
-       * will be cancelled and replaced with immediate work when the upper
-       * layer demands more data.
+      /* Default: reschedule immediately (delay=0).  Polling as fast as the
+       * hardware can respond is safe and self-rate-limiting via FT232R's
+       * latency timer; an active RX stream paces at the bulk-IN round-trip.
+       *
+       * Exception: when the upper UART RX ringbuf is full (consumer is
+       * slower than the device side), back off to USBHOST_FT232R_RXDELAY
+       * to avoid a tight LPWORK busy-loop on the rxbuf-full check.  The
+       * loop's exit nexthead carries the freshness check: if nexthead
+       * still equals rxbuf->tail, the consumer hasn't drained anything
+       * since we last broke out.
        */
 
+      rxdelay = (nexthead == rxbuf->tail) ? USBHOST_FT232R_RXDELAY : 0;
+
       ret = work_queue(LPWORK, &priv->rxwork, usbhost_rxdata_work, priv,
-                       USBHOST_FT232R_RXDELAY);
+                       rxdelay);
       DEBUGASSERT(ret >= 0);
       UNUSED(ret);
     }
@@ -1991,9 +2020,14 @@ static int usbhost_connect(FAR struct usbhost_class_s *usbclass,
       goto errout;
     }
 
-  /* Send the initial line encoding */
+  /* Send the initial line encoding.  Use full SIO_RESET (wValue=0) so the
+   * FT232 SIO engine, both FIFOs, and the modem-control state are reset to
+   * a known baseline.  The previous ft232r_reset(priv, true) passed
+   * wValue=1 which only purges the RX buffer and leaves TX FIFO state
+   * undefined across reconnects.
+   */
 
-  ret = ft232r_reset(priv, true);
+  ret = ft232r_reset(priv, false);
   if (ret < 0)
     {
       uerr("ERROR: ft232r_reset() failed: %d\n", ret);
