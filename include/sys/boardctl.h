@@ -407,7 +407,12 @@ struct boardioc_boot_info_s
 };
 #endif
 
-/* Describes the reason of last reset */
+#endif /* CONFIG_BOARDCTL */
+
+/* Describes the reason of last reset.  These are kept outside the
+ * CONFIG_BOARDCTL guard because board_reset()/board_reset_cause() use them
+ * even on builds that do not enable the boardctl() interface (e.g. boot0).
+ */
 
 enum boardioc_reset_cause_e
 {
@@ -446,6 +451,8 @@ struct boardioc_reset_cause_s
   uint32_t flag;                      /* watchdog number when watchdog reset,
                                        * or soft-reset subreason */
 };
+
+#ifdef CONFIG_BOARDCTL
 
 /****************************************************************************
  * Public Data
