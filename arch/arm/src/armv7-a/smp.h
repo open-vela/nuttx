@@ -27,7 +27,7 @@
 
 #include <nuttx/config.h>
 
-#ifdef CONFIG_SMP
+#ifndef CONFIG_UP
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -49,18 +49,18 @@
 
 #ifndef __ASSEMBLY__
 
-#if CONFIG_SMP_NCPUS > 1
+#if CONFIG_NCPUS > 1
 extern uint32_t g_cpu1_idlestack[SMP_STACK_WORDS];
-#if CONFIG_SMP_NCPUS > 2
+#if CONFIG_NCPUS > 2
 extern uint32_t g_cpu2_idlestack[SMP_STACK_WORDS];
-#if CONFIG_SMP_NCPUS > 3
+#if CONFIG_NCPUS > 3
 extern uint32_t g_cpu3_idlestack[SMP_STACK_WORDS];
-#if CONFIG_SMP_NCPUS > 4
-#  error This logic needs to extended for CONFIG_SMP_NCPUS > 4
-#endif /* CONFIG_SMP_NCPUS > 4 */
-#endif /* CONFIG_SMP_NCPUS > 3 */
-#endif /* CONFIG_SMP_NCPUS > 2 */
-#endif /* CONFIG_SMP_NCPUS > 1 */
+#if CONFIG_NCPUS > 4
+#  error This logic needs to extended for CONFIG_NCPUS > 4
+#endif /* CONFIG_NCPUS > 4 */
+#endif /* CONFIG_NCPUS > 3 */
+#endif /* CONFIG_NCPUS > 2 */
+#endif /* CONFIG_NCPUS > 1 */
 
 /****************************************************************************
  * Public Function Prototypes
@@ -86,20 +86,20 @@ extern uint32_t g_cpu3_idlestack[SMP_STACK_WORDS];
 
 void __start(void);
 
-#if CONFIG_SMP_NCPUS > 1
+#if CONFIG_NCPUS > 1
 void __cpu1_start(void);
 #endif
 
-#if CONFIG_SMP_NCPUS > 2
+#if CONFIG_NCPUS > 2
 void __cpu2_start(void);
 #endif
 
-#if CONFIG_SMP_NCPUS > 3
+#if CONFIG_NCPUS > 3
 void __cpu3_start(void);
 #endif
 
-#if CONFIG_SMP_NCPUS > 4
-#  error This logic needs to extended for CONFIG_SMP_NCPUS > 4
+#if CONFIG_NCPUS > 4
+#  error This logic needs to extended for CONFIG_NCPUS > 4
 #endif
 
 /****************************************************************************
@@ -126,5 +126,5 @@ void __cpu3_start(void);
 void arm_cpu_boot(int cpu);
 
 #endif /* __ASSEMBLY__ */
-#endif /* CONFIG_SMP */
+#endif /* !CONFIG_UP */
 #endif /* __ARCH_ARM_SRC_ARMV7_A_SMP_H */
