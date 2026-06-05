@@ -183,7 +183,12 @@ struct nrf53_sdc_dev_s
   uint8_t msg_buffer[HCI_MSG_BUFFER_MAX_SIZE];
 
   mutex_t lock;
-  struct work_s work;
+  struct work_s work;     /* low_prio_worker (MPSL) work */
+  struct work_s hciwork;  /* on_hci_worker (HCI evt read) work - separate so
+                           * the SWI3/MPSL low_prio_worker does not clobber a
+                           * pending HCI-event read on the shared work struct
+                           * (caused nimble host to hang in BRINGUP waiting
+                           * for the HCI Reset Command Complete) */
 };
 
 begin_packed_struct struct sdc_hci_cmd_vs_zephyr_write_bd_addr_s
@@ -307,7 +312,7 @@ static int bt_hci_send(struct bt_driver_s *btdev,
         {
           ret = len;
 
-          work_queue(LPWORK, &g_sdc_dev.work, on_hci_worker, NULL, 0);
+          work_queue(LPWORK, &g_sdc_dev.hciwork, on_hci_worker, NULL, 0);
         }
     }
 
