@@ -137,9 +137,9 @@ void t113_cpu_disable(int cpu)
  * Name: up_cpu_start
  *
  * Description:
- *   Chip-specific override of the arm_a_r weak default.  Called by
+ *   Chip-specific override of the armv7-a weak default.  Called by
  *   nx_smp_start() once per secondary CPU (1..CONFIG_SMP_NCPUS-1) after
- *   CPU0 has finished arm_enable_smp(0) in arm_boot_primary().  Programs
+ *   CPU0 has finished arm_enable_smp(0) in arm_boot().  Programs
  *   the CPU soft-entry register with the secondary entry point and pulses
  *   the core reset / L1RSTDISABLE sequence to release the target CPU.
  *
@@ -167,21 +167,63 @@ int up_cpu_start(int cpu)
  * Name: arm_cpu_boot
  *
  * Description:
- *   Chip-specific secondary-CPU hook invoked by the common
- *   arm_boot_secondary() between arm_enable_smp() and the MM-ready wait.
- *   Runs with IRQs disabled and before up_irqinitialize(), so it must
- *   not touch the GIC distributor or perform work that needs per-CPU
- *   IRQ state.
+ *   Secondary-CPU C entry point.  arm_cpuhead.S jumps here ("b
+ *   arm_cpu_boot") once CPUn (n != 0) has set up its mode, stack, MMU and
+ *   caches.  There is no common arm_boot_secondary() layer on this port, so
+ *   this function is the full secondary bring-up and must NOT return:
  *
- *   T113 has no such work: secondary timer/IRQ bring-up happens later
- *   inside nx_start() via up_timer_initialize(), which is BMP-aware
- *   (g_oneshot_lower and g_irqvector are per-CPU under BMP).
+ *     - configure the FPU for this CPU,
+ *     - enable SMP cache coherency (SCU),
+ *     - wait until CPU0 has the memory manager ready,
+ *     - bring up this CPU's GIC CPU interface (up_irqinitialize ->
+ *       arm_gic_initialize -> arm_gic_init_done sets the per-CPU bit that
+ *       CPU0's arm_gic_wait_done() spins on),
+ *     - start the per-CPU tick (SMP), then enter the IDLE task.
+ *
+ *   Under BMP each core runs an independent image, so it falls through to
+ *   nx_start() with the timer used as its main timer.
  *
  ****************************************************************************/
 
 void arm_cpu_boot(int cpu)
 {
-  UNUSED(cpu);
+  /* Initialize the FPU for this CPU */
+
+  arm_fpuconfig();
+
+  /* Enable SMP cache coherency (SCU) for this CPU */
+
+  arm_enable_smp(cpu);
+
+  /* Wait until CPU0 has finished memory manager initialization before
+   * touching anything that may allocate.
+   */
+
+  while (!OSINIT_MM_READY())
+    {
+    }
+
+  /* Bring up this CPU's interrupt controller.  arm_gic_initialize() ends
+   * with arm_gic_init_done(), publishing this CPU's bit so CPU0's
+   * arm_gic_wait_done() can proceed when it IPIs us.
+   */
+
+  up_irqinitialize();
+
+#ifdef CONFIG_BMP
+  /* BMP: this core runs its own image with the timer as its main timer. */
+
+  nx_start();
+#else
+  /* SMP: secondary CPUs need their own tick source, then enter IDLE.
+   * T113 uses the per-CPU ARM generic timer, not the common armv7-a
+   * arm_timer.c (which this chip does not build), so call the chip hook.
+   */
+
+  t113_timer_secondary_init();
+
+  nx_idle_trampoline();
+#endif
 }
 #endif /* !CONFIG_UP */
 
