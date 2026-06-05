@@ -61,7 +61,9 @@
 #include <nuttx/timers/ptp_clock_dummy.h>
 #include <nuttx/t32.h>
 #include <nuttx/trace.h>
+#ifdef CONFIG_NET_USRSOCK_RPMSG_SERVER
 #include <nuttx/usrsock/usrsock_rpmsg.h>
+#endif
 #include <nuttx/vhost/vhost.h>
 #include <nuttx/virtio/virtio.h>
 #include <nuttx/drivers/optee.h>
