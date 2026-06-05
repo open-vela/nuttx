@@ -146,7 +146,21 @@ void nrf53_ipc_signal(int id)
 
   ipcinfo("IPC signal %d\n", id);
 
+#ifdef CONFIG_ARCH_CHIP_NRF5340_CPUAPP
+  /* On nRF5340 app core (Secure domain) the IPC Secure alias (0x5002A000)
+   * TASKS_SEND does not propagate cross-core to the network core.  The
+   * NonSecure alias (0x4002A000) must be used for TASKS_SEND only; all
+   * other IPC registers (RECEIVE_CNF, INTEN, etc.) remain at the Secure
+   * base since they configure the app core's own receive path.
+   * Verified via J-Link: NS TASKS_SEND triggers net core EVENTS_RECEIVE,
+   * S TASKS_SEND does not.  SPU PERIPHIDPERM[42] is LOCK=1 so cannot
+   * be changed at runtime.
+   */
+
+  putreg32(1, 0x4002a000u + NRF53_IPC_TASKS_SEND_OFFSET(id));
+#else
   putreg32(1, NRF53_IPC_TASKS_SEND(id));
+#endif
 }
 
 /****************************************************************************
