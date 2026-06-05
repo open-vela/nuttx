@@ -31,6 +31,13 @@ endif()
 
 if(CONFIG_XTENSA_TOOLCHAIN_GNU)
   set(CROSSDEV ${CONFIG_XTENSA_TOOLCHAIN_PREFIX})
+
+  # CONFIG_XTENSA_TOOLCHAIN_PREFIX carries the full prefix including the
+  # trailing dash (e.g. "xtensa-hifi4-elf-").  The compiler/tool variables below
+  # append "-gcc" etc. to TOOLCHAIN_PREFIX, so strip the trailing dash here to
+  # keep a single dash in the resolved tool name.
+  string(REGEX REPLACE "-$" "" TOOLCHAIN_PREFIX
+                       "${CONFIG_XTENSA_TOOLCHAIN_PREFIX}")
 endif()
 
 # Default toolchain
