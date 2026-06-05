@@ -43,6 +43,9 @@
 #include "mmu.h"
 #endif
 #include "arm_internal.h"
+#ifdef CONFIG_SMP
+#  include "scu.h"
+#endif
 #include "t113_lowputc.h"
 #include "t113_boot.h"
 #include "t113_clk.h"
@@ -301,6 +304,17 @@ void arm_boot(void)
 #endif
 
   arm_fpuconfig();
+
+#ifdef CONFIG_SMP
+  /* Enable SMP cache coherency for CPU0: invalidate + enable the MPCore
+   * SCU and set ACTLR.SMP.  Secondary CPUs only set ACTLR.SMP once they are
+   * released; without the CPU0-side SCU enable here, cache coherency is
+   * never established and a started CPU1 faults.  (imx6/qemu do this in
+   * their arm_boot; the T113 port previously omitted it.)
+   */
+
+  arm_enable_smp(0);
+#endif
 
 #ifdef CONFIG_BOOT_SDRAM_DATA
   arm_data_initialize();
