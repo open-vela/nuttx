@@ -1050,6 +1050,11 @@ int32_t esp_timer_start_once(esp_timer_handle_t timer, uint64_t timeout_us)
 {
   struct rt_timer_s *rt_timer = (struct rt_timer_s *)timer;
 
+  if (rt_timer == NULL)
+    {
+      return -1;
+    }
+
   esp32s3_rt_timer_start(rt_timer, timeout_us, false);
 
   return 0;
@@ -1074,6 +1079,11 @@ int32_t esp_timer_start_periodic(esp_timer_handle_t timer, uint64_t period)
 {
   struct rt_timer_s *rt_timer = (struct rt_timer_s *)timer;
 
+  if (rt_timer == NULL)
+    {
+      return -1;
+    }
+
   esp32s3_rt_timer_start(rt_timer, period, true);
 
   return 0;
@@ -1097,6 +1107,11 @@ int32_t esp_timer_stop(esp_timer_handle_t timer)
 {
   struct rt_timer_s *rt_timer = (struct rt_timer_s *)timer;
 
+  if (rt_timer == NULL)
+    {
+      return -1;
+    }
+
   esp32s3_rt_timer_stop(rt_timer);
 
   return 0;
@@ -1119,6 +1134,11 @@ int32_t esp_timer_stop(esp_timer_handle_t timer)
 int32_t esp_timer_delete(esp_timer_handle_t timer)
 {
   struct rt_timer_s *rt_timer = (struct rt_timer_s *)timer;
+
+  if (rt_timer == NULL)
+    {
+      return -1;
+    }
 
   esp32s3_rt_timer_delete(rt_timer);
 
