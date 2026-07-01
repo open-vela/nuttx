@@ -1,0 +1,193 @@
+############################################################################
+# arch/arm64/src/rk3576/Make.defs
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+############################################################################
+
+include common/Make.defs
+
+# Rockchip RK3576 specific C source files
+CHIP_CSRCS  = rk3576_boot.c rk3576_serial.c
+
+# GPIO driver
+ifeq ($(CONFIG_RK3576_GPIO),y)
+CHIP_CSRCS += rk3576_gpio.c
+endif
+
+# PWM driver
+ifeq ($(CONFIG_RK3576_PWM),y)
+CHIP_CSRCS += rk3576_pwm.c
+endif
+
+# ADC driver
+ifeq ($(CONFIG_RK3576_ADC),y)
+CHIP_CSRCS += rk3576_adc.c
+endif
+
+# I2C driver
+ifeq ($(CONFIG_RK3576_I2C),y)
+CHIP_CSRCS += rk3576_i2c.c
+endif
+
+# SPI driver
+ifeq ($(CONFIG_RK3576_SPI),y)
+CHIP_CSRCS += rk3576_spi.c
+endif
+
+# I2S audio driver
+ifeq ($(CONFIG_RK3576_I2S),y)
+CHIP_CSRCS += rk3576_i2s.c
+endif
+
+# USB driver
+ifeq ($(CONFIG_RK3576_USB),y)
+CHIP_CSRCS += rk3576_usb.c
+endif
+
+# Ethernet MAC driver
+ifeq ($(CONFIG_RK3576_ETH),y)
+CHIP_CSRCS += rk3576_eth.c
+endif
+
+# HDMI display driver
+ifeq ($(CONFIG_RK3576_HDMI),y)
+CHIP_CSRCS += rk3576_hdmi.c
+endif
+
+# Watchdog timer driver
+ifeq ($(CONFIG_RK3576_WDT),y)
+CHIP_CSRCS += rk3576_wdt.c
+endif
+
+# General purpose timer driver
+ifeq ($(CONFIG_RK3576_TIMER),y)
+CHIP_CSRCS += rk3576_timer.c
+endif
+
+# RTC driver
+ifeq ($(CONFIG_RK3576_RTC),y)
+CHIP_CSRCS += rk3576_rtc.c
+endif
+
+# DMA controller driver
+ifeq ($(CONFIG_RK3576_DMAC),y)
+CHIP_CSRCS += rk3576_dmac.c
+endif
+
+# SDMMC driver
+ifeq ($(CONFIG_RK3576_SDMMC),y)
+CHIP_CSRCS += rk3576_sdmmc.c
+endif
+
+# DSI display driver
+ifeq ($(CONFIG_RK3576_DSI),y)
+CHIP_CSRCS += rk3576_dsi.c
+endif
+
+# CSI camera driver
+ifeq ($(CONFIG_RK3576_CSI),y)
+CHIP_CSRCS += rk3576_csi.c
+endif
+
+# VOP display driver
+ifeq ($(CONFIG_RK3576_VOP),y)
+CHIP_CSRCS += rk3576_vop.c
+endif
+
+# SPI Flash driver
+ifeq ($(CONFIG_RK3576_SPIFLASH),y)
+CHIP_CSRCS += rk3576_spiflash.c
+endif
+
+# Touch screen driver
+ifeq ($(CONFIG_RK3576_TOUCH),y)
+CHIP_CSRCS += rk3576_touch.c
+endif
+
+# Crypto driver
+ifeq ($(CONFIG_RK3576_CRYPTO),y)
+CHIP_CSRCS += rk3576_crypto.c
+endif
+
+# GPU driver
+ifeq ($(CONFIG_RK3576_GPU),y)
+CHIP_CSRCS += rk3576_gpu.c
+endif
+
+# CRU driver
+ifeq ($(CONFIG_RK3576_CRU),y)
+CHIP_CSRCS += rk3576_cru.c
+endif
+
+# GRF driver
+ifeq ($(CONFIG_RK3576_GRF),y)
+CHIP_CSRCS += rk3576_grf.c
+endif
+
+# PMU driver
+ifeq ($(CONFIG_RK3576_PMU),y)
+CHIP_CSRCS += rk3576_pmu.c
+endif
+
+# NPU driver
+ifeq ($(CONFIG_RK3576_NPU),y)
+CHIP_CSRCS += rk3576_npu.c
+endif
+
+# DDR controller driver
+ifeq ($(CONFIG_RK3576_DDR),y)
+CHIP_CSRCS += rk3576_ddr.c
+endif
+
+# Bluetooth HCI driver
+ifeq ($(CONFIG_RK3576_BLUETOOTH),y)
+CHIP_CSRCS += rk3576_bluetooth.c
+endif
+
+# CAN bus driver
+ifeq ($(CONFIG_RK3576_CAN),y)
+CHIP_CSRCS += rk3576_can.c
+endif
+
+# PCIe driver
+ifeq ($(CONFIG_RK3576_PCIE),y)
+CHIP_CSRCS += rk3576_pcie.c
+endif
+
+# S/PDIF driver
+ifeq ($(CONFIG_RK3576_SPDIF),y)
+CHIP_CSRCS += rk3576_spdif.c
+endif
+
+# HDMI CEC driver
+ifeq ($(CONFIG_RK3576_CEC),y)
+CHIP_CSRCS += rk3576_cec.c
+endif
+
+# Framebuffer driver
+ifeq ($(CONFIG_RK3576_FB),y)
+CHIP_CSRCS += rk3576_fb.c
+endif
+
+# LVGL integration driver
+ifeq ($(CONFIG_RK3576_LVGL),y)
+CHIP_CSRCS += rk3576_lvgl.c
+endif
+
+ifeq ($(CONFIG_ARCH_EARLY_PRINT),y)
+CHIP_ASRCS  = rk3576_lowputc.S
+endif

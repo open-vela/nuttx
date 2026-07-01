@@ -1,0 +1,344 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_RK3576
+
+menu "Rockchip RK3576 Peripheral Selection"
+
+config RK3576_UART0
+	bool "UART 0"
+	default n
+	select UART0_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Select to enable support for UART0.
+
+config RK3576_UART1
+	bool "UART 1"
+	default n
+	select UART1_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Select to enable support for UART1.
+
+config RK3576_UART2
+	bool "UART 2"
+	default y
+	select UART2_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Select to enable support for UART2.
+
+config RK3576_UART3
+	bool "UART 3"
+	default n
+	select UART3_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Select to enable support for UART3.
+
+config RK3576_UART4
+	bool "UART 4"
+	default n
+	select UART4_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+	---help---
+		Select to enable support for UART4.
+
+config RK3576_GPIO
+	bool "GPIO Support"
+	default y
+	---help---
+		Enable RK3576 GPIO driver. Provides GPIO input/output,
+		interrupt, and debounce support for all 5 GPIO banks
+		(GPIO0-GPIO4, 160 pins total).
+
+if RK3576_GPIO
+
+config RK3576_GPIO_IRQ
+	bool "GPIO Interrupt Support"
+	default y
+	---help---
+		Enable GPIO interrupt support. Required for rotary encoder
+		and button input with interrupt-driven detection.
+
+config RK3576_GPIO_DEBOUNCE
+	bool "GPIO Debounce Support"
+	default y
+	---help---
+		Enable hardware debounce for GPIO inputs. Useful for
+		rotary encoder and button debouncing.
+
+endif # RK3576_GPIO
+
+config RK3576_PWM
+	bool "PWM Support"
+	default y
+	---help---
+		Enable RK3576 PWM driver. Provides PWM output for
+		backlight, buzzer, and other PWM-controlled devices.
+		Supports PWM0 (2ch), PWM1 (6ch), PWM2 (8ch), PWM3 (2ch).
+
+config RK3576_ADC
+	bool "ADC Support"
+	default y
+	---help---
+		Enable RK3576 SARADC (Successive Approximation ADC) driver.
+		Provides 12-bit analog input on up to 6 channels.
+		Used for battery voltage, signal levels, and sensor readings.
+
+config RK3576_I2C
+	bool "I2C Support"
+	default y
+	---help---
+		Enable RK3576 I2C master driver. Supports standard mode
+		(100kHz), fast mode (400kHz), and fast plus (1MHz).
+		Used for touch screen, sensors, and other I2C devices.
+
+config RK3576_SPI
+	bool "SPI Support"
+	default y
+	---help---
+		Enable RK3576 SPI master driver. Supports 4-bit to 16-bit
+		word size, all 4 SPI modes, and configurable clock.
+		Used for SPI flash, displays, and other SPI devices.
+
+config RK3576_I2S
+	bool "I2S Audio Support"
+	default y
+	---help---
+		Enable RK3576 I2S audio driver. Supports TX/RX,
+		master/slave, 16/20/24/32-bit resolution, and DMA.
+		Used for audio playback and recording.
+
+config RK3576_USB
+	bool "USB Support"
+	default y
+	---help---
+		Enable RK3576 USB driver. Supports USB2.0 OTG
+		(Host/Device mode) with DWC2 core. Used for
+		USB devices, mass storage, and serial connections.
+
+config RK3576_ETH
+	bool "Ethernet MAC Support"
+	default y
+	---help---
+		Enable RK3576 Ethernet MAC (GMAC) driver. Supports
+		MII/RMII/RGMII interfaces, MDIO (PHY access), and
+		10/100/1000 Mbps operation. Used for wired networking.
+
+config RK3576_HDMI
+	bool "HDMI Display Support"
+	default y
+	---help---
+		Enable RK3576 HDMI display driver. Supports
+		multiple resolutions up to 1920x1080, RGB/YCbCr
+		formats, and hotplug detection.
+
+config RK3576_WDT
+	bool "Watchdog Timer Support"
+	default y
+	---help---
+		Enable RK3576 watchdog timer driver. Supports
+		feed (kick) operation, configurable timeout,
+		and reset/interrupt modes.
+
+config RK3576_TIMER
+	bool "General Purpose Timer Support"
+	default y
+	---help---
+		Enable RK3576 general purpose timer driver.
+		Supports 2 controllers x 2 channels, free-running
+		and user-defined count modes, interrupt generation.
+
+config RK3576_RTC
+	bool "Real-Time Clock Support"
+	default y
+	---help---
+		Enable RK3576 RTC (Real-Time Clock) driver.
+		Supports time get/set, alarm, and interrupt.
+		RTC is in PMU domain, maintains time when
+		system is powered off.
+
+config RK3576_DMAC
+	bool "DMA Controller Support"
+	default y
+	---help---
+		Enable RK3576 DMA controller driver. Supports
+		8 channels, memory-to-memory, memory-to-peripheral,
+		and peripheral-to-memory transfers.
+
+config RK3576_SDMMC
+	bool "SDMMC/eMMC Support"
+	default y
+	---help---
+		Enable RK3576 SDMMC driver. Supports SD card,
+		MMC card, and eMMC storage. Provides block
+		device interface for file systems.
+
+config RK3576_DSI
+	bool "MIPI DSI Display Support"
+	default y
+	---help---
+		Enable RK3576 MIPI DSI display driver. Supports
+		video mode and command mode, DPHY configuration,
+		and panel initialization sequence.
+
+config RK3576_CSI
+	bool "MIPI CSI Camera Support"
+	default y
+	---help---
+		Enable RK3576 MIPI CSI-2 camera interface driver.
+		Supports 1/2/4 data lanes, multiple image formats
+		(RAW8/10/12, RGB888, YUV422), and interrupt-driven
+		frame capture. Used for dashcam functionality.
+
+config RK3576_VOP
+	bool "Video Output Processor Support"
+	default y
+	---help---
+		Enable RK3576 VOP (display pipeline) driver.
+		Provides framebuffer display output.
+
+config RK3576_SPIFLASH
+	bool "SPI NOR Flash Support"
+	default y
+	---help---
+		Enable RK3576 SPI NOR Flash driver.
+
+config RK3576_TOUCH
+	bool "Touch Screen Support"
+	default y
+	---help---
+		Enable I2C touch screen driver.
+
+config RK3576_CRYPTO
+	bool "Hardware Crypto Support"
+	default y
+	---help---
+		Enable RK3576 hardware crypto (AES/SHA).
+
+config RK3576_GPU
+	bool "GPU Support (Mali-G51)"
+	default y
+	---help---
+		Enable RK3576 GPU driver. Supports Mali-G51
+		detection, power management, and open-source
+		Lima/Panfrost driver integration.
+
+config RK3576_CRU
+	bool "Clock and Reset Unit Support"
+	default y
+	---help---
+		Enable RK3576 CRU driver for clock configuration
+		and software reset control.
+
+config RK3576_GRF
+	bool "General Register File Support"
+	default y
+	---help---
+		Enable RK3576 GRF driver for register access
+		and pin configuration.
+
+config RK3576_PMU
+	bool "Power Management Unit Support"
+	default y
+	---help---
+		Enable RK3576 PMU driver for power domain
+		control and sleep management.
+
+config RK3576_NPU
+	bool "Neural Processing Unit Support"
+	default y
+	---help---
+		Enable RK3576 NPU driver for AI inference.
+
+config RK3576_DDR
+	bool "DDR Controller Support"
+	default y
+	---help---
+		Enable RK3576 DDR controller status driver.
+
+config RK3576_FB
+	bool "Framebuffer Support"
+	default y
+	depends on RK3576_VOP
+	---help---
+		Enable RK3576 framebuffer driver (/dev/fb0).
+		Provides NuttX framebuffer interface for LVGL
+		and other display clients.
+
+if RK3576_FB
+
+config RK3576_FB_WIDTH
+	int "Framebuffer Width"
+	default 1024
+	---help---
+		Framebuffer width in pixels.
+
+config RK3576_FB_HEIGHT
+	int "Framebuffer Height"
+	default 600
+	---help---
+		Framebuffer height in pixels.
+
+config RK3576_FB_DEPTH
+	int "Framebuffer Color Depth"
+	default 32
+	---help---
+		Color depth in bits (16 for RGB565, 32 for ARGB8888).
+
+endif # RK3576_FB
+
+config RK3576_LVGL
+	bool "LVGL Graphics Support"
+	default y
+	depends on RK3576_FB && RK3576_TOUCH
+	---help---
+		Enable LVGL graphics library integration.
+		Provides display driver, touch input, and
+		demo dashboard UI for the smart car head unit.
+
+config RK3576_BLUETOOTH
+	bool "Bluetooth HCI Support"
+	default y
+	---help---
+		Enable RK3576 Bluetooth HCI transport driver.
+		UART-based HCI for built-in BLE controller.
+		Required for Xiaomi BLE gateway functionality.
+
+config RK3576_CAN
+	bool "CAN Bus Support"
+	default y
+	---help---
+		Enable RK3576 CAN controller driver (Bosch M_CAN).
+		Supports CAN 2.0A/B and CAN FD.
+		Required for VW vehicle control.
+
+config RK3576_PCIE
+	bool "PCIe Support"
+	default y
+	---help---
+		Enable RK3576 PCIe controller driver.
+		Supports 2 PCIe lanes (Gen2 x1).
+		Used for WiFi/4G expansion modules.
+
+config RK3576_SPDIF
+	bool "S/PDIF Digital Audio Support"
+	default y
+	---help---
+		Enable RK3576 S/PDIF digital audio output driver.
+		Supports 32/44.1/48/96 kHz sample rates.
+
+config RK3576_CEC
+	bool "HDMI CEC Support"
+	default y
+	---help---
+		Enable RK3576 HDMI CEC driver.
+		Supports CEC 1.4 for remote control over HDMI.
+
+endmenu # Rockchip RK3576 Peripheral Selection
+
+endif # ARCH_CHIP_RK3576
