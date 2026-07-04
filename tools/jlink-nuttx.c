@@ -309,7 +309,6 @@ static int update_tcbinfo(struct plugin_priv_s *priv)
   if (!priv->tcbinfo)
     {
       uint16_t regs_num;
-      uint32_t reg_off;
       int ret;
 
       ret = READU16(g_symbols[TCBINFO].address +
@@ -339,6 +338,8 @@ static int update_tcbinfo(struct plugin_priv_s *priv)
       if (ret != sizeof(struct tcbinfo_s))
         {
           PERROR("error in read tcbinfo_s ret %d\n", ret);
+          FREE(priv->tcbinfo);
+          priv->tcbinfo = NULL;
           return ret;
         }
 
@@ -348,6 +349,8 @@ static int update_tcbinfo(struct plugin_priv_s *priv)
       if (ret != regs_num * sizeof(struct reginfo_s))
         {
           PERROR("error in read tcbinfo_s reg_offs ret %d\n", ret);
+          FREE(priv->tcbinfo);
+          priv->tcbinfo = NULL;
           return ret;
         }
     }
