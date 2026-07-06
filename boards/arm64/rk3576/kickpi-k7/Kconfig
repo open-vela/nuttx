@@ -1,0 +1,20 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_BOARD_KICKPI_K7
+
+menu "KICKPI-K7 Board Selection"
+
+config BOARD_LATE_INITIALIZE
+	bool "Late initialization"
+	default y
+
+config BOARD_LOOPSPERMSEC
+	int "Loops per millisecond"
+	default 16800000
+
+endmenu # KICKPI-K7 Board Selection
+
+endif # ARCH_BOARD_KICKPI_K7
