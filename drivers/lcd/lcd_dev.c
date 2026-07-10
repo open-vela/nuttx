@@ -69,6 +69,8 @@ static int lcddev_open(FAR struct file *filep);
 static int lcddev_close(FAR struct file *filep);
 static int lcddev_ioctl(FAR struct file *filep, int cmd,
                         unsigned long arg);
+static int lcddev_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                        bool setup);
 
 /****************************************************************************
  * Private Data
@@ -82,6 +84,9 @@ static const struct file_operations g_lcddev_fops =
   NULL,         /* write */
   NULL,         /* seek */
   lcddev_ioctl, /* ioctl */
+  NULL,         /* mmap */
+  NULL,         /* truncate */
+  lcddev_poll,  /* poll */
 };
 
 /****************************************************************************
@@ -393,6 +398,29 @@ static int lcddev_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
     }
 
   return ret;
+}
+
+/****************************************************************************
+ * Name: lcddev_poll
+ *
+ * Description:
+ *   Poll the LCD device. LCD is always ready for writing.
+ *
+ ****************************************************************************/
+
+static int lcddev_poll(FAR struct file *filep, FAR struct pollfd *fds,
+                       bool setup)
+{
+  if (setup)
+    {
+      fds->revents |= (fds->events & POLLOUT);
+      if (fds->revents != 0)
+        {
+          poll_notify(&fds, 1, POLLOUT);
+        }
+    }
+
+  return OK;
 }
 
 /****************************************************************************
