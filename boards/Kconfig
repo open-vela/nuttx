@@ -2236,6 +2236,13 @@ config ARCH_BOARD_PINEPHONE_PRO
 		This options selects support for NuttX on PINE64 PinePhone based
 		on Rockchip RK3399 SoC with ARM Cortex-A53
 
+config ARCH_BOARD_EVB7_AMP
+	bool "Rockchip RK3588 EVB7 V11 (AMP remote core)"
+	depends on ARCH_CHIP_RK3588
+	---help---
+		NuttX as an AMP remote-core firmware on the RK3588 EVB7 V11,
+		running on cpu_l3 launched by vendor U-Boot (CONFIG_AMP).
+
 config ARCH_BOARD_NANOPI_M4
 	bool "FriendlyElec NanoPi M4"
 	depends on ARCH_CHIP_RK3399
@@ -3530,6 +3537,7 @@ config ARCH_BOARD
 	default "qemu-armv8r-aarch32"       if ARCH_BOARD_QEMU_ARMV8R_AARCH32
 	default "pinephone"                 if ARCH_BOARD_PINEPHONE
 	default "pinephonepro"              if ARCH_BOARD_PINEPHONE_PRO
+	default "evb7-amp"                  if ARCH_BOARD_EVB7_AMP
 	default "nanopi_m4"                 if ARCH_BOARD_NANOPI_M4
 	default "fvp-armv8r"                if ARCH_BOARD_FVP_ARMV8R
 	default "vdk-armv8r"                if ARCH_BOARD_VDK_ARMV8R_BASE
@@ -3761,6 +3769,9 @@ source "boards/arm64/a64/pinephone/Kconfig"
 endif
 if ARCH_BOARD_PINEPHONE_PRO
 source "boards/arm64/rk3399/pinephonepro/Kconfig"
+endif
+if ARCH_BOARD_EVB7_AMP
+source "boards/arm64/rk3588/evb7-amp/Kconfig"
 endif
 if ARCH_BOARD_FVP_ARMV8R
 source "boards/arm64/fvp-v8r/fvp-armv8r/Kconfig"
