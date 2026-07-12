@@ -45,7 +45,8 @@
  */
 
 #define AMP_SHMEM_MAGIC (*(volatile uint32_t *)0x31000000UL)
-#define AMP_SHMEM_COUNT (*(volatile uint32_t *)0x31000004UL)
+#define AMP_SHMEM_COUNT (*(volatile uint32_t *)0x31000004UL)  /* timer/usleep */
+#define AMP_BUSY_COUNT  (*(volatile uint32_t *)0x31000008UL)  /* busy-loop */
 #define AMP_MAGIC_VALUE 0x414d5033u  /* "AMP3" */
 
 /****************************************************************************
@@ -62,6 +63,30 @@ static int amp_heartbeat(int argc, char *argv[])
     {
       AMP_SHMEM_COUNT = AMP_SHMEM_COUNT + 1;
       usleep(1000000);
+    }
+
+  return 0;
+}
+
+/* Timer-independent busy-loop counter. If this keeps rising after the
+ * usleep counter (0x31000004) freezes, cpu_l3 is still alive and only the
+ * timer IRQ was cut (e.g. by Linux GIC takeover); if it also freezes, the
+ * core was hung.
+ */
+
+static int amp_busy(int argc, char *argv[])
+{
+  volatile uint32_t d;
+
+  AMP_BUSY_COUNT = 0;
+
+  for (; ; )
+    {
+      for (d = 0; d < 20000000; d++)
+        {
+        }
+
+      AMP_BUSY_COUNT = AMP_BUSY_COUNT + 1;
     }
 
   return 0;
@@ -99,6 +124,10 @@ int evb7_amp_bringup(void)
   /* Start the cross-core heartbeat so Linux can confirm this core is alive */
 
   kthread_create("amp_hb", 100, 2048, amp_heartbeat, NULL);
+
+  /* Lower-priority busy-loop counter for timer-independent liveness check */
+
+  kthread_create("amp_busy", 50, 2048, amp_busy, NULL);
 
   UNUSED(ret);
   return OK;
