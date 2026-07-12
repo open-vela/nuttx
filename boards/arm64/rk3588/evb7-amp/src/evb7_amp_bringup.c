@@ -127,13 +127,15 @@ static int amp_heartbeat(int argc, char *argv[])
     {
       AMP_SHMEM_COUNT = AMP_SHMEM_COUNT + 1;
 
-      /* Ring Linux via mailbox0 B2A channel 0: write DAT then CMD. Writing
-       * B2A_CMD(0) latches B2A_STATUS bit0 and raises Linux's B2A IRQ (Linux
-       * enabled B2A_INTEN bit0 when rpmsg requested rx channel 0).
+      /* Ring Linux rpmsg with the correct handshake: cmd = link_id (0x03,
+       * rockchip,link-id), data = RPMSG_MBOX_MAGIC (0x524D5347 "RMSG").
+       * Linux rk_rpmsg_rx_callback checks data==MAGIC (else "data error"),
+       * reads link_id from cmd, marks the remote ready and kicks vring0.
+       * Write DAT first, then CMD (CMD raises Linux's B2A IRQ).
        */
 
-      MBOX0_B2A_DAT0 = AMP_SHMEM_COUNT;
-      MBOX0_B2A_CMD0 = 0xa5a50000u | (AMP_SHMEM_COUNT & 0xffffu);
+      MBOX0_B2A_DAT0 = 0x524d5347u;  /* RPMSG_MBOX_MAGIC */
+      MBOX0_B2A_CMD0 = 0x03u;        /* rockchip,link-id */
 
       amp_puts("[AMP] tick ");
       amp_putu(AMP_SHMEM_COUNT);
