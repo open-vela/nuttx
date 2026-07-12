@@ -757,6 +757,17 @@ uint64_t * arm64_decodeirq(uint64_t * regs)
 
   irq = arm64_gic_get_active_irq();
 
+#ifdef CONFIG_ARCH_CHIP_RK3588
+  /* AMP IRQ diagnostic (cpu_l3): record the last INTID @0x3100000c and an
+   * interrupt counter @0x31000010 in the AMP shared-mem window. Linux reads
+   * them (busybox devmem) to see what hits this core when it hangs on the
+   * Linux GIC takeover. Cheap, non-blocking, no UART in IRQ context.
+   */
+
+  *(volatile uint32_t *)0x3100000cul  = (uint32_t)irq;
+  *(volatile uint32_t *)0x31000010ul += 1u;
+#endif
+
   /* Ignore spurions IRQs.  ICCIAR will report 1023 if there is no pending
    * interrupt.
    */
@@ -772,6 +783,16 @@ uint64_t * arm64_decodeirq(uint64_t * regs)
   /* Write to the end-of-interrupt register */
 
   aarm64_gic_eoi_irq(irq);
+
+#ifdef CONFIG_ARCH_CHIP_RK3588
+  /* AMP diag: "IRQ completed" counter. Compare with the "IRQ entered" counter
+   * @0x31000010: if entered == completed, the core hangs OUTSIDE the ISR
+   * (main/idle/busy thread); if entered == completed+1, it is stuck INSIDE the
+   * last ISR dispatch (arm64_doirq/handler).
+   */
+
+  *(volatile uint32_t *)0x31000014ul += 1u;
+#endif
 
   return regs;
 }
