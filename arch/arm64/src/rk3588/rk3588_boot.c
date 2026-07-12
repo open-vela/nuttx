@@ -64,9 +64,15 @@ static const struct arm_mmu_region g_mmu_regions[] =
    * the AMP core can read/write it; Linux reads it via /dev/mem.
    */
 
+  /* Non-cacheable so cpu_l3 writes land in DRAM immediately and Linux (reading
+   * via /dev/mem) sees them coherently. Cacheable mapping made the heartbeat
+   * look "frozen" (writes stuck in cpu_l3's cache). Required for shared-memory
+   * data paths (rpmsg vrings) to work across cores without explicit flushes.
+   */
+
   MMU_REGION_FLAT_ENTRY("AMP_SHMEM",
                         0x31000000, MB(4),
-                        MT_NORMAL | MT_RW | MT_SECURE),
+                        MT_NORMAL_NC | MT_RW | MT_SECURE),
 };
 
 const struct arm_mmu_config g_mmu_config =
