@@ -63,6 +63,7 @@
 
 #define MBOX0_BASE     0xfec60000UL
 #define MBOX0_B2A_CMD0 (*(volatile uint32_t *)(MBOX0_BASE + 0x30UL))
+#define MBOX0_B2A_DAT0 (*(volatile uint32_t *)(MBOX0_BASE + 0x34UL))
 
 /****************************************************************************
  * Private Functions
@@ -126,8 +127,12 @@ static int amp_heartbeat(int argc, char *argv[])
     {
       AMP_SHMEM_COUNT = AMP_SHMEM_COUNT + 1;
 
-      /* Ring Linux via mailbox0 B2A channel 0 (doorbell min test) */
+      /* Ring Linux via mailbox0 B2A channel 0: write DAT then CMD. Writing
+       * B2A_CMD(0) latches B2A_STATUS bit0 and raises Linux's B2A IRQ (Linux
+       * enabled B2A_INTEN bit0 when rpmsg requested rx channel 0).
+       */
 
+      MBOX0_B2A_DAT0 = AMP_SHMEM_COUNT;
       MBOX0_B2A_CMD0 = 0xa5a50000u | (AMP_SHMEM_COUNT & 0xffffu);
 
       amp_puts("[AMP] tick ");
