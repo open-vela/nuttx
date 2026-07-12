@@ -55,6 +55,15 @@
 #define UART2_LSR (*(volatile uint32_t *)0xfeb50014UL)
 #define UART_LSR_THRE (1u << 5)
 
+/* RK3588 mailbox0 @0xfec60000 (V1 regs). cpu_l3(=B) writes B2A_CMD(chan) to
+ * ring Linux(=A); Linux's rockchip-mailbox driver already attached the B2A
+ * IRQs (SPI 61-64) and rpmsg enabled mailbox0. Min test: kick channel 0 each
+ * tick; Linux sees the mailbox IRQ count climb in /proc/interrupts.
+ */
+
+#define MBOX0_BASE     0xfec60000UL
+#define MBOX0_B2A_CMD0 (*(volatile uint32_t *)(MBOX0_BASE + 0x30UL))
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
@@ -116,9 +125,14 @@ static int amp_heartbeat(int argc, char *argv[])
   for (; ; )
     {
       AMP_SHMEM_COUNT = AMP_SHMEM_COUNT + 1;
+
+      /* Ring Linux via mailbox0 B2A channel 0 (doorbell min test) */
+
+      MBOX0_B2A_CMD0 = 0xa5a50000u | (AMP_SHMEM_COUNT & 0xffffu);
+
       amp_puts("[AMP] tick ");
       amp_putu(AMP_SHMEM_COUNT);
-      amp_puts("\n");
+      amp_puts(" (kick mbox)\n");
       usleep(1000000);
     }
 
