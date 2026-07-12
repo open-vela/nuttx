@@ -40,38 +40,94 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Cross-core heartbeat in amp-shmem@31000000 (outside NuttX RAM and Linux
- * no-map). Linux reads it via /dev/mem: busybox devmem 0x31000004 32.
- */
-
 #define AMP_SHMEM_MAGIC (*(volatile uint32_t *)0x31000000UL)
 #define AMP_SHMEM_COUNT (*(volatile uint32_t *)0x31000004UL)  /* timer/usleep */
 #define AMP_BUSY_COUNT  (*(volatile uint32_t *)0x31000008UL)  /* busy-loop */
 #define AMP_MAGIC_VALUE 0x414d5033u  /* "AMP3" */
 
+/* Direct polled write to the SHARED UART2 (0xfeb50000). Does NOT go through the
+ * NuttX serial driver or any IRQ, so it keeps printing even if the interrupt
+ * path is disturbed by the Linux GIC takeover. Borrow-only: poll LSR.THRE +
+ * write THR, never reconfigure. Output interleaves with the Linux log.
+ */
+
+#define UART2_THR (*(volatile uint32_t *)0xfeb50000UL)
+#define UART2_LSR (*(volatile uint32_t *)0xfeb50014UL)
+#define UART_LSR_THRE (1u << 5)
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+static void amp_putc(char c)
+{
+  unsigned int spin = 0;
+  while (!(UART2_LSR & UART_LSR_THRE) && ++spin < 200000)
+    {
+    }
+
+  UART2_THR = (uint32_t)c;
+}
+
+static void amp_puts(const char *s)
+{
+  while (*s)
+    {
+      if (*s == '\n')
+        {
+          amp_putc('\r');
+        }
+
+      amp_putc(*s++);
+    }
+}
+
+static void amp_putu(unsigned int v)
+{
+  char buf[12];
+  int  i = 0;
+
+  if (v == 0)
+    {
+      amp_putc('0');
+      return;
+    }
+
+  while (v && i < (int)sizeof(buf))
+    {
+      buf[i++] = (char)('0' + (v % 10u));
+      v /= 10u;
+    }
+
+  while (i > 0)
+    {
+      amp_putc(buf[--i]);
+    }
+}
+
+/* Heartbeat driven by usleep() -> depends on the arch timer tick. */
 
 static int amp_heartbeat(int argc, char *argv[])
 {
   AMP_SHMEM_MAGIC = AMP_MAGIC_VALUE;
   AMP_SHMEM_COUNT = 0;
-  syslog(LOG_INFO, "[AMP] NuttX heartbeat running @0x31000000\n");
+  amp_puts("[AMP] hb start\n");
 
   for (; ; )
     {
       AMP_SHMEM_COUNT = AMP_SHMEM_COUNT + 1;
+      amp_puts("[AMP] tick ");
+      amp_putu(AMP_SHMEM_COUNT);
+      amp_puts("\n");
       usleep(1000000);
     }
 
   return 0;
 }
 
-/* Timer-independent busy-loop counter. If this keeps rising after the
- * usleep counter (0x31000004) freezes, cpu_l3 is still alive and only the
- * timer IRQ was cut (e.g. by Linux GIC takeover); if it also freezes, the
- * core was hung.
+/* Timer-independent busy-loop. Keeps printing as long as the core executes,
+ * even if the timer tick is gone. Last "[AMP] busy N" on the wire marks the
+ * exact instant cpu_l3 stops executing.
  */
 
 static int amp_busy(int argc, char *argv[])
@@ -82,11 +138,14 @@ static int amp_busy(int argc, char *argv[])
 
   for (; ; )
     {
-      for (d = 0; d < 20000000; d++)
+      for (d = 0; d < 40000000; d++)
         {
         }
 
       AMP_BUSY_COUNT = AMP_BUSY_COUNT + 1;
+      amp_puts("[AMP] busy ");
+      amp_putu(AMP_BUSY_COUNT);
+      amp_puts("\n");
     }
 
   return 0;
@@ -118,15 +177,11 @@ int evb7_amp_bringup(void)
     }
 #endif
 
-  syslog(LOG_INFO,
-         "[AMP] hello from NuttX on cpu_l3 (RK3588 EVB7 V11 AMP)\n");
+  amp_puts("[AMP] hello from NuttX on cpu_l3 (RK3588 EVB7 V11 AMP)\n");
 
-  /* Start the cross-core heartbeat so Linux can confirm this core is alive */
+  /* Timer-based + timer-independent liveness threads, both print to UART2 */
 
   kthread_create("amp_hb", 100, 2048, amp_heartbeat, NULL);
-
-  /* Lower-priority busy-loop counter for timer-independent liveness check */
-
   kthread_create("amp_busy", 50, 2048, amp_busy, NULL);
 
   UNUSED(ret);
