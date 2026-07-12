@@ -911,7 +911,41 @@ static void arm64_gic_init(void)
 {
   int       err;
 
-  g_gic_rdists = CONFIG_GICR_BASE + up_cpu_index() * CONFIG_GICR_OFFSET;
+  /* Locate THIS core's redistributor by matching GICR_TYPER.Affinity to our
+   * MPIDR, instead of assuming rdist index == up_cpu_index(). On AMP, NuttX
+   * runs on a non-zero physical core (e.g. cpu_l3, MPIDR 0x300) while
+   * up_cpu_index() is 0, so the old "base + cpu_index * stride" picked cpu0's
+   * redistributor and this core's PPIs (including the arch timer) were never
+   * enabled. Matching by affinity is the GICv3-standard method and also works
+   * for ordinary SMP.
+   */
+
+  uint64_t      mpidr = arm64_get_mpid(0);
+  uint64_t      aff   = (((mpidr >> 32) & 0xff) << 24) |
+                        (((mpidr >> 16) & 0xff) << 16) |
+                        (((mpidr >> 8)  & 0xff) << 8)  |
+                         (mpidr & 0xff);
+  unsigned long rdist = CONFIG_GICR_BASE;
+  int           i;
+
+  for (i = 0; i < 16; i++)
+    {
+      uint64_t typer = getreg64(rdist + GICR_TYPER);
+
+      if ((typer >> 32) == aff)
+        {
+          break;                 /* found this core's redistributor */
+        }
+
+      if (typer & BIT(4))        /* GICR_TYPER.Last: no more frames */
+        {
+          break;
+        }
+
+      rdist += CONFIG_GICR_OFFSET;
+    }
+
+  g_gic_rdists = rdist;
 
   gicv3_rdist_enable(gic_get_rdist());
 
