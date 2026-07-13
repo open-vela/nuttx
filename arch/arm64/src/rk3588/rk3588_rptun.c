@@ -69,9 +69,30 @@
 #define RPMSG_TX_CHAN         0            /* B2A: cpu_l3 -> Linux (rpmsg-rx) */
 #define RPMSG_RX_CHAN         3            /* A2B: Linux -> cpu_l3 (rpmsg-tx) */
 
-/* A2B mailbox interrupt to cpu_l3: GIC SPI 100 -> NuttX irq 100 + 32 */
+/* A2B mailbox RX interrupt for cpu_l3.
+ *
+ * IMPORTANT: rockchip's rk3588-amp.dtsi amp-irqs list uses GIC INTIDs directly
+ * (verified: its UART5 entry is 368 = GIC_SPI 336 + 32). Its MAILBOX entry is
+ * 100, i.e. GIC INTID 100 = SPI 68 = mailbox0 A2B channel 3 (the Linux-side
+ * B2A ch0-3 are SPI 61-64; the A2B ch0-3 follow as SPI 65-68). Linux's
+ * gic_dist_init() routes INTID 100 to cpu_l3 (aff 0x300) via that amp-irqs
+ * entry. So the RX doorbell INTID is 100, NOT 132 -- the earlier "100 + 32"
+ * enabled INTID 132 (an unrelated SPI), which is exactly why the mailbox
+ * interrupt never reached NuttX and we fell back to polling.
+ */
 
-#define RK3588_MBOX_A2B_IRQ   (100 + 32)
+#define RK3588_MBOX_A2B_IRQ   100
+
+/* GICv3 distributor (RK3588) — used to re-point our RX INTID's IROUTER back to
+ * cpu_l3 after up_enable_irq(). NuttX's generic arm64_gic_irq_enable() writes
+ * IROUTER = up_cpu_index() (0 in this UP build => cpu0/Linux), which would
+ * steal the mailbox IRQ away from us; we rewrite it to cpu_l3's affinity.
+ */
+
+#define RK3588_GICD_BASE       0xfe600000ul
+#define RK3588_GICD_IROUTER(n) (RK3588_GICD_BASE + 0x6000ul + (n) * 8ul)
+#define RK3588_CPU_L3_AFF      0x300ul   /* MPIDR aff: cluster3, cpu0 = cpu_l3 */
+#define putreg64b(v, a)        (*(volatile uint64_t *)(a) = (v))
 
 #define getreg32b(a)          (*(volatile uint32_t *)(a))
 #define putreg32b(v, a)       (*(volatile uint32_t *)(a) = (v))
@@ -352,10 +373,16 @@ int rk3588_rptun_init(const char *shmemname, const char *cpuname)
       return ret;
     }
 
-  /* NOTE: the actual GIC enable + routing is deferred to
-   * rk3588_rptun_irq_setup() (spawned below) because Linux's later GIC
-   * distributor init would otherwise wipe an early enable.
+  /* Enable the RX INTID and force its routing to cpu_l3. up_enable_irq()
+   * (arm64_gic_irq_enable) writes GICD_IROUTER = up_cpu_index() = 0 for SPIs,
+   * which would deliver the mailbox A2B IRQ to cpu0 (Linux). Rewrite IROUTER
+   * to cpu_l3's affinity (0x300) so it comes to us. Linux's amp-irqs handling
+   * (rockchip_amp_check_amp_irq) makes its GICv3 driver skip this INTID in
+   * mask/unmask/eoi, so our routing survives the Linux GIC probe.
    */
+
+  up_enable_irq(RK3588_MBOX_A2B_IRQ);
+  putreg64b(RK3588_CPU_L3_AFF, RK3588_GICD_IROUTER(RK3588_MBOX_A2B_IRQ));
 
   dev->rptun.ops = &g_rk3588_rptun_ops;
   strncpy(dev->cpuname, cpuname, RPMSG_NAME_SIZE);
