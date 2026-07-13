@@ -76,9 +76,13 @@
  * 100, i.e. GIC INTID 100 = SPI 68 = mailbox0 A2B channel 3 (the Linux-side
  * B2A ch0-3 are SPI 61-64; the A2B ch0-3 follow as SPI 65-68). Linux's
  * gic_dist_init() routes INTID 100 to cpu_l3 (aff 0x300) via that amp-irqs
- * entry. So the RX doorbell INTID is 100, NOT 132 -- the earlier "100 + 32"
- * enabled INTID 132 (an unrelated SPI), which is exactly why the mailbox
- * interrupt never reached NuttX and we fell back to polling.
+ * entry. So the RX doorbell INTID is 100.
+ *
+ * INTID 100 is a Non-secure Group-1 interrupt and IS delivered to NS-EL1 on
+ * cpu_l3 (verified on target). It is NOT a GIC group/secure problem. The only
+ * catch is that Linux's gic_dist_init() (~15s) disables all SPIs and clears
+ * A2B_INTEN, and never re-enables our amp irq; NuttX must re-arm it (see
+ * rk3588_rptun_irq_keepalive). With that, RX is fully interrupt-driven.
  */
 
 #define RK3588_MBOX_A2B_IRQ   100
@@ -96,6 +100,14 @@
 
 #define getreg32b(a)          (*(volatile uint32_t *)(a))
 #define putreg32b(v, a)       (*(volatile uint32_t *)(a) = (v))
+
+/* GICD_ISENABLER for the RX INTID. INTID 100 -> ISENABLER3 (covers 96..127),
+ * bit 4. Used by the keepalive thread to re-arm the interrupt after Linux's
+ * gic_dist_init disables all SPIs.
+ */
+
+#define RK3588_GICD_ISENABLER(n) (RK3588_GICD_BASE + 0x100ul + ((n) / 32) * 4ul)
+#define RK3588_GICD_ISENABLER_BIT(n) (1u << ((n) % 32))
 
 /****************************************************************************
  * Private Types
@@ -220,12 +232,47 @@ static int rk3588_rptun_stop(struct rptun_dev_s *dev)
   return 0;
 }
 
+/* Re-arm the mailbox RX interrupt: (re-)enable the GIC INTID, keep it routed
+ * to cpu_l3, and (re-)enable the mailbox A2B RX channel interrupt. Idempotent
+ * and cheap. Used by the bounded startup keepalive (to survive Linux's
+ * gic_dist_init) and opportunistically from the TX path (to cover a later
+ * Linux GIC re-init such as suspend/resume, whenever we have TX traffic).
+ */
+
+static void rk3588_rptun_irq_rearm(void)
+{
+  putreg32b(RK3588_GICD_ISENABLER_BIT(RK3588_MBOX_A2B_IRQ),
+            RK3588_GICD_ISENABLER(RK3588_MBOX_A2B_IRQ));
+  putreg64b(RK3588_CPU_L3_AFF, RK3588_GICD_IROUTER(RK3588_MBOX_A2B_IRQ));
+  putreg32b(getreg32b(MBOX0_BASE + MBOX_A2B_INTEN) | (1u << RPMSG_RX_CHAN),
+            MBOX0_BASE + MBOX_A2B_INTEN);
+}
+
 /* Ring Linux: write B2A_DAT (magic) then B2A_CMD (link_id) on channel 0.
  * (Verified: Linux rk_rpmsg_rx_callback accepts this and kicks vring0.)
  */
 
 static int rk3588_rptun_notify(struct rptun_dev_s *dev, uint32_t vqid)
 {
+  /* TODO(suspend/resume): opportunistic RX-interrupt backstop.
+   *
+   * Uncommenting the rk3588_rptun_irq_rearm() below re-arms our RX interrupt
+   * on every TX, so it survives a LATER Linux GIC re-init (Linux disables all
+   * SPIs and clears mailbox A2B_INTEN whenever it re-runs gic_dist_init).
+   *
+   * Left DISABLED on purpose: this board has NO Linux suspend/resume or CPU
+   * hotplug scenario, and Linux's ONE-TIME gic_dist_init at boot (~15s) is
+   * already fully covered by the bounded startup keepalive
+   * (rk3588_rptun_irq_keepalive). So the extra per-TX register writes are
+   * unnecessary today.
+   *
+   * Re-enable ONLY IF Linux S3 suspend/resume (or CPU hotplug that re-inits
+   * the GIC) is introduced later -- otherwise the RX interrupt would go dead
+   * after the first resume with no one to re-arm it.
+   */
+
+  /* rk3588_rptun_irq_rearm(); */
+
   putreg32b(RPMSG_MBOX_MAGIC, MBOX0_BASE + MBOX_B2A_DAT(RPMSG_TX_CHAN));
   putreg32b(RPMSG_LINK_ID,    MBOX0_BASE + MBOX_B2A_CMD(RPMSG_TX_CHAN));
 
@@ -245,16 +292,15 @@ static int rk3588_rptun_register_callback(struct rptun_dev_s *dev,
   return 0;
 }
 
-/* A2B mailbox interrupt: Linux kicked us. Read/clear status, notify OpenAMP. */
+/* A2B mailbox interrupt: Linux kicked us. Read/clear status, notify OpenAMP.
+ * This is the real RX path (interrupt-driven). Linux sends on A2B ch3
+ * (rpmsg-tx = INTID 100); we service every pending A2B channel defensively.
+ */
 
 static int rk3588_rptun_isr(int irq, void *context, void *arg)
 {
   struct rk3588_rptun_dev_s *dev = &g_rptun_dev;
   uint32_t status = getreg32b(MBOX0_BASE + MBOX_A2B_STATUS);
-
-  /* Handle every pending A2B channel (Linux uses ch3 for rpmsg-tx, but stay
-   * robust to any channel). Clear each serviced bit and notify OpenAMP.
-   */
 
   if (status != 0u)
     {
@@ -279,56 +325,42 @@ static int rk3588_rptun_isr(int irq, void *context, void *arg)
   return OK;
 }
 
-/* A2B RX poll fallback. The GIC AMP routing of the mailbox A2B SPI (100) to
- * cpu_l3 does not deliver the interrupt here (Linux devmem shows A2B_STATUS
- * stuck with the pending bit set and no ISR), likely due to GIC group/security
- * config that needs BL31 cooperation. Since A2B_STATUS is set reliably by
- * Linux, poll it and drive the same path the ISR would.
- */
-
-/* A2B RX via polling.
+/* RX interrupt keepalive thread.
  *
- * The mailbox A2B interrupt (SPI 100) cannot be delivered to NuttX here: Linux
- * devmem shows GICD_IROUTER(100)=0x500 (routed to cpu5, not our cpu_l3, and it
- * reverts to 0x500 even after we write 0x300) and GICD_IGROUPR bit for SPI 100
- * = 0 (Group0/secure). rockchip's AMP interrupt delivery to a remote core is
- * arranged by BL31 (EL3) with specific GIC group/security state that our
- * NS-EL1 NuttX cannot reprogram. So poll A2B_STATUS instead -- cpu_l3 is
- * dedicated to NuttX, so a 5ms register poll costs effectively nothing.
+ * The mailbox A2B RX interrupt (INTID 100) IS a Non-secure Group-1 interrupt
+ * and is delivered fine to NS-EL1 on cpu_l3 -- proven on target: with this
+ * keepalive active, rpmsg RX runs entirely from rk3588_rptun_isr (rx_count
+ * climbed to 10000 with the poll no longer collecting RX, and a devmem poke of
+ * any A2B channel triggers the ISR).
+ *
+ * The reason interrupt RX did NOT work before was NOT a GIC group/secure
+ * problem: Linux's gic_dist_init() (~15s) resets the (shared) GICD -- it
+ * DISABLES all SPIs (GICD_ICENABLER) and its rockchip-amp handling only
+ * restores IROUTER, never re-enables; Linux also clears the mailbox A2B
+ * interrupt-enable. So the SPI ended up disabled with A2B_INTEN cleared, and
+ * NuttX (having enabled it once at boot) never re-armed it.
+ *
+ * Fix (pure NS side, no BL31/OP-TEE change): re-arm the RX path. Linux only
+ * disables it ONCE, during gic_dist_init (~15s), so this thread re-arms every
+ * 100ms for the first ~30s (to reliably survive that event) and then EXITS --
+ * steady state needs no polling. A later Linux GIC re-init (suspend/resume) is
+ * covered opportunistically by the TX-path re-arm in rk3588_rptun_notify().
  */
 
-static int rk3588_rptun_rx_poll(int argc, char *argv[])
+#define RK3588_RPTUN_KEEPALIVE_MS      100
+#define RK3588_RPTUN_KEEPALIVE_ROUNDS  300   /* 300 * 100ms = 30s */
+
+static int rk3588_rptun_irq_keepalive(int argc, char *argv[])
 {
-  struct rk3588_rptun_dev_s *dev = &g_rptun_dev;
+  int i;
 
-  for (; ; )
+  for (i = 0; i < RK3588_RPTUN_KEEPALIVE_ROUNDS; i++)
     {
-      uint32_t status = getreg32b(MBOX0_BASE + MBOX_A2B_STATUS);
-
-      if (status != 0u)
-        {
-          unsigned int ch;
-
-          for (ch = 0; ch < 4; ch++)
-            {
-              if (status & (1u << ch))
-                {
-                  (void)getreg32b(MBOX0_BASE + MBOX_A2B_CMD(ch));
-                  (void)getreg32b(MBOX0_BASE + MBOX_A2B_DAT(ch));
-                  putreg32b(1u << ch, MBOX0_BASE + MBOX_A2B_STATUS);
-                }
-            }
-
-          if (dev->callback != NULL)
-            {
-              dev->callback(dev->arg, RPTUN_NOTIFY_ALL);
-            }
-        }
-
-      nxsig_usleep(5000);
+      rk3588_rptun_irq_rearm();
+      nxsig_usleep(RK3588_RPTUN_KEEPALIVE_MS * 1000);
     }
 
-  return 0;
+  return 0;   /* startup window done; steady state needs no re-arm */
 }
 
 /****************************************************************************
@@ -358,28 +390,22 @@ int rk3588_rptun_init(const char *shmemname, const char *cpuname)
   memset((void *)0x07c00000ul, 0, 0x8000);         /* vring0 full slot     */
   memset((void *)0x07c08000ul, 0, 0x0f000 - 0x8000); /* vring1 up to rsctbl */
 
-  /* Enable the A2B RX interrupt (Linux -> cpu_l3 doorbell). Linux sends on
-   * channel 3 (rpmsg-tx); also enable channel 0 defensively.
+  /* Enable the mailbox A2B RX interrupt (Linux -> cpu_l3 doorbell) and wire up
+   * the ISR. Linux sends rpmsg-tx on A2B channel 3 => INTID 100. Enable that
+   * channel's mailbox interrupt, attach + enable the GIC INTID, and route it
+   * to cpu_l3. (A keepalive thread below re-arms all of this after Linux's GIC
+   * reset; see rk3588_rptun_irq_keepalive.)
    */
 
-  putreg32b(getreg32b(MBOX0_BASE + MBOX_A2B_INTEN) |
-            (1u << RPMSG_RX_CHAN) | (1u << RPMSG_TX_CHAN),
+  putreg32b(getreg32b(MBOX0_BASE + MBOX_A2B_INTEN) | (1u << RPMSG_RX_CHAN),
             MBOX0_BASE + MBOX_A2B_INTEN);
 
   ret = irq_attach(RK3588_MBOX_A2B_IRQ, rk3588_rptun_isr, dev);
   if (ret < 0)
     {
-      rpmsgerr("ERROR: irq_attach failed %d\n", ret);
+      rpmsgerr("ERROR: irq_attach(%d) failed %d\n", RK3588_MBOX_A2B_IRQ, ret);
       return ret;
     }
-
-  /* Enable the RX INTID and force its routing to cpu_l3. up_enable_irq()
-   * (arm64_gic_irq_enable) writes GICD_IROUTER = up_cpu_index() = 0 for SPIs,
-   * which would deliver the mailbox A2B IRQ to cpu0 (Linux). Rewrite IROUTER
-   * to cpu_l3's affinity (0x300) so it comes to us. Linux's amp-irqs handling
-   * (rockchip_amp_check_amp_irq) makes its GICv3 driver skip this INTID in
-   * mask/unmask/eoi, so our routing survives the Linux GIC probe.
-   */
 
   up_enable_irq(RK3588_MBOX_A2B_IRQ);
   putreg64b(RK3588_CPU_L3_AFF, RK3588_GICD_IROUTER(RK3588_MBOX_A2B_IRQ));
@@ -395,11 +421,13 @@ int rk3588_rptun_init(const char *shmemname, const char *cpuname)
       return ret;
     }
 
-  /* Start the A2B RX poll thread (mailbox interrupt cannot reach us; see
-   * rk3588_rptun_rx_poll comment).
+  /* Start the bounded RX interrupt keepalive thread: re-arms INTID 100 /
+   * IROUTER / A2B_INTEN for the first ~30s to survive Linux's one-time GIC
+   * reset (~15s), then exits. RX itself is interrupt-driven (rk3588_rptun_isr);
+   * the TX path (rk3588_rptun_notify) re-arms opportunistically thereafter.
    */
 
-  kthread_create("rptun_rx", 200, 2048, rk3588_rptun_rx_poll, NULL);
+  kthread_create("rptun_ka", 200, 2048, rk3588_rptun_irq_keepalive, NULL);
 
   return ret;
 }
