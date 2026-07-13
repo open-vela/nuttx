@@ -23,6 +23,10 @@ include common/Make.defs
 # Rockchip RK3588 specific C source files
 CHIP_CSRCS  = rk3588_boot.c rk3588_serial.c
 
+ifeq ($(CONFIG_RPTUN),y)
+CHIP_CSRCS += rk3588_rptun.c rk3588_rsctable.c rk3588_addrenv.c
+endif
+
 ifeq ($(CONFIG_ARCH_EARLY_PRINT),y)
 CHIP_ASRCS  = rk3588_lowputc.S
 endif

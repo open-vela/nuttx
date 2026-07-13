@@ -73,6 +73,15 @@ static const struct arm_mmu_region g_mmu_regions[] =
   MMU_REGION_FLAT_ENTRY("AMP_SHMEM",
                         0x31000000, MB(4),
                         MT_NORMAL_NC | MT_RW | MT_SECURE),
+
+  /* rpmsg region: vrings@0x07c00000 (rpmsg_reserved) + buffer pool@0x08000000
+   * (rpmsg-dma_reserved). Non-cacheable so vring/buffers stay coherent with
+   * Linux. Covers 0x07c00000..0x08200000 (6MB).
+   */
+
+  MMU_REGION_FLAT_ENTRY("AMP_RPMSG",
+                        0x07c00000, MB(6),
+                        MT_NORMAL_NC | MT_RW | MT_SECURE),
 };
 
 const struct arm_mmu_config g_mmu_config =
