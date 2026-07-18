@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_start.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -37,9 +39,11 @@
 #include "esp_lowputc.h"
 #include "esp_start.h"
 
+#include "esp_rom_sys.h"
 #include "esp_clk_internal.h"
 #include "esp_private/rtc_clk.h"
 #include "esp_cpu.h"
+#include "esp_private/esp_mmu_map_private.h"
 #include "esp_private/brownout.h"
 #include "hal/wdt_hal.h"
 #include "hal/mmu_hal.h"
@@ -47,20 +51,40 @@
 #include "hal/cache_types.h"
 #include "hal/cache_ll.h"
 #include "hal/cache_hal.h"
+#include "hal/rwdt_ll.h"
 #include "soc/ext_mem_defs.h"
-#include "soc/extmem_reg.h"
-#include "soc/mmu.h"
 #include "soc/reg_base.h"
 #include "spi_flash_mmap.h"
 #include "rom/cache.h"
+#include "soc/soc.h"
+#include "soc/soc_caps.h"
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+#  include "soc/hp_peri_pms_reg.h"
+#  include "soc/lp_peri_pms_reg.h"
+#endif
+#include "soc/rtc.h"
 
 #include "bootloader_init.h"
+#include "bootloader_sha.h"
 
 #ifdef CONFIG_ESPRESSIF_SIMPLE_BOOT
-#include "bootloader_flash_priv.h"
-#include "esp_rom_uart.h"
-#include "esp_rom_sys.h"
+#include "esp_rom_serial_output.h"
 #include "esp_app_format.h"
+#endif
+
+#include "bootloader_mem.h"
+#include "bootloader_flash_priv.h"
+#include "esp_private/startup_internal.h"
+#include "esp_private/spi_flash_os.h"
+#ifdef CONFIG_ESPRESSIF_SPIRAM
+#  include "esp_psram.h"
+#  include "esp_private/esp_psram_extram.h"
+#  include "esp_private/regi2c_ctrl.h"
+#  include "soc/regi2c_bias.h"
+#endif
+
+#if SOC_APM_SUPPORTED
+#  include "hal/apm_hal.h"
 #endif
 
 /****************************************************************************
@@ -68,38 +92,32 @@
  ****************************************************************************/
 
 #ifdef CONFIG_DEBUG_FEATURES
-#  define showprogress(c)     riscv_lowputc(c)
+#  define showprogress(c)     esp_rom_printf(c)
 #else
 #  define showprogress(c)
 #endif
 
 #if defined(CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT) || \
     defined (CONFIG_ESPRESSIF_SIMPLE_BOOT)
-#ifdef CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT
-#  define PRIMARY_SLOT_OFFSET   CONFIG_ESPRESSIF_OTA_PRIMARY_SLOT_OFFSET
-#  define MMU_FLASH_MASK        (~(MMU_BLOCK_SIZE - 1))
-#else
-/* Force offset to the beginning of the whole image
- */
-
-#  define PRIMARY_SLOT_OFFSET   0
-#endif
+#  ifdef CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT
+#    define PRIMARY_SLOT_OFFSET   CONFIG_ESPRESSIF_OTA_PRIMARY_SLOT_OFFSET
+#  else
+#    define PRIMARY_SLOT_OFFSET   0  /* Force offset to the beginning of the whole image */
+#  endif
 #  define HDR_ATTR              __attribute__((section(".entry_addr"))) \
-                                  __attribute__((used))
-#  define FLASH_MMU_TABLE       ((volatile uint32_t*) DR_REG_MMU_TABLE)
-#  define FLASH_MMU_TABLE_SIZE  (ICACHE_MMU_SIZE/sizeof(uint32_t))
-#  define MMU_BLOCK_SIZE        0x00010000  /* 64 KB */
-#  define CACHE_REG             EXTMEM_ICACHE_CTRL1_REG
-#  define CACHE_MASK            (EXTMEM_ICACHE_SHUT_IBUS_M | \
-                                 EXTMEM_ICACHE_SHUT_DBUS_M)
-
+                                __attribute__((used))
 #  define CHECKSUM_ALIGN        16
 #  define IS_PADD(addr) ((addr) == 0)
+#if defined(SOC_TCM_LOW) || defined(SOC_TCM_HIGH)
+#  define IS_TCM(addr)  ((addr) >= SOC_TCM_LOW && (addr) < SOC_TCM_HIGH)
+#else
+#  define IS_TCM(addr) false
+#endif
 #  define IS_DRAM(addr) ((addr) >= SOC_DRAM_LOW && (addr) < SOC_DRAM_HIGH)
 #  define IS_IRAM(addr) ((addr) >= SOC_IRAM_LOW && (addr) < SOC_IRAM_HIGH)
 #  define IS_IROM(addr) ((addr) >= SOC_IROM_LOW && (addr) < SOC_IROM_HIGH)
 #  define IS_DROM(addr) ((addr) >= SOC_DROM_LOW && (addr) < SOC_DROM_HIGH)
-#  define IS_SRAM(addr) (IS_IRAM(addr) || IS_DRAM(addr))
+#  define IS_SRAM(addr) (IS_TCM(addr) || IS_IRAM(addr) || IS_DRAM(addr))
 #  define IS_MMAP(addr) (IS_IROM(addr) || IS_DROM(addr))
 #  ifdef SOC_RTC_FAST_MEM_SUPPORTED
 #    define IS_RTC_FAST_IRAM(addr) \
@@ -122,6 +140,7 @@
 #  define IS_NONE(addr) (!IS_IROM(addr) \
                          && !IS_DROM(addr) \
                          && !IS_IRAM(addr) \
+                         && !IS_TCM(addr) \
                          && !IS_DRAM(addr) \
                          && !IS_RTC_FAST_IRAM(addr) \
                          && !IS_RTC_FAST_DRAM(addr) \
@@ -130,6 +149,8 @@
 
 #  define IS_MAPPING(addr) IS_IROM(addr) || IS_DROM(addr)
 #endif
+
+#define NAPOT_RWX   (PMPCFG_A_NAPOT | PMPCFG_RWX_MASK)
 
 /****************************************************************************
  * Private Types
@@ -146,6 +167,12 @@ extern uint8_t _image_drom_lma[];
 extern uint8_t _image_drom_size[];
 #endif
 
+extern int _vector_table;
+
+#if SOC_INT_CLIC_SUPPORTED
+extern int _mtvt_table;
+#endif
+
 /****************************************************************************
  * ROM Function Prototypes
  ****************************************************************************/
@@ -155,7 +182,12 @@ extern uint8_t _image_drom_size[];
 extern int ets_printf(const char *fmt, ...) printf_like(1, 2);
 #endif
 
+/* Minimal PSRAM diagnostics: readable via NSH xd */
+volatile int g_psram_diag_chip = -1;  /* esp_psram_chip_init result */
+volatile int g_psram_diag_init = -1;  /* esp_psram_init result */
+
 extern void cache_set_idrom_mmu_size(uint32_t irom_size, uint32_t drom_size);
+extern void ets_delay_us(uint32_t us);
 
 /****************************************************************************
  * Private Function Prototypes
@@ -187,30 +219,6 @@ extern uint8_t _rodata_reserved_end[];
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
-
-/****************************************************************************
- * Name: calc_mmu_pages
- *
- * Description:
- *   Calculate the number of cache pages to map.
- *
- * Input Parameters:
- *   size  - Size of data to map
- *   vaddr - Virtual address where data will be mapped
- *
- * Returned Value:
- *   Number of cache MMU pages required to do the mapping.
- *
- ****************************************************************************/
-
-#if defined(CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT) || \
-    defined (CONFIG_ESPRESSIF_SIMPLE_BOOT)
-static inline uint32_t calc_mmu_pages(uint32_t size, uint32_t vaddr)
-{
-  return (size + (vaddr - (vaddr & MMU_FLASH_MASK)) + MMU_BLOCK_SIZE - 1) /
-    MMU_BLOCK_SIZE;
-}
-#endif
 
 /****************************************************************************
  * Name: map_rom_segments
@@ -300,7 +308,8 @@ static int map_rom_segments(uint32_t app_drom_start, uint32_t app_drom_vaddr,
               IS_MMAP(segment_hdr.load_addr) ?
                 IS_IROM(segment_hdr.load_addr) ? "imap" : "dmap" :
                   IS_PADD(segment_hdr.load_addr) ? "padd" :
-                    IS_DRAM(segment_hdr.load_addr) ? "dram" : "iram",
+                    IS_TCM(segment_hdr.load_addr) ? "tcm" :
+                      IS_DRAM(segment_hdr.load_addr) ? "dram" : "iram",
           offset + sizeof(esp_image_segment_header_t),
           segment_hdr.load_addr, segment_hdr.data_len,
           segment_hdr.data_len);
@@ -346,7 +355,7 @@ static int map_rom_segments(uint32_t app_drom_start, uint32_t app_drom_vaddr,
   ets_printf("total segments stored %d\n", segments - 1);
 #endif
 
-  cache_hal_disable(CACHE_TYPE_ALL);
+  cache_hal_disable(CACHE_LL_LEVEL_EXT_MEM, CACHE_TYPE_ALL);
 
   /* Clear the MMU entries that are already set up,
    * so the new app only has the mappings it creates.
@@ -376,11 +385,50 @@ static int map_rom_segments(uint32_t app_drom_start, uint32_t app_drom_vaddr,
   cache_ll_l1_enable_bus(1, bus_mask);
 #endif
 
+#if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+  cache_ll_invalidate_addr(CACHE_LL_LEVEL_ALL, CACHE_TYPE_ALL,
+                           CACHE_LL_ID_ALL, app_irom_vaddr_aligned,
+                           actual_mapped_len);
+#endif
+
   /* ------------------Enable Cache----------------------------------- */
 
-  cache_hal_enable(CACHE_TYPE_ALL);
+  cache_hal_enable(CACHE_LL_LEVEL_EXT_MEM, CACHE_TYPE_ALL);
 
   return (int)rc;
+}
+#endif
+
+/****************************************************************************
+ * Name: recalib_bbpll
+ *
+ * Description:
+ *   Workaround for bootloader calibration issues. This function is placed in
+ *   IRAM because disabling BBPLL may influence the cache.
+ *
+ * Input Parameters:
+ *   None.
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_ARCH_CHIP_ESP32C6) || defined(CONFIG_ARCH_CHIP_ESP32H2)
+static void IRAM_ATTR NOINLINE_ATTR recalib_bbpll(void)
+{
+    rtc_cpu_freq_config_t old_config;
+    rtc_clk_cpu_freq_get_config(&old_config);
+
+  if (old_config.source == SOC_CPU_CLK_SRC_PLL
+#ifdef CONFIG_ARCH_CHIP_ESP32H2
+      || old_config.source == SOC_CPU_CLK_SRC_FLASH_PLL
+#endif
+      )
+    {
+      rtc_clk_cpu_freq_set_xtal();
+      rtc_clk_cpu_freq_set_config(&old_config);
+    }
 }
 #endif
 
@@ -388,16 +436,74 @@ static int map_rom_segments(uint32_t app_drom_start, uint32_t app_drom_vaddr,
  * Public Functions
  ****************************************************************************/
 
+extern void esp_chip_revision_check(void);
+
+/****************************************************************************
+ * Name: riscv_soc_initialize
+ *
+ * Description:
+ *   Initialize SoC-specific initialization.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void weak_function riscv_soc_initialize(void)
+{
+  sys_startup_fn();
+}
+
+/****************************************************************************
+ * Name: sys_startup_fn
+ *
+ * Description:
+ *   Execute the system layer startup function for the current CPU core.
+ *   This function calls the appropriate startup function from the per-CPU
+ *   startup function array (g_startup_fn) based on the current core ID.
+ *   The SYS_STARTUP_FN() macro retrieves the core ID, indexes into the
+ *   g_startup_fn array, and invokes the corresponding startup function.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void sys_startup_fn(void)
+{
+  SYS_STARTUP_FN();
+}
+
 /****************************************************************************
  * Name: __esp_start
  ****************************************************************************/
 
 void __esp_start(void)
 {
+  esp_err_t ret;
+
+  esp_cpu_intr_set_ivt_addr(&_vector_table);
+
+#if SOC_INT_CLIC_SUPPORTED
+  /* When hardware vectored interrupts are enabled in CLIC,
+   * the CPU jumps to this base address + 4 * interrupt_id.
+   */
+
+  esp_cpu_intr_set_mtvt_addr(&_mtvt_table);
+#endif
+
 #ifdef CONFIG_ESP_ROM_NEEDS_SET_CACHE_MMU_SIZE
   uint32_t _instruction_size;
   uint32_t cache_mmu_irom_size;
 #endif
+
+  bootloader_clear_bss_section();
 
 #ifdef CONFIG_ESPRESSIF_SIMPLE_BOOT
   if (bootloader_init() != 0)
@@ -405,8 +511,12 @@ void __esp_start(void)
       ets_printf("Hardware init failed, aborting\n");
       while (true);
     }
-#else
-  bootloader_clear_bss_section();
+#endif
+
+  /* Initialize the per CPU areas */
+
+#ifdef CONFIG_RISCV_PERCPU_SCRATCH
+  riscv_percpu_add_hart(0);
 #endif
 
 #if defined(CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT) || \
@@ -441,7 +551,7 @@ void __esp_start(void)
 #endif /* CONFIG_ESP_ROM_NEEDS_SET_CACHE_MMU_SIZE */
 
 #if CONFIG_ESP_SYSTEM_BBPLL_RECALIB
-  rtc_clk_recalib_bbpll();
+  recalib_bbpll();
 #endif
 
 #ifdef CONFIG_ESPRESSIF_REGION_PROTECTION
@@ -450,11 +560,89 @@ void __esp_start(void)
   esp_cpu_configure_region_protection();
 #endif
 
+  /* Configure the power related stuff. */
+
+  esp_rtc_init();
+
+  esp_mspi_pin_init();
+
+  /* Configure SPI Flash chip state */
+
+  spi_flash_init_chip_state();
+
+  esp_mmu_map_init();
+
+#ifdef CONFIG_ESPRESSIF_SPIRAM
+  /* ESP32-P4 PSRAM requires the analog I2C master clock to be enabled
+   * for MPLL configuration (used as PSRAM clock source).
+   * In ESP-IDF, the bootloader keeps this clock always enabled.
+   * NuttX simple boot must explicitly enable it before PSRAM init.
+   */
+  {
+    extern void _regi2c_ctrl_ll_master_enable_clock(bool enable);
+    extern void regi2c_ctrl_ll_master_configure_clock(void);
+    _regi2c_ctrl_ll_master_enable_clock(true);
+    regi2c_ctrl_ll_master_configure_clock();
+
+    /* Also set the BIAS registers as done by bootloader_hardware_init() */
+    REGI2C_WRITE_MASK(I2C_BIAS, I2C_BIAS_DREG_1P1, 10);
+    REGI2C_WRITE_MASK(I2C_BIAS, I2C_BIAS_DREG_1P1_PVT, 10);
+
+    /* Wait for analog circuits to stabilize after enabling clocks/bias */
+    ets_delay_us(500);
+  }
+
+  ret = esp_psram_chip_init();
+  g_psram_diag_chip = ret;
+  if (ret != ESP_OK)
+    {
+      ets_printf("PSRAM chip_init failed: %d\n", ret);
+#  ifndef CONFIG_ESPRESSIF_SPIRAM_IGNORE_NOTFOUND
+      PANIC();
+#  endif
+    }
+
+#  ifdef CONFIG_ESPRESSIF_SPIRAM_BOOT_INIT
+  if (ret == ESP_OK)
+    {
+      ret = esp_psram_init();
+      g_psram_diag_init = ret;
+      if (ret != ESP_OK)
+        {
+          ets_printf("PSRAM init failed: %d\n", ret);
+#    ifndef CONFIG_ESPRESSIF_SPIRAM_IGNORE_NOTFOUND
+          PANIC();
+#    endif
+        }
+      else
+        {
+          ets_printf("PSRAM init OK, size=%u\n",
+                     (unsigned)esp_psram_get_size());
+        }
+    }
+#  endif
+#endif
+
   /* Configures the CPU clock, RTC slow and fast clocks, and performs
    * RTC slow clock calibration.
    */
 
   esp_clk_init();
+
+  esp_mspi_pin_reserve();
+
+  bootloader_init_mem();
+
+#ifdef CONFIG_ESPRESSIF_SPIRAM_MEMTEST
+  if (esp_psram_is_initialized() && !esp_psram_extram_test())
+    {
+      PANIC();
+    }
+#endif
+
+#ifdef CONFIG_ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+  esp_psram_bss_init();
+#endif
 
   /* Disable clock of unused peripherals */
 
@@ -476,13 +664,15 @@ void __esp_start(void)
   riscv_earlyserialinit();
 #endif
 
-  showprogress('A');
+  esp_chip_revision_check();
+
+  showprogress("A");
 
   /* Setup the syscall table needed by the ROM code */
 
   esp_setup_syscall_table();
 
-  showprogress('B');
+  showprogress("B");
 
   /* The 2nd stage bootloader enables RTC WDT to monitor any issues that may
    * prevent the startup sequence from finishing correctly. Hence disable it
@@ -495,15 +685,17 @@ void __esp_start(void)
   wdt_hal_disable(&rwdt_ctx);
   wdt_hal_write_protect_enable(&rwdt_ctx);
 
+  showprogress("C");
+
   /* Initialize onboard resources */
 
   esp_board_initialize();
 
-  showprogress('C');
-
-  /* Bring up NuttX */
+  showprogress("D");
 
   nx_start();
+
+  UNUSED(ret);
 
   for (; ; );
 }

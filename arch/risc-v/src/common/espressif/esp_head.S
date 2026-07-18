@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_head.S
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -46,6 +48,7 @@
  ****************************************************************************/
 
 __start:
+
   .option push
   .option norelax
 
@@ -61,15 +64,9 @@ __start:
 
   /* Disable all interrupts (i.e. timer, external) in mstatus */
 
-  csrw CSR_MSTATUS, zero
+  csrc CSR_STATUS, STATUS_IE
 
   .option pop
-
-  /* Initialize the Machine Trap-Vector */
-
-  lui  t0, %hi(_vector_table)
-  addi t0, t0, %lo(_vector_table)
-  csrw  CSR_MTVEC, t0
 
   /* Jump to __esp_start */
 

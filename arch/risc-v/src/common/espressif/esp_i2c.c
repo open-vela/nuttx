@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_i2c.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -24,7 +26,7 @@
 
 #include <nuttx/config.h>
 
-#ifdef CONFIG_ESPRESSIF_I2C_PERIPH
+#ifdef CONFIG_ESPRESSIF_I2C_PERIPH_MASTER_MODE
 
 #include <sys/types.h>
 #include <stdio.h>
@@ -33,15 +35,15 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <time.h>
 #include <sys/time.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/irq.h>
 #include <nuttx/clock.h>
 #include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
-#include <nuttx/spinlock.h>
 #include <nuttx/i2c/i2c_master.h>
 
 #include <arch/board/board.h>
@@ -57,25 +59,31 @@
 #include "hal/i2c_ll.h"
 #include "soc/system_reg.h"
 #include "soc/gpio_sig_map.h"
-#include "soc/i2c_periph.h"
-#if defined(CONFIG_ESPRESSIF_ESP32H2) || defined(CONFIG_ESPRESSIF_ESP32C6)
+#include "hal/i2c_periph.h"
+#include "esp_clk_tree.h"
+#if defined(CONFIG_ARCH_CHIP_ESP32H2) || defined(CONFIG_ARCH_CHIP_ESP32C6)
 #  include "soc/pcr_reg.h"
+#endif
+#if defined(CONFIG_ESPRESSIF_LP_I2C0)
+#  include "driver/rtc_io.h"
+#  include "hal/rtc_io_hal.h"
+#  include "io_mux.h"
+#  include "lp_core_i2c.h"
+#  include "soc/i2c_struct.h"
+#  include "driver/lp_io.h"
+#endif
+#ifdef CONFIG_PM
+#  include "include/esp_pm.h"
 #endif
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_ESPRESSIF_ESP32H2
-#  define SYSTEM_I2C_EXT0_CLK_EN PCR_I2C0_CLK_EN
-#  define SYSTEM_I2C_EXT0_RST    PCR_I2C0_RST_EN
-#  define SYSTEM_I2C_EXT1_CLK_EN PCR_I2C1_CLK_EN
-#  define SYSTEM_I2C_EXT1_RST    PCR_I2C1_RST_EN
-#endif
-
-#ifdef CONFIG_ESPRESSIF_ESP32C6
-#  define SYSTEM_I2C_EXT0_CLK_EN PCR_I2C_CLK_EN
-#  define SYSTEM_I2C_EXT0_RST    PCR_I2C_RST_EN
+#if defined(CONFIG_ESPRESSIF_LP_I2C0)
+#  define ESP_LP_I2C0_ID     LP_I2C_NUM_0
+#else
+#  define ESP_LP_I2C0_ID     I2C_NUM_MAX
 #endif
 
 #define GET_STATUS(hw) hw->sr.val
@@ -122,6 +130,34 @@
 #ifndef CONFIG_I2C_NTRACE
 #  define CONFIG_I2C_NTRACE 32
 #endif
+
+/* Time to wait for the bus to be cleared */
+
+#define I2C_CLR_BUS_TIMEOUT_MS (50)
+
+/* SCL timeout value in microseconds */
+
+#define SCL_TIMEOUT_VAL_US (CONFIG_ESPRESSIF_I2CTIMEOMS * 1000)
+
+#if SOC_PERIPH_CLK_CTRL_SHARED
+#  define I2C_CLOCK_SRC_ATOMIC() PERIPH_RCC_ATOMIC()
+#else
+#  define I2C_CLOCK_SRC_ATOMIC()
+#endif
+
+#if !SOC_RCC_IS_INDEPENDENT
+#  define I2C_RCC_ATOMIC() PERIPH_RCC_ATOMIC()
+#else
+#  define I2C_RCC_ATOMIC()
+#endif
+
+#if SOC_LP_I2C_SUPPORTED
+#  define LP_I2C_SRC_CLK_ATOMIC()    PERIPH_RCC_ATOMIC()
+#  define LP_I2C_BUS_CLK_ATOMIC()    PERIPH_RCC_ATOMIC()
+#endif
+
+#define SCL_PIN_ATTR (FUNCTION_2 || INPUT_PULLUP || OUTPUT_OPEN_DRAIN)
+#define SDA_PIN_ATTR (FUNCTION_2 || INPUT_PULLUP || OUTPUT_OPEN_DRAIN)
 
 /****************************************************************************
  * Private Types
@@ -184,23 +220,8 @@ struct esp_trace_s
 struct esp_i2c_config_s
 {
   uint32_t clk_freq;    /* Clock frequency */
-
   uint8_t scl_pin;      /* GPIO configuration for SCL as SCL */
   uint8_t sda_pin;      /* GPIO configuration for SDA as SDA */
-
-#ifndef CONFIG_I2C_POLLED
-  uint8_t periph;      /* Peripheral ID */
-  uint8_t irq;         /* Interrupt ID */
-#endif
-
-  uint32_t clk_bit;    /* Clock enable bit */
-  uint32_t rst_bit;    /* I2C reset bit */
-
-  uint32_t scl_insig;  /* I2C SCL input signal index */
-  uint32_t scl_outsig; /* I2C SCL output signal index */
-
-  uint32_t sda_insig;  /* I2C SDA input signal index */
-  uint32_t sda_outsig; /* I2C SDA output signal index */
 };
 
 /* I2C Device Private Data */
@@ -213,7 +234,7 @@ struct esp_i2c_priv_s
 
   /* Port configuration */
 
-  const struct esp_i2c_config_s *config;
+  struct esp_i2c_config_s *config;
   int refs;                    /* Reference count */
   mutex_t lock;                /* Mutual exclusion mutex */
 
@@ -238,6 +259,8 @@ struct esp_i2c_priv_s
 
   bool ready_read;             /* If I2C is ready for receiving data */
 
+  soc_module_clk_t clk_src;   /* Clock source */
+
   uint32_t clk_freq;           /* Current I2C Clock frequency */
 
   /* I2C trace support */
@@ -252,6 +275,9 @@ struct esp_i2c_priv_s
 
 #endif
   i2c_hal_context_t *ctx;     /* Common layer struct */
+#ifdef CONFIG_PM
+  esp_pm_lock_handle_t pm_lock; /* Power management lock */
+#endif
 };
 
 /****************************************************************************
@@ -314,7 +340,7 @@ static const struct i2c_ops_s esp_i2c_ops =
 #endif
 };
 
-#ifdef CONFIG_ESPRESSIF_I2C0
+#ifdef CONFIG_ESPRESSIF_I2C0_MASTER_MODE
 
 i2c_hal_context_t i2c0_ctx =
 {
@@ -323,21 +349,11 @@ i2c_hal_context_t i2c0_ctx =
 
 /* I2C device structure */
 
-static const struct esp_i2c_config_s esp_i2c0_config =
+static struct esp_i2c_config_s esp_i2c0_config =
 {
   .clk_freq   = I2C_CLK_FREQ_DEF,
   .scl_pin    = CONFIG_ESPRESSIF_I2C0_SCLPIN,
   .sda_pin    = CONFIG_ESPRESSIF_I2C0_SDAPIN,
-#ifndef CONFIG_I2C_POLLED
-  .periph     = ETS_I2C_EXT0_INTR_SOURCE,
-  .irq        = ESP_IRQ_I2C_EXT0,
-#endif
-  .clk_bit    = SYSTEM_I2C_EXT0_CLK_EN,
-  .rst_bit    = SYSTEM_I2C_EXT0_RST,
-  .scl_insig  = I2CEXT0_SCL_IN_IDX,
-  .scl_outsig = I2CEXT0_SCL_OUT_IDX,
-  .sda_insig  = I2CEXT0_SDA_IN_IDX,
-  .sda_outsig = I2CEXT0_SDA_OUT_IDX
 };
 
 static struct esp_i2c_priv_s esp_i2c0_priv =
@@ -359,13 +375,17 @@ static struct esp_i2c_priv_s esp_i2c0_priv =
 #endif
   .error      = 0,
   .ready_read = false,
+  .clk_src    = I2C_CLK_SRC_DEFAULT,
   .clk_freq   = 0,
-  .ctx = &i2c0_ctx
+  .ctx        = &i2c0_ctx,
+#ifdef CONFIG_PM
+  .pm_lock    = NULL,
+#endif
 };
 #endif
 
-#ifdef CONFIG_ESPRESSIF_I2C1
-
+#ifdef CONFIG_ESPRESSIF_I2C1_MASTER_MODE
+#  if SOC_HP_I2C_NUM > 1
 i2c_hal_context_t i2c1_ctx =
 {
   0
@@ -373,21 +393,11 @@ i2c_hal_context_t i2c1_ctx =
 
 /* I2C device structure */
 
-static const struct esp_i2c_config_s esp_i2c1_config =
+static struct esp_i2c_config_s esp_i2c1_config =
 {
   .clk_freq   = I2C_CLK_FREQ_DEF,
   .scl_pin    = CONFIG_ESPRESSIF_I2C1_SCLPIN,
   .sda_pin    = CONFIG_ESPRESSIF_I2C1_SDAPIN,
-#ifndef CONFIG_I2C_POLLED
-  .periph     = ETS_I2C_EXT1_INTR_SOURCE,
-  .irq        = ESP_IRQ_I2C_EXT1,
-#endif
-  .clk_bit    = SYSTEM_I2C_EXT1_CLK_EN,
-  .rst_bit    = SYSTEM_I2C_EXT1_RST,
-  .scl_insig  = I2CEXT1_SCL_IN_IDX,
-  .scl_outsig = I2CEXT1_SCL_OUT_IDX,
-  .sda_insig  = I2CEXT1_SDA_IN_IDX,
-  .sda_outsig = I2CEXT1_SDA_OUT_IDX
 };
 
 static struct esp_i2c_priv_s esp_i2c1_priv =
@@ -409,10 +419,64 @@ static struct esp_i2c_priv_s esp_i2c1_priv =
 #endif
   .error      = 0,
   .ready_read = false,
+  .clk_src    = I2C_CLK_SRC_DEFAULT,
   .clk_freq   = 0,
-  .ctx        = &i2c1_ctx
+  .ctx        = &i2c1_ctx,
+#ifdef CONFIG_PM
+  .pm_lock    = NULL,
+#endif
 };
+#  else
+#    error "This device contains only a single HP I2C port."
+#  endif /* SOC_HP_I2C_NUM > 0 */
 #endif /* CONFIG_ESPRESSIF_I2C1 */
+
+#ifdef CONFIG_ESPRESSIF_LP_I2C0
+#  if SOC_LP_I2C_NUM > 0
+i2c_hal_context_t lp_i2c0_ctx =
+{
+  0
+};
+
+/* I2C device structure */
+
+static struct esp_i2c_config_s esp_lp_i2c0_config =
+{
+  .clk_freq   = I2C_CLK_FREQ_DEF,
+  .scl_pin    = CONFIG_ESPRESSIF_LPI2C0_SCLPIN,
+  .sda_pin    = CONFIG_ESPRESSIF_LPI2C0_SDAPIN,
+};
+
+static struct esp_i2c_priv_s esp_lp_i2c0_priv =
+{
+  .ops        = &esp_i2c_ops,
+  .id         = LP_I2C_NUM_0,
+  .config     = &esp_lp_i2c0_config,
+  .refs       = 0,
+  .lock       = NXMUTEX_INITIALIZER,
+#ifndef CONFIG_I2C_POLLED
+  .sem_isr    = SEM_INITIALIZER(0),
+#endif
+  .i2cstate   = I2CSTATE_IDLE,
+  .msgv       = NULL,
+  .msgid      = 0,
+  .bytes      = 0,
+#ifndef CONFIG_I2C_POLLED
+  .cpuint     = -ENOMEM,
+#endif
+  .error      = 0,
+  .ready_read = false,
+  .clk_src    = LP_I2C_SCLK_DEFAULT,
+  .clk_freq   = 0,
+  .ctx        = &lp_i2c0_ctx,
+#ifdef CONFIG_PM
+  .pm_lock    = NULL,
+#endif
+};
+#  else
+#    error "This device does not contain a LP I2C port."
+#  endif /* SOC_LP_I2C_NUM > 0 */
+#endif /* CONFIG_ESPRESSIF_LP_I2C0 */
 
 /* Trace events strings */
 
@@ -513,9 +577,9 @@ static void esp_i2c_sendstart(struct esp_i2c_priv_s *priv)
 
   end_cmd.op_code = I2C_LL_CMD_END;
 
-  i2c_ll_write_cmd_reg(priv->ctx->dev, restart_cmd, 0);
-  i2c_ll_write_cmd_reg(priv->ctx->dev, write_cmd, 1);
-  i2c_ll_write_cmd_reg(priv->ctx->dev, end_cmd, 2);
+  i2c_ll_master_write_cmd_reg(priv->ctx->dev, restart_cmd, 0);
+  i2c_ll_master_write_cmd_reg(priv->ctx->dev, write_cmd, 1);
+  i2c_ll_master_write_cmd_reg(priv->ctx->dev, end_cmd, 2);
 
   /* Write data to FIFO register */
 
@@ -562,8 +626,8 @@ static void esp_i2c_senddata(struct esp_i2c_priv_s *priv)
   n = n < I2C_FIFO_SIZE ? n : I2C_FIFO_SIZE;
 
   write_cmd.byte_num = n;
-  i2c_ll_write_cmd_reg(priv->ctx->dev, write_cmd, 0);
-  i2c_ll_write_cmd_reg(priv->ctx->dev, end_cmd, 1);
+  i2c_ll_master_write_cmd_reg(priv->ctx->dev, write_cmd, 0);
+  i2c_ll_master_write_cmd_reg(priv->ctx->dev, end_cmd, 1);
   i2c_ll_write_txfifo(priv->ctx->dev, &msg->buffer[priv->bytes], n);
   i2c_ll_master_enable_tx_it(priv->ctx->dev);
 
@@ -641,10 +705,10 @@ static void esp_i2c_startrecv(struct esp_i2c_priv_s *priv)
   read_cmd.byte_num = n;
   read_cmd.ack_val = ack_value;
   read_cmd.op_code = I2C_LL_CMD_READ;
-  i2c_ll_write_cmd_reg(priv->ctx->dev, read_cmd, 0);
+  i2c_ll_master_write_cmd_reg(priv->ctx->dev, read_cmd, 0);
 
   end_cmd.op_code = I2C_LL_CMD_END;
-  i2c_ll_write_cmd_reg(priv->ctx->dev, end_cmd, 1);
+  i2c_ll_master_write_cmd_reg(priv->ctx->dev, end_cmd, 1);
 
   /* Enable I2C master RX interrupt */
 
@@ -675,7 +739,7 @@ static void esp_i2c_sendstop(struct esp_i2c_priv_s *priv)
       .op_code = I2C_LL_CMD_STOP
     };
 
-  i2c_ll_write_cmd_reg(priv->ctx->dev, stop_cmd, 0);
+  i2c_ll_master_write_cmd_reg(priv->ctx->dev, stop_cmd, 0);
 
   /* Enable I2C master TX interrupt */
 
@@ -703,17 +767,73 @@ static void esp_i2c_sendstop(struct esp_i2c_priv_s *priv)
 static void esp_i2c_init_clock(struct esp_i2c_priv_s *priv,
                                uint32_t bus_freq)
 {
+  uint32_t src_clk_frequency = 0;
+
   if (bus_freq == priv->clk_freq)
     {
       return ;
     }
 
-  i2c_clock_source_t src_clk = I2C_CLK_SRC_DEFAULT;
-  i2c_hal_set_bus_timing(priv->ctx, priv->config->clk_freq,
-                         src_clk, XTAL_CLK_FREQ);
+  esp_clk_tree_src_get_freq_hz(priv->clk_src,
+                               ESP_CLK_TREE_SRC_FREQ_PRECISION_APPROX,
+                               &src_clk_frequency);
+
+  I2C_CLOCK_SRC_ATOMIC()
+    {
+      i2c_hal_set_bus_timing(priv->ctx, priv->config->clk_freq,
+                             priv->clk_src, src_clk_frequency);
+    }
+
+  i2c_hal_master_set_scl_timeout_val(priv->ctx, SCL_TIMEOUT_VAL_US,
+                                     src_clk_frequency);
+
+#ifdef CONFIG_ESPRESSIF_LPI2C
+  LP_I2C_SRC_CLK_ATOMIC()
+    {
+      lp_i2c_ll_set_source_clk(priv->ctx->dev, priv->clk_src);
+    }
+#else
+  I2C_CLOCK_SRC_ATOMIC()
+    {
+      i2c_ll_set_source_clk(priv->ctx->dev, priv->clk_src);
+    }
+#endif
+
   i2c_ll_update(priv->ctx->dev);
   priv->clk_freq = bus_freq;
 }
+
+#ifdef CONFIG_ESPRESSIF_LPI2C
+/****************************************************************************
+ * Name: esp_lp_i2c_config_io
+ *
+ * Description:
+ *   Configures LP I2C pin.
+ *
+ * Parameters:
+ *   priv      - Pointer to the private driver struct.
+ *   pin       - Pin number to configure.
+ *
+ * Return Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+static void esp_lp_i2c_config_io(const struct esp_i2c_priv_s *priv,
+                                 int8_t pin)
+{
+  int lp_pin = rtc_io_num_map[pin];
+
+  DEBUGASSERT(lp_pin != -1);
+
+  rtc_gpio_set_level(pin, 1);
+  rtc_gpio_init(pin);
+
+  rtc_gpio_set_direction(pin, RTC_GPIO_MODE_INPUT_OUTPUT_OD);
+  rtc_gpio_pulldown_dis(pin);
+  rtc_gpio_pullup_en(pin);
+}
+#endif /* CONFIG_ESPRESSIF_LPI2C */
 
 /****************************************************************************
  * Name: esp_i2c_init
@@ -730,40 +850,101 @@ static void esp_i2c_init(struct esp_i2c_priv_s *priv)
 {
   const struct esp_i2c_config_s *config = priv->config;
 
-  /* Configure GPIO signals for I2C SCL and SDA pins */
+  if (priv->id < ESP_LP_I2C0_ID)
+    {
+      uint32_t scl_in_sig = i2c_periph_signal[priv->id].scl_in_sig;
+      uint32_t scl_out_sig = i2c_periph_signal[priv->id].scl_out_sig;
+      uint32_t sda_in_sig = i2c_periph_signal[priv->id].sda_in_sig;
+      uint32_t sda_out_sig = i2c_periph_signal[priv->id].sda_out_sig;
 
-  esp_gpiowrite(config->scl_pin, 1);
-  esp_gpiowrite(config->sda_pin, 1);
+      I2C_RCC_ATOMIC()
+        {
+          i2c_ll_enable_bus_clock(priv->id, true);
+          i2c_ll_reset_register(priv->id);
+        }
 
-  esp_configgpio(config->scl_pin, INPUT_PULLUP | OUTPUT_OPEN_DRAIN);
-  esp_gpio_matrix_out(config->scl_pin, config->scl_outsig, 0, 0);
-  esp_gpio_matrix_in(config->scl_pin, config->scl_insig, 0);
+      I2C_CLOCK_SRC_ATOMIC()
+        {
+          i2c_hal_init(priv->ctx, priv->id);
+        }
 
-  esp_configgpio(config->sda_pin, INPUT_PULLUP | OUTPUT_OPEN_DRAIN);
-  esp_gpio_matrix_out(config->sda_pin, config->sda_outsig, 0, 0);
-  esp_gpio_matrix_in(config->sda_pin, config->sda_insig, 0);
+      /* Configure GPIO signals for I2C SCL and SDA pins */
 
-  /* Enable I2C hardware */
+      esp_gpiowrite(config->scl_pin, 1);
+      esp_gpiowrite(config->sda_pin, 1);
 
-  periph_module_enable(i2c_periph_signal[priv->id].module);
+      esp_configgpio(config->scl_pin, SCL_PIN_ATTR);
+      esp_gpio_matrix_out(config->scl_pin, scl_out_sig, 0, 0);
+      esp_gpio_matrix_in(config->scl_pin, scl_in_sig, 0);
 
-  i2c_hal_init(priv->ctx, priv->id);
+      esp_configgpio(config->sda_pin, SDA_PIN_ATTR);
+      esp_gpio_matrix_out(config->sda_pin, sda_out_sig, 0, 0);
+      esp_gpio_matrix_in(config->sda_pin, sda_in_sig, 0);
+    }
+#ifdef CONFIG_ESPRESSIF_LPI2C
+  else
+    {
+      LP_I2C_BUS_CLK_ATOMIC()
+        {
+          /* Enable LP I2C bus clock */
 
-  /* Disable I2C interrupts */
+          lp_i2c_ll_enable_bus_clock(priv->id - LP_I2C_NUM_0, true);
 
-  esp_i2c_intr_disable(priv);
+          /* Reset LP I2C register */
+
+          lp_i2c_ll_reset_register(priv->id - LP_I2C_NUM_0);
+        }
+
+      I2C_CLOCK_SRC_ATOMIC()
+        {
+          i2c_hal_init(priv->ctx, priv->id);
+        }
+
+      esp_lp_i2c_config_io(priv, config->scl_pin);
+      esp_lp_i2c_config_io(priv, config->sda_pin);
+      const i2c_signal_conn_t *p_i2c_pin = &i2c_periph_signal[priv->id];
+#if !SOC_LP_GPIO_MATRIX_SUPPORTED
+      rtc_gpio_iomux_func_sel(config->sda_pin, p_i2c_pin->iomux_func);
+      rtc_gpio_iomux_func_sel(config->scl_pin, p_i2c_pin->iomux_func);
+#else
+      lp_gpio_connect_out_signal(config->sda_pin, p_i2c_pin->sda_out_sig, 0,
+                                 0);
+      lp_gpio_connect_in_signal(config->sda_pin, p_i2c_pin->sda_in_sig, 0);
+      lp_gpio_connect_out_signal(config->scl_pin, p_i2c_pin->scl_out_sig, 0,
+                                 0);
+      lp_gpio_connect_in_signal(config->scl_pin, p_i2c_pin->scl_in_sig, 0);
+#endif /* SOC_LP_GPIO_MATRIX_SUPPORTED */
+    }
+#endif
 
   /* Initialize I2C Master  */
 
   i2c_hal_master_init(priv->ctx);
 
-  /* Configure the hardware filter function */
-
-  i2c_ll_set_filter(priv->ctx->dev, I2C_FILTER_CYC_NUM_DEF);
+  i2c_ll_update(priv->ctx->dev);
 
   /* Initialize I2C bus clock */
 
   esp_i2c_init_clock(priv, config->clk_freq);
+
+  /* Disable I2C interrupts */
+
+  esp_i2c_intr_disable(priv);
+
+  /* Configure the hardware filter function */
+
+  i2c_ll_master_set_filter(priv->ctx->dev, I2C_FILTER_CYC_NUM_DEF);
+
+#ifdef CONFIG_ESPRESSIF_LPI2C
+  /* Enable internal open-drain mode for I2C IO lines */
+
+  priv->ctx->dev->ctr.sda_force_out = 0;
+  priv->ctx->dev->ctr.scl_force_out = 0;
+
+  /* Configure the I2C master to send a NACK when the Rx FIFO count is full */
+
+  i2c_ll_master_rx_full_ack_level(priv->ctx->dev, 1);
+#endif
 }
 
 /****************************************************************************
@@ -779,11 +960,17 @@ static void esp_i2c_init(struct esp_i2c_priv_s *priv)
 
 static void esp_i2c_deinit(struct esp_i2c_priv_s *priv)
 {
-  const struct esp_i2c_config_s *config = priv->config;
-
   priv->clk_freq = 0;
-  i2c_hal_deinit(priv->ctx);
-  periph_module_disable(i2c_periph_signal[priv->id].module);
+
+  I2C_CLOCK_SRC_ATOMIC()
+    {
+      i2c_hal_deinit(priv->ctx);
+    }
+
+  I2C_RCC_ATOMIC()
+    {
+      i2c_ll_enable_bus_clock(priv->id, false);
+    }
 }
 
 /****************************************************************************
@@ -838,7 +1025,7 @@ static int esp_i2c_sem_waitdone(struct esp_i2c_priv_s *priv)
  *   priv - Pointer to the internal driver state structure.
  *
  * Returned Values:
- *   Zero (OK) is returned on successfull transfer. -ETIMEDOUT is returned
+ *   Zero (OK) is returned on successful transfer. -ETIMEDOUT is returned
  *   in case a transfer didn't finish within the timeout interval. And ERROR
  *   is returned in case of any I2C error during the transfer has happened.
  *
@@ -865,7 +1052,7 @@ static int esp_i2c_polling_waitdone(struct esp_i2c_priv_s *priv)
    * and an error didn't occur within the timeout
    */
 
-  while ((sclock_t)(current - timeout) < 0 && (priv->error == 0))
+  while (current - timeout < 0 && priv->error == 0)
     {
       /* Check if any interrupt triggered, clear them
        * process the operation.
@@ -965,6 +1152,10 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
     {
       return ret;
     }
+
+#ifdef CONFIG_PM
+  esp_pm_lock_acquire(priv->pm_lock);
+#endif
 
   if (priv->i2cstate != I2CSTATE_IDLE)
     {
@@ -1067,6 +1258,9 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
   /* Dump the trace result */
 
   esp_i2c_tracedump(priv);
+#ifdef CONFIG_PM
+  esp_pm_lock_release(priv->pm_lock);
+#endif
   nxmutex_unlock(&priv->lock);
 
   return ret;
@@ -1087,7 +1281,24 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
 #ifdef CONFIG_I2C_RESET
 static void esp_i2c_clear_bus(struct esp_i2c_priv_s *priv)
 {
-  i2c_ll_master_clr_bus(priv->ctx->dev);
+  i2c_ll_master_clr_bus(priv->ctx->dev,
+                        I2C_LL_RESET_SLV_SCL_PULSE_NUM_DEFAULT, true);
+
+  /* Wait for bus clear done or timeout */
+
+  clock_t start = clock_systime_ticks();
+  clock_t timeout = start + MSEC2TICK(I2C_CLR_BUS_TIMEOUT_MS);
+  while (i2c_ll_master_is_bus_clear_done(priv->ctx->dev))
+    {
+      if (clock_systime_ticks() >= timeout)
+        {
+          i2cerr("ERROR: clear bus failed.\n");
+          i2c_ll_master_clr_bus(priv->ctx->dev, 0, false);
+          break;
+        }
+    }
+
+  i2c_ll_update(priv->ctx->dev);
 }
 #endif
 
@@ -1299,7 +1510,7 @@ static void esp_i2c_tracedump(struct esp_i2c_priv_s *priv)
   struct esp_trace_s *trace;
   int i;
 
-  syslog(LOG_DEBUG, "Elapsed time: %" PRIu32 "\n",
+  syslog(LOG_DEBUG, "Elapsed time: %" PRId64 "\n",
          (clock_systime_ticks() - priv->start_time));
 
   for (i = 0; i < priv->tndx; i++)
@@ -1307,7 +1518,7 @@ static void esp_i2c_tracedump(struct esp_i2c_priv_s *priv)
       trace = &priv->trace[i];
       syslog(LOG_DEBUG,
              "%2d. STATUS: %08" PRIx32 " COUNT: %3" PRIu32 " EVENT: %s(%2d)"
-             " PARM: %08" PRIx32 " TIME: %" PRIu32 "\n",
+             " PARM: %08" PRIx32 " TIME: %" PRId64 "\n",
              i + 1, trace->status, trace->count, g_trace_names[trace->event],
              trace->event, trace->parm, trace->time - priv->start_time);
     }
@@ -1476,21 +1687,26 @@ static inline void esp_i2c_process(struct esp_i2c_priv_s *priv,
 struct i2c_master_s *esp_i2cbus_initialize(int port)
 {
   struct esp_i2c_priv_s *priv;
-#ifndef CONFIG_I2C_POLLED
-  const struct esp_i2c_config_s *config;
   int ret;
+#ifdef CONFIG_PM
+  esp_pm_lock_type_t pm_lock_type = ESP_PM_NO_LIGHT_SLEEP;
 #endif
 
   switch (port)
     {
-#ifdef CONFIG_ESPRESSIF_I2C0
+#ifdef CONFIG_ESPRESSIF_I2C0_MASTER_MODE
     case ESPRESSIF_I2C0:
       priv = &esp_i2c0_priv;
       break;
 #endif
-#ifdef CONFIG_ESPRESSIF_I2C1
+#ifdef CONFIG_ESPRESSIF_I2C1_MASTER_MODE
     case ESPRESSIF_I2C1:
       priv = &esp_i2c1_priv;
+      break;
+#endif
+#ifdef CONFIG_ESPRESSIF_LP_I2C0
+    case ESPRESSIF_LP_I2C0:
+      priv = &esp_lp_i2c0_priv;
       break;
 #endif
     default:
@@ -1509,19 +1725,56 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
       return (struct i2c_master_s *)priv;
     }
 
+#ifdef CONFIG_PM
+#  if SOC_I2C_SUPPORT_RTC
+  if (I2C_CLK_SRC_DEFAULT == I2C_CLK_SRC_RC_FAST)
+    {
+      pm_lock_type = ESP_PM_NO_LIGHT_SLEEP;
+    }
+#  endif
+
+#  if SOC_I2C_SUPPORT_APB
+  if (I2C_CLK_SRC_DEFAULT == I2C_CLK_SRC_APB)
+    {
+      pm_lock_type = ESP_PM_APB_FREQ_MAX;
+    }
+#  endif
+
+#  ifdef CONFIG_ESPRESSIF_LP_I2C0
+  if (priv->id == ESPRESSIF_LP_I2C0)
+    {
+      pm_lock_type = ESP_PM_NO_LIGHT_SLEEP;
+    }
+#  endif
+
+  ret = esp_pm_lock_create(pm_lock_type,
+                           0,
+                           i2c_periph_signal[priv->id].module_name,
+                           &priv->pm_lock);
+  if (ret != OK)
+    {
+      priv->refs--;
+      nxmutex_unlock(&priv->lock);
+      i2cerr("Failed to create I2C PM lock."
+             "Handler: %p\n", priv);
+      return NULL;
+    }
+#endif
+
 #ifndef CONFIG_I2C_POLLED
-  config = priv->config;
   if (priv->cpuint != -ENOMEM)
     {
       /* Disable the previous IRQ */
 
-      up_disable_irq(config->irq);
-      esp_teardown_irq(config->periph, priv->cpuint);
+      up_disable_irq(ESP_SOURCE2IRQ(i2c_periph_signal[priv->id].irq));
+      esp_teardown_irq(i2c_periph_signal[priv->id].irq, priv->cpuint);
     }
 
-  priv->cpuint = esp_setup_irq(config->periph,
+  priv->cpuint = esp_setup_irq(i2c_periph_signal[priv->id].irq,
                                ESP_IRQ_PRIORITY_DEFAULT,
-                               ESP_IRQ_TRIGGER_LEVEL);
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               esp_i2c_irq,
+                               priv);
   if (priv->cpuint < 0)
     {
       /* Failed to allocate a CPU interrupt of this type. */
@@ -1532,22 +1785,9 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
       return NULL;
     }
 
-  ret = irq_attach(config->irq, esp_i2c_irq, priv);
-  if (ret != OK)
-    {
-      /* Failed to attach IRQ, free the allocated CPU interrupt */
-
-      esp_teardown_irq(config->periph, priv->cpuint);
-      priv->cpuint = -ENOMEM;
-      priv->refs--;
-      nxmutex_unlock(&priv->lock);
-
-      return NULL;
-    }
-
   /* Enable the CPU interrupt that is linked to the I2C device. */
 
-  up_enable_irq(config->irq);
+  up_enable_irq(ESP_SOURCE2IRQ(i2c_periph_signal[priv->id].irq));
 #endif
 
   esp_i2c_init(priv);
@@ -1593,9 +1833,17 @@ int esp_i2cbus_uninitialize(struct i2c_master_s *dev)
     }
 
 #ifndef CONFIG_I2C_POLLED
-  up_disable_irq(priv->config->irq);
-  esp_teardown_irq(priv->config->periph, priv->cpuint);
+  up_disable_irq(ESP_SOURCE2IRQ(i2c_periph_signal[priv->id].irq));
+  esp_teardown_irq(i2c_periph_signal[priv->id].irq, priv->cpuint);
   priv->cpuint = -ENOMEM;
+#endif
+
+#ifdef CONFIG_PM
+  if (priv->pm_lock != NULL)
+    {
+      esp_pm_lock_delete(priv->pm_lock);
+      priv->pm_lock = NULL;
+    }
 #endif
 
   esp_i2c_deinit(priv);
@@ -1604,4 +1852,4 @@ int esp_i2cbus_uninitialize(struct i2c_master_s *dev)
   return OK;
 }
 
-#endif /* CONFIG_ESPRESSIF_I2C_PERIPH */
+#endif /* CONFIG_ESPRESSIF_I2C_PERIPH_MASTER_MODE */
