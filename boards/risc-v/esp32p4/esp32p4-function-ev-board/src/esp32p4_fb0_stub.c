@@ -46,3 +46,9 @@ int esp_fb0_stub_register(void)
 {
   return register_driver("/dev/fb0", &g_fb0_fops, 0666, NULL);
 }
+
+/* Alias for bringup code compatibility */
+int board_fb_initialize(void)
+{
+  return esp_fb0_stub_register();
+}
