@@ -220,11 +220,3 @@ void riscv_addregion(void)
 }
 #endif
 
-/* Weak stub for esp_psram_io_get_cs_io - used by flash_ops.c when
- * SPIRAM is not enabled but SOC_SPIRAM_SUPPORTED is true for ESP32-P4.
- */
-
-__attribute__((weak)) uint8_t esp_psram_io_get_cs_io(void)
-{
-  return 0xff;  /* Invalid IO, PSRAM not configured */
-}

@@ -752,6 +752,7 @@ SECTIONS
   .debug_str_offsets 0 : { *(.debug_str_offsets) }
   .comment 0 : { *(.comment) }
   .note.GNU-stack 0: { *(.note.GNU-stack) }
+  /DISCARD/ : { *(.note.gnu.build-id) }
   .riscv.attributes 0: { *(.riscv.attributes) }
   /DISCARD/ :
   {
