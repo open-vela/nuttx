@@ -25,6 +25,14 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common/espressif espressif)
 
 set(SRCS esp_chip_rev.c)
 
+if(CONFIG_ESP32P4_MIPI_DSI)
+  list(APPEND SRCS esp_mipi_dsi.c)
+endif()
+
+if(CONFIG_ESP32P4_CAMERA)
+  list(APPEND SRCS esp_camera.c esp_cam_sensor.c esp_mipi_csi.c)
+endif()
+
 target_compile_definitions(arch PRIVATE _RETARGETABLE_LOCKING)
 target_compile_options(arch PRIVATE -Wno-array-bounds -Wno-stringop-overflow)
 
