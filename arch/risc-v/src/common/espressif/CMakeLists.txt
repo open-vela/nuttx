@@ -223,7 +223,7 @@ if(DEFINED ENV{ESP_HAL_3RDPARTY_VERSION})
       CACHE STRING "ESP HAL 3rdparty version")
 else()
   set(ESP_HAL_3RDPARTY_VERSION
-      0eb59f7e02a4735f2b9a78797e691b66740fcadb
+      69ae4cb7bc2b34cf763effad55c01c78f0d636f3
       CACHE STRING "ESP HAL 3rdparty version")
 endif()
 
@@ -233,7 +233,7 @@ if(DEFINED ENV{ESP_HAL_3RDPARTY_URL})
       CACHE STRING "ESP HAL 3rdparty URL")
 else()
   set(ESP_HAL_3RDPARTY_URL
-      https://github.com/espressif/esp-hal-3rdparty.git
+      https://github.com/Joneyao/esp-hal-3rdparty.git
       CACHE STRING "ESP HAL 3rdparty URL")
 endif()
 
