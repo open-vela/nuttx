@@ -275,6 +275,17 @@
 
 /* Ethernet definitions *****************************************************/
 
+/* MB1381 H750XB-B01 routes the LAN8740A through full MII.  PH2/MII_CRS and
+ * PH3/MII_COL share pins with QSPI bank 2 IO0/IO1.  QSPI-XIP builds must
+ * leave those pins in their QSPI alternate function; negotiated full-duplex
+ * Ethernet does not use CRS/COL.
+ */
+
+#ifdef CONFIG_STM32H750B_DK_QSPI_BOOT
+#  define BOARD_ETH_MII_NO_CRS_COL 1
+#  define BOARD_ETH_PHY_POLL 1
+#endif
+
 /* The STM32H7 connects to a LAN8740A PHY using these pins:
  *
  *   STM32H7  BOARD        LAN8740A
