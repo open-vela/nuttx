@@ -588,8 +588,10 @@ void __esp_start(void)
     REGI2C_WRITE_MASK(I2C_BIAS, I2C_BIAS_DREG_1P1, 10);
     REGI2C_WRITE_MASK(I2C_BIAS, I2C_BIAS_DREG_1P1_PVT, 10);
 
-    /* Wait for analog circuits to stabilize after enabling clocks/bias */
-    ets_delay_us(500);
+    /* Wait for analog circuits to stabilize after enabling clocks/bias.
+     * Use busy-wait since ets_delay_us may be unreliable before esp_clk_init.
+     */
+    for (volatile int d = 0; d < 100000; d++) { }
   }
 
   ret = esp_psram_chip_init();

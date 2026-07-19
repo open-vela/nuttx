@@ -220,3 +220,17 @@ void riscv_addregion(void)
 }
 #endif
 
+
+/****************************************************************************
+ * Weak stub: esp_psram_io_get_cs_io
+ *
+ * HAL flash_ops.c references this when CONFIG_SPIRAM is defined (which we
+ * define unconditionally for clock gate reasons). The real implementation
+ * lives in esp_psram.c which is only linked when SPIRAM Kconfig is enabled.
+ * This stub prevents link failure in minimal configs.
+ ****************************************************************************/
+
+__attribute__((weak)) uint8_t esp_psram_io_get_cs_io(void)
+{
+  return 0xff;
+}
