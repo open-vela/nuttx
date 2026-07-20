@@ -368,6 +368,39 @@ config OV2640_REGDEBUG
 
 endif
 
+config VIDEO_OV3660
+	bool "OV3660 image sensor"
+	default n
+	depends on ALLOW_MIT_COMPONENTS
+	select I2C
+	---help---
+		Enable the OV3660 I2C/SCCB image sensor configuration driver.
+		The driver provides QVGA JPEG and QQVGA RGB565 output profiles.
+		Board logic must provide the sensor power, reset and 20 MHz XCLK.
+
+if VIDEO_OV3660
+
+config OV3660_I2CADDR
+	hex "I2C address (7-bit)"
+	default 0x3c
+	---help---
+		OV3660 I2C/SCCB address in 7-bit format.
+
+config OV3660_FREQUENCY
+	int "I2C frequency"
+	default 100000
+	---help---
+		OV3660 I2C/SCCB bus frequency.
+
+config OV3660_REGDEBUG
+	bool "Register-level debug output"
+	default n
+	depends on DEBUG_FEATURES
+	---help---
+		Enable OV3660 register read and write debug output.
+
+endif
+
 config GOLDFISH_CAMERA
 	bool "Goldfish camera support"
 	depends on VIDEO

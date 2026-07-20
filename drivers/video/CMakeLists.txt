@@ -50,6 +50,10 @@ if(CONFIG_DRIVERS_VIDEO)
       list(APPEND SRCS ov2640.c)
     endif()
 
+    if(CONFIG_VIDEO_OV3660)
+      list(APPEND SRCS ov3660.c)
+    endif()
+
   endif()
 
   if(CONFIG_GOLDFISH_FB)

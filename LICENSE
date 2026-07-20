@@ -1385,6 +1385,18 @@ drivers/video/ov2640
   so, but I am not a copyright attorney so you should use this driver in
   products at your own risk.
 
+drivers/video/ov3660.c
+======================
+
+  The register settings in this driver are derived from the OpenMV OV3660
+  driver as carried by Espressif's esp32-camera project.
+
+  Copyright (c) 2013/2014 Ibrahim Abdelkader
+  <i.abdalkader@gmail.com>
+
+  This work is licensed under the MIT license.  The complete license text is
+  provided in drivers/video/ov3660.c.
+
 include/nuttx/lcd/ili9488.h
 ===========================
 
