@@ -3,7 +3,7 @@
 # see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-if ARCH_CHIP_ESPRESSIF || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32C3_GENERIC
+if ARCH_CHIP_ESP32C3_GENERIC || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32P4
 
 choice ESPRESSIF_CHIP_SERIES
 	prompt "Chip Series"
@@ -27,6 +27,12 @@ config ESPRESSIF_ESP32H2
 	---help---
 		Espressif ESP32-H2 (RV32IMC).
 
+config ESPRESSIF_ESP32P4
+	bool "ESP32-P4"
+	select ARCH_HAVE_I2CRESET
+	---help---
+		Espressif ESP32-P4 (RV32IMAC).
+
 endchoice # ESPRESSIF_CHIP_SERIES
 
 config ESPRESSIF_CHIP_SERIES
@@ -34,6 +40,7 @@ config ESPRESSIF_CHIP_SERIES
 	default "esp32c3" if ESPRESSIF_ESP32C3
 	default "esp32c6" if ESPRESSIF_ESP32C6
 	default "esp32h2" if ESPRESSIF_ESP32H2
+	default "esp32p4" if ESPRESSIF_ESP32P4
 	default "unknown"
 
 choice ESPRESSIF_FLASH

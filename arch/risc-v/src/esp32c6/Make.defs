@@ -1,6 +1,8 @@
 ############################################################################
 # arch/risc-v/src/esp32c6/Make.defs
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.  The
@@ -21,11 +23,18 @@
 include common/Make.defs
 include common/espressif/Make.defs
 
+CHIP_CSRCS += esp_chip_rev.c
+
 # Wireless interfaces.
 
 ifeq ($(CONFIG_ESPRESSIF_WIFI),y)
 CHIP_CSRCS += esp_coex_adapter.c esp_wifi_adapter.c
 EXTRA_LIBS += -lcore -lnet80211 -lpp
+endif
+
+ifeq ($(CONFIG_ESPRESSIF_BLE),y)
+CHIP_CSRCS += esp_ble.c
+EXTRA_LIBS +=  -lbtbb -lble_app
 endif
 
 CFLAGS += ${DEFINE_PREFIX}_RETARGETABLE_LOCKING

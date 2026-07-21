@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/riscv_exception_common.S
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -79,11 +81,15 @@
 #  endif
 #endif
 
-/* Provide a default section for the exeception handler. */
+/* Provide a default section for the exception handler. */
 
 #ifndef EXCEPTION_SECTION
 #  define EXCEPTION_SECTION .text
 #endif
+
+/* Valid exceptions causes range is from 0 to 63 */
+
+#define CAUSE_EXCEPTION   63
 
 /****************************************************************************
  * Public Symbols
@@ -139,12 +145,6 @@ exception_common:
   csrr       s0, CSR_STATUS       /* s0=status */
   csrr       s1, CSR_EPC          /* s1=exception PC */
   csrr       s2, CSR_CAUSE        /* s2=cause */
-#ifdef CONFIG_ARCH_RV_HAVE_CLIC
-  csrr       s4, CSR_INTTHRESH    /* s4=interrupt threshold */
-#endif
-#ifdef CONFIG_ARCH_RV_SHADOW_STACK
-  csrr       s5, CSR_SSP          /* s5=shadow stack pointer */
-#endif
 
 #ifdef CONFIG_ARCH_KERNEL_STACK
   csrr       s3, CSR_SCRATCH
@@ -156,17 +156,19 @@ exception_common:
   REGSTORE   s0, REG_INT_CTX(sp)
   REGSTORE   s1, REG_EPC(sp)
   REGSTORE   s3, REG_SP(sp)
-#ifdef CONFIG_ARCH_RV_HAVE_CLIC
-  REGSTORE   s4, REG_INT_THRESH(sp)
-#endif
-#ifdef CONFIG_ARCH_RV_SHADOW_STACK
-  REGSTORE   s5, REG_SSP(sp)       /* Save shadow stack pointer */
-#endif
 
 #ifdef CONFIG_LIB_SYSCALL
+  csrr       tp, CSR_SCRATCH      /* Load kernel TP */
+  REGLOAD    tp, RISCV_PERCPU_TCB(tp)
+
   /* Check whether it is an exception or interrupt */
 
   blt        s2, x0, handle_irq   /* If cause < 0 it is interrupt */
+
+  /* Adjust exception cause range from 0 to 63 */
+
+  li         s3, CAUSE_EXCEPTION
+  and        s2, s2, s3
 
   /* Is it a system call ? */
 
@@ -187,9 +189,6 @@ exception_common:
 1:
   addi       s1, s1, 0x4          /* Must move EPC forward by +4 */
   REGSTORE   s1, REG_EPC(sp)      /* Updated EPC to user context */
-
-  csrr       tp, CSR_SCRATCH      /* Load kernel TP */
-  REGLOAD    tp, RISCV_PERCPU_TCB(tp)
 
   mv         a7, sp               /* a7 = context */
   call       x1, dispatch_syscall /* Dispatch the system call */
@@ -225,7 +224,7 @@ handle_irq:
 
 #if CONFIG_ARCH_INTERRUPTSTACK > 15
 
-  /* Switch to interrupt stack if not already done so */
+  /* Switch to interrupt stack */
 
   setintstack t0, t1
 
@@ -250,7 +249,7 @@ handle_irq:
   REGSTORE   s0, 0(sp)
   add        s0, sp, (INT_REG_SIZE * 2)
 
-#ifndef CONFIG_DISABLE_SIGNALS
+#ifdef CONFIG_ENABLE_ALL_SIGNALS
   addi       sp, sp, -XCPTCONTEXT_SIZE
 #endif
 
@@ -262,7 +261,7 @@ handle_irq:
   REGLOAD    s0, 0(sp)
   add        sp, sp, (INT_REG_SIZE * 2)
 
-#ifndef CONFIG_DISABLE_SIGNALS
+#ifdef CONFIG_ENABLE_ALL_SIGNALS
   /* Restore sp */
 
   addi       sp, sp, XCPTCONTEXT_SIZE
@@ -280,21 +279,12 @@ return_from_exception:
 
   REGLOAD    s0, REG_INT_CTX(sp)  /* restore status */
   csrw       CSR_STATUS, s0
-#ifdef CONFIG_ARCH_RV_HAVE_CLIC
-  REGLOAD    s0, REG_INT_THRESH(sp) /* restore interrupt threshold */
-  csrw       CSR_INTTHRESH, s0
-#endif
-#ifdef CONFIG_ARCH_RV_SHADOW_STACK
-  REGLOAD    s0, REG_SSP(sp)       /* restore shadow stack pointer */
-  csrw       CSR_SSP, s0
-#endif
 
 #ifdef CONFIG_LIB_SYSCALL
   /* Store tcb to scratch register */
 
-  call       x1, nxsched_self
   csrr       s1, CSR_SCRATCH
-  REGSTORE   a0, RISCV_PERCPU_TCB(s1)
+  REGSTORE   tp, RISCV_PERCPU_TCB(s1)
 #endif
 
 #ifdef CONFIG_ARCH_KERNEL_STACK

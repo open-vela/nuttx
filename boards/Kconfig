@@ -541,6 +541,32 @@ config ARCH_BOARD_ESP32H2_DEVKIT
 	---help---
 		The ESP32-H2 DevKit features the ESP32-H2 CPU with a RISC-V core.
 
+config ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+	bool "Espressif ESP32-P4 Function EV Board"
+	depends on ARCH_CHIP_ESP32P4
+	select ARCH_HAVE_BUTTONS
+	select ARCH_HAVE_IRQBUTTONS
+	---help---
+		The ESP32-P4 Function EV Board features the ESP32-P4 CPU
+		with a dual-core RISC-V core.
+
+config ARCH_BOARD_ESP32P4_PICO_WIFI_WARESHARE
+	bool "ESP32-P4 Pico WiFi (Waveshare)"
+	depends on ARCH_CHIP_ESP32P4
+	select ARCH_HAVE_BUTTONS
+	select ARCH_HAVE_IRQBUTTONS
+	---help---
+		Waveshare ESP32-P4-PICO-WIFI board with ESP32-P4 and ESP32-C6
+		for WiFi connectivity.
+
+config ARCH_BOARD_ESP32P4_TAB5
+	bool "M5Stack Tab5"
+	depends on ARCH_CHIP_ESP32P4
+	select ARCH_HAVE_BUTTONS
+	select ARCH_HAVE_IRQBUTTONS
+	---help---
+		M5Stack Tab5 board with ESP32-P4.
+
 config ARCH_BOARD_ET_STM32_STAMP
 	bool "Futurlec: ET-STM32 Stamp"
 	depends on ARCH_CHIP_STM32F103RE
@@ -3350,6 +3376,9 @@ config ARCH_BOARD
 	default "esp32c6-devkitc"           if ARCH_BOARD_ESP32C6_DEVKITC
 	default "esp32c6-devkitm"           if ARCH_BOARD_ESP32C6_DEVKITM
 	default "esp32h2-devkit"            if ARCH_BOARD_ESP32H2_DEVKIT
+	default "esp32p4-function-ev-board" if ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+	default "esp32p4-pico-wifi-wareshare" if ARCH_BOARD_ESP32P4_PICO_WIFI_WARESHARE
+	default "esp32p4-tab5"             if ARCH_BOARD_ESP32P4_TAB5
 	default "et-stm32-stamp"            if ARCH_BOARD_ET_STM32_STAMP
 	default "tlsr8278adk80d"            if ARCH_BOARD_TLSR8278ADK80D
 	default "ez80f910200kitg"           if ARCH_BOARD_EZ80F910200KITG
@@ -4557,6 +4586,15 @@ endif
 if ARCH_BOARD_ESP32H2_DEVKIT
 source "boards/risc-v/esp32h2/esp32h2-devkit/Kconfig"
 endif
+if ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+source "boards/risc-v/esp32p4/esp32p4-function-ev-board/Kconfig"
+endif
+if ARCH_BOARD_ESP32P4_PICO_WIFI_WARESHARE
+source "boards/risc-v/esp32p4/esp32p4-pico-wifi-wareshare/Kconfig"
+endif
+if ARCH_BOARD_ESP32P4_TAB5
+source "boards/risc-v/esp32p4/esp32p4-tab5/Kconfig"
+endif
 if ARCH_BOARD_SIM
 source "boards/sim/sim/sim/Kconfig"
 endif
@@ -4701,6 +4739,9 @@ source "boards/risc-v/esp32c6/common/Kconfig"
 endif
 if ARCH_CHIP_ESP32H2
 source "boards/risc-v/esp32h2/common/Kconfig"
+endif
+if ARCH_CHIP_ESP32P4
+source "boards/risc-v/esp32p4/common/Kconfig"
 endif
 if ARCH_CHIP_SAMV7
 source "boards/arm/samv7/common/Kconfig"
