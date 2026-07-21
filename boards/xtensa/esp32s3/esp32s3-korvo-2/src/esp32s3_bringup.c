@@ -143,6 +143,7 @@
 int esp32s3_bringup(void)
 {
   int ret;
+
 #if (defined(CONFIG_ESP32S3_I2S0) && !defined(CONFIG_AUDIO_CS4344) && \
      !defined(CONFIG_AUDIO_ES8311)) || defined(CONFIG_ESP32S3_I2S1)
   bool i2s_enable_tx;
@@ -290,6 +291,14 @@ int esp32s3_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize I2C driver: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ESP32S3_KORVO_2_CAMERA
+  ret = board_camera_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize camera: %d\n", ret);
     }
 #endif
 

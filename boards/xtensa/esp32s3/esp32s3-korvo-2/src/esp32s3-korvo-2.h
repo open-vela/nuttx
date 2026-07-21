@@ -80,6 +80,22 @@
 int esp32s3_bringup(void);
 
 /****************************************************************************
+ * Name: board_camera_initialize
+ *
+ * Description:
+ *   Initialize the OV3660 sensor and ESP32-S3 camera receiver, then register
+ *   the V4L2 capture device at /dev/video0.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_ESP32S3_KORVO_2_CAMERA
+int board_camera_initialize(void);
+#endif
+
+/****************************************************************************
  * Name: board_spiflash_init
  *
  * Description:

@@ -5,5 +5,16 @@
 
 if ARCH_BOARD_ESP32S3_KORVO_2
 
-endif # ARCH_BOARD_ESP32S3_KORVO_2
+config ESP32S3_KORVO_2_CAMERA
+	bool "OV3660 camera"
+	default n
+	depends on ALLOW_MIT_COMPONENTS
+	select ESP32S3_CAMERA
+	select ESP32S3_I2C0
+	select VIDEO_OV3660
+	---help---
+		Enable the OV3660 camera module fitted to ESP32-S3-Korvo-2 and
+		register it as /dev/video0.  The initial capture profile is RGB565
+		QQVGA (160 x 120) using I2C0 and the LCD_CAM interface.
 
+endif # ARCH_BOARD_ESP32S3_KORVO_2

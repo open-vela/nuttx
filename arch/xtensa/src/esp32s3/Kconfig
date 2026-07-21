@@ -638,6 +638,20 @@ config ESP32S3_DMA
 	default n
 	select ARCH_DMA
 
+config ESP32S3_CAMERA
+	bool "LCD_CAM camera interface"
+	default n
+	select ESP32S3_DMA
+	select SCHED_WORKQUEUE
+	select SCHED_HPWORK
+	select VIDEO
+	select DRIVERS_VIDEO
+	select VIDEO_STREAM
+	---help---
+		Enable the ESP32-S3 LCD_CAM camera receive interface.  The driver
+		provides an image-data lower half for the NuttX V4L2 capture
+		framework.  Board logic must configure and register an image sensor.
+
 config ESP32S3_RTC
 	bool "Real Time Clock (RTC)"
 	default y
@@ -864,6 +878,7 @@ config ESP32S3_WCL
 config ESP32S3_LCD
 	bool "LCD"
 	default n
+	depends on !ESP32S3_CAMERA
 	select DRIVERS_VIDEO
 	select VIDEO_FB
 	select FB_UPDATE
@@ -2457,6 +2472,97 @@ config ESP32S3_OTG_DEBUG_REGISTER
 	depends on DEBUG_USB_INFO
 
 endmenu # USB OTG Configuration
+
+menu "Camera Controller Configuration"
+	depends on ESP32S3_CAMERA
+
+config ESP32S3_CAMERA_XCLK_PIN
+	int "Camera XCLK pin"
+	range 0 48
+	default 40
+
+config ESP32S3_CAMERA_PCLK_PIN
+	int "Camera pixel clock pin"
+	range 0 48
+	default 11
+
+config ESP32S3_CAMERA_VSYNC_PIN
+	int "Camera vertical synchronization pin"
+	range 0 48
+	default 21
+
+config ESP32S3_CAMERA_HREF_PIN
+	int "Camera horizontal reference pin"
+	range 0 48
+	default 38
+
+config ESP32S3_CAMERA_DATA0_PIN
+	int "Camera data bit 0 pin"
+	range 0 48
+	default 13
+
+config ESP32S3_CAMERA_DATA1_PIN
+	int "Camera data bit 1 pin"
+	range 0 48
+	default 47
+
+config ESP32S3_CAMERA_DATA2_PIN
+	int "Camera data bit 2 pin"
+	range 0 48
+	default 14
+
+config ESP32S3_CAMERA_DATA3_PIN
+	int "Camera data bit 3 pin"
+	range 0 48
+	default 3
+
+config ESP32S3_CAMERA_DATA4_PIN
+	int "Camera data bit 4 pin"
+	range 0 48
+	default 12
+
+config ESP32S3_CAMERA_DATA5_PIN
+	int "Camera data bit 5 pin"
+	range 0 48
+	default 42
+
+config ESP32S3_CAMERA_DATA6_PIN
+	int "Camera data bit 6 pin"
+	range 0 48
+	default 41
+
+config ESP32S3_CAMERA_DATA7_PIN
+	int "Camera data bit 7 pin"
+	range 0 48
+	default 39
+
+config ESP32S3_CAMERA_XCLK_FREQUENCY
+	int "Camera XCLK frequency"
+	range 1000000 40000000
+	default 20000000
+
+config ESP32S3_CAMERA_VSYNC_INVERT
+	bool "Invert camera VSYNC input"
+	default y
+
+config ESP32S3_CAMERA_PCLK_INVERT
+	bool "Capture on inverted PCLK"
+	default n
+
+config ESP32S3_CAMERA_MAX_FRAME_SIZE
+	int "Maximum captured frame size"
+	range 4096 524288
+	default 153600
+	---help---
+		Maximum number of bytes accepted for one frame.  This determines the
+		statically allocated GDMA descriptor count, not a frame buffer.
+
+config ESP32S3_CAMERA_REGDEBUG
+	bool "Camera register debug output"
+	default n
+	depends on DEBUG_FEATURES
+
+endmenu # Camera Controller Configuration
 
 menu "LCD Controller Configuration"
 	depends on ESP32S3_LCD
