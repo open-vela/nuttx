@@ -137,7 +137,9 @@
 
 #ifdef CONFIG_VIDEO_FB
 #  include "esp_board_fb.h"
-#  include "esp_mipi_dsi.h"
+#endif
+#ifdef CONFIG_ESP32P4_MIPI_DSI
+#  include "esp_dsi_fb.h"
 #endif
 
 #include "esp32p4-function-ev-board.h"
@@ -546,11 +548,11 @@ int esp_bringup(void)
 #endif
 
 #ifdef CONFIG_ESP32P4_MIPI_DSI
-  {
-    extern int esp_mipi_dsi_initialize(void);
-    ret = esp_mipi_dsi_initialize();
-    syslog(LOG_INFO, "[DSI] init: %d\n", ret);
-  }
+  ret = esp_dsi_fb_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: esp_dsi_fb_initialize failed: %d\n", ret);
+    }
 #endif
 
 #ifdef CONFIG_VIDEO_FB
@@ -559,17 +561,6 @@ int esp_bringup(void)
     {
       syslog(LOG_ERR, "ERROR: board_fb_initialize failed: %d\n", ret);
     }
-#else
-  /* Register a minimal /dev/fb0 stub device */
-
-  {
-    extern int esp_fb0_stub_register(void);
-    ret = esp_fb0_stub_register();
-    if (ret < 0)
-      {
-        syslog(LOG_ERR, "ERROR: esp_fb0_stub_register failed: %d\n", ret);
-      }
-  }
 #endif
 
 #ifdef CONFIG_ESP32P4_CAMERA
@@ -579,6 +570,18 @@ int esp_bringup(void)
       syslog(LOG_ERR, "ERROR: esp_camera_initialize failed: %d\n", ret);
     }
 #endif
+
+#ifdef CONFIG_ESP32P4_MIPI_DSI
+  /* Start DSI DMA refresh AFTER camera init (camera resets GDMA) */
+
+  ret = esp_dsi_fb_start_refresh();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: esp_dsi_fb_start_refresh failed: %d\n", ret);
+    }
+#endif
+
+
 
   /* If we got here then perhaps not all initialization was successful, but
    * at least enough succeeded to bring-up NSH with perhaps reduced
