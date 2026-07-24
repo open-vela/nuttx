@@ -45,13 +45,7 @@
 /* Forward declaration for esp_i2cbus_initialize */
 
 struct i2c_master_s *esp_i2cbus_initialize(int port);
-
-/* OV5647 Key Registers */
-
-#define OV5647_SW_RESET_REG    0x0103   /* Software reset */
-#define OV5647_MIPI_CTRL00     0x4800   /* MIPI control */
-#define OV5647_STREAM_ON_REG   0x4202   /* Stream control: 0=on, 1=off */
-#define OV5647_IO_PAD_OUTPUT   0x300d   /* IO pad output enable */
+int esp_i2cbus_uninitialize(struct i2c_master_s *dev);
 
 /****************************************************************************
  * Private Types
@@ -59,7 +53,7 @@ struct i2c_master_s *esp_i2cbus_initialize(int port);
 
 /* Register-value pair for sensor initialization sequence */
 
-struct ov5647_regval_s
+struct sc2336_regval_s
 {
   uint16_t reg;
   uint8_t  val;
@@ -72,111 +66,198 @@ struct ov5647_regval_s
 static struct i2c_master_s *g_i2c_dev;
 static bool g_sensor_initialized;
 
-/* Minimal OV5647 initialization sequence for 1024x600 @ 30fps RAW8.
- * This is a subset of the full init sequence. A complete sequence
- * would include PLL setup, timing, analog settings, etc.
- * For initial bring-up, we focus on: reset, ID check, basic config.
+/* SC2336 initialization sequence for 1024x600 @ 30fps RAW8, MIPI 2-lane,
+ * 24MHz input, 288Mbps.  Ported from ESP-IDF esp_cam_sensor component
+ * (init_reglist_MIPI_2lane_1024x600_raw8_30fps).  Terminated by
+ * SC2336_REG_END (0xffff).
  */
 
-static const struct ov5647_regval_s g_ov5647_init_regs[] =
+static const struct sc2336_regval_s g_sc2336_init_regs[] =
 {
-  /* Software reset */
-
   {0x0103, 0x01},
-
-  /* Delay needed after reset - handled in code */
-
-  /* System clock and PLL configuration for 24MHz input, 2-lane MIPI */
-
-  {0x0100, 0x00},   /* Standby mode */
-  {0x3034, 0x08},   /* PLL: 8-bit mode */
-  {0x3035, 0x21},   /* PLL: system clock divider */
-  {0x3036, 0x46},   /* PLL: multiplier */
-  {0x303c, 0x11},   /* PLL: MIPI divider */
-  {0x3106, 0xf5},   /* SRB control */
-
-  /* Timing control for 1024x600 */
-
-  {0x3820, 0x41},   /* Timing: V flip + V binning */
-  {0x3821, 0x07},   /* Timing: H mirror + H binning */
-  {0x3808, 0x04},   /* H output size high: 1024 = 0x0400 */
-  {0x3809, 0x00},   /* H output size low */
-  {0x380a, 0x02},   /* V output size high: 600 = 0x0258 */
-  {0x380b, 0x58},   /* V output size low */
-
-  /* H/V window offset */
-
-  {0x3800, 0x00},   /* H crop start high */
-  {0x3801, 0x00},   /* H crop start low */
-  {0x3802, 0x00},   /* V crop start high */
-  {0x3803, 0x00},   /* V crop start low */
-  {0x3804, 0x0a},   /* H crop end high: 2623 */
-  {0x3805, 0x3f},   /* H crop end low */
-  {0x3806, 0x07},   /* V crop end high: 1955 */
-  {0x3807, 0xa3},   /* V crop end low */
-
-  /* Timing: total H/V size */
-
-  {0x380c, 0x07},   /* Total H size high */
-  {0x380d, 0x68},   /* Total H size low: 1896 */
-  {0x380e, 0x03},   /* Total V size high */
-  {0x380f, 0xd8},   /* Total V size low: 984 */
-
-  /* Analog and digital settings */
-
-  {0x3612, 0x59},
-  {0x3618, 0x00},
-  {0x3614, 0x28},
-  {0x3630, 0x36},
-  {0x3632, 0x44},
-  {0x3631, 0x22},
-
-  /* MIPI configuration */
-
-  {0x3a02, 0x03},   /* AEC: max exposure H */
-  {0x3a03, 0xd8},   /* AEC: max exposure L */
-  {0x3a08, 0x01},   /* AEC: B50 step */
-  {0x3a09, 0x27},
-  {0x3a0a, 0x00},   /* AEC: B60 step */
-  {0x3a0b, 0xf6},
-  {0x3a0e, 0x03},   /* AEC: B50 max */
-  {0x3a0d, 0x04},   /* AEC: B60 max */
-  {0x3a14, 0x03},   /* AEC: max exposure 50Hz H */
-  {0x3a15, 0xd8},   /* AEC: max exposure 50Hz L */
-
-  /* ISP configuration */
-
-  {0x5001, 0x01},   /* ISP: enable AWB */
-  {0x5000, 0x06},   /* ISP: enable LENC + BPC */
-
-  /* MIPI 2-lane configuration */
-
-  {0x4800, 0x04},   /* MIPI: non-continuous clock */
-  {0x4837, 0x18},   /* MIPI: global timing (pclk period) */
-
-  /* Format: RAW8 */
-
-  {0x3034, 0x08},   /* 8-bit output */
-  {0x3035, 0x21},
-
-  /* End marker */
+  {SC2336_REG_SLEEP_MODE, 0x00},
+  {0x36e9, 0x80},
+  {0x37f9, 0x80},
+  {0x301f, 0xc7},
+  {0x3031, 0x08},
+  {0x3037, 0x00},
+  {0x3106, 0x05},
+  {0x3200, 0x01},
+  {0x3201, 0xb4},
+  {0x3202, 0x00},
+  {0x3203, 0xf0},
+  {0x3204, 0x05},
+  {0x3205, 0xd3},
+  {0x3206, 0x03},
+  {0x3207, 0x4f},
+  {0x3208, 0x04},
+  {0x3209, 0x00},
+  {0x320a, 0x02},
+  {0x320b, 0x58},
+  {0x320c, 0x09},
+  {0x320d, 0x60},
+  {0x320e, 0x03},
+  {0x320f, 0xe8},
+  {0x3210, 0x00},
+  {0x3211, 0x10},
+  {0x3212, 0x00},
+  {0x3213, 0x04},
+  {0x3248, 0x04},
+  {0x3249, 0x0b},
+  {0x3253, 0x08},
+  {0x3301, 0x09},
+  {0x3302, 0xff},
+  {0x3303, 0x10},
+  {0x3306, 0x60},
+  {0x3307, 0x02},
+  {0x330a, 0x01},
+  {0x330b, 0x10},
+  {0x330c, 0x16},
+  {0x330d, 0xff},
+  {0x3318, 0x02},
+  {0x3321, 0x0a},
+  {0x3327, 0x0e},
+  {0x332b, 0x12},
+  {0x3333, 0x10},
+  {0x3334, 0x40},
+  {0x335e, 0x06},
+  {0x335f, 0x0a},
+  {0x3364, 0x1f},
+  {0x337c, 0x02},
+  {0x337d, 0x0e},
+  {0x3390, 0x09},
+  {0x3391, 0x0f},
+  {0x3392, 0x1f},
+  {0x3393, 0x20},
+  {0x3394, 0x20},
+  {0x3395, 0xff},
+  {0x33a2, 0x04},
+  {0x33b1, 0x80},
+  {0x33b2, 0x68},
+  {0x33b3, 0x42},
+  {0x33f9, 0x78},
+  {0x33fb, 0xd8},
+  {0x33fc, 0x0f},
+  {0x33fd, 0x1f},
+  {0x349f, 0x03},
+  {0x34a6, 0x0f},
+  {0x34a7, 0x1f},
+  {0x34a8, 0x42},
+  {0x34a9, 0x06},
+  {0x34aa, 0x01},
+  {0x34ab, 0x28},
+  {0x34ac, 0x01},
+  {0x34ad, 0x90},
+  {0x3630, 0xf4},
+  {0x3633, 0x22},
+  {0x3639, 0xf4},
+  {0x363c, 0x47},
+  {0x3670, 0x09},
+  {0x3674, 0xf4},
+  {0x3675, 0xfb},
+  {0x3676, 0xed},
+  {0x367c, 0x09},
+  {0x367d, 0x0f},
+  {0x3690, 0x22},
+  {0x3691, 0x22},
+  {0x3692, 0x22},
+  {0x3698, 0x89},
+  {0x3699, 0x96},
+  {0x369a, 0xd0},
+  {0x369b, 0xd0},
+  {0x369c, 0x09},
+  {0x369d, 0x0f},
+  {0x36a2, 0x09},
+  {0x36a3, 0x0f},
+  {0x36a4, 0x1f},
+  {0x36d0, 0x01},
+  {0x36ea, 0x08},
+  {0x36eb, 0x0a},
+  {0x36ec, 0x1a},
+  {0x36ed, 0x18},
+  {0x3722, 0xe1},
+  {0x3724, 0x41},
+  {0x3725, 0xc1},
+  {0x3728, 0x20},
+  {0x37fa, 0x08},
+  {0x37fb, 0x32},
+  {0x37fc, 0x11},
+  {0x37fd, 0x37},
+  {0x3900, 0x0d},
+  {0x3905, 0x98},
+  {0x391b, 0x81},
+  {0x391c, 0x10},
+  {0x3933, 0x81},
+  {0x3934, 0xc5},
+  {0x3940, 0x68},
+  {0x3941, 0x00},
+  {0x3942, 0x01},
+  {0x3943, 0xc6},
+  {0x3952, 0x02},
+  {0x3953, 0x0f},
+  {0x3e01, 0x37},
+  {0x3e02, 0xe0},
+  {0x3e08, 0x1f},
+  {0x3e1b, 0x14},
+  {0x4509, 0x38},
+  {0x4819, 0x05},
+  {0x481b, 0x03},
+  {0x481d, 0x0a},
+  {0x481f, 0x02},
+  {0x4821, 0x08},
+  {0x4823, 0x03},
+  {0x4825, 0x02},
+  {0x4827, 0x03},
+  {0x4829, 0x04},
+  {0x5799, 0x06},
+  {0x5ae0, 0xfe},
+  {0x5ae1, 0x40},
+  {0x5ae2, 0x30},
+  {0x5ae3, 0x28},
+  {0x5ae4, 0x20},
+  {0x5ae5, 0x30},
+  {0x5ae6, 0x28},
+  {0x5ae7, 0x20},
+  {0x5ae8, 0x3c},
+  {0x5ae9, 0x30},
+  {0x5aea, 0x28},
+  {0x5aeb, 0x3c},
+  {0x5aec, 0x30},
+  {0x5aed, 0x28},
+  {0x5aee, 0xfe},
+  {0x5aef, 0x40},
+  {0x5af4, 0x30},
+  {0x5af5, 0x28},
+  {0x5af6, 0x20},
+  {0x5af7, 0x30},
+  {0x5af8, 0x28},
+  {0x5af9, 0x20},
+  {0x5afa, 0x3c},
+  {0x5afb, 0x30},
+  {0x5afc, 0x28},
+  {0x5afd, 0x3c},
+  {0x5afe, 0x30},
+  {0x5aff, 0x28},
+  {0x36e9, 0x53},
+  {0x37f9, 0x53},
+  {SC2336_REG_END, 0x00},
 };
 
-#define OV5647_INIT_REGS_COUNT \
-    (sizeof(g_ov5647_init_regs) / sizeof(g_ov5647_init_regs[0]))
+#define SC2336_INIT_REGS_COUNT \
+    (sizeof(g_sc2336_init_regs) / sizeof(g_sc2336_init_regs[0]))
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: ov5647_i2c_write_reg
+ * Name: sc2336_i2c_write_reg
  *
  * Description:
- *   Write a single byte to an OV5647 register (16-bit address).
+ *   Write a single byte to an SC2336 register (16-bit address).
  ****************************************************************************/
 
-static int ov5647_i2c_write_reg(uint16_t reg, uint8_t val)
+static int sc2336_i2c_write_reg(uint16_t reg, uint8_t val)
 {
   struct i2c_msg_s msg;
   uint8_t buf[3];
@@ -186,8 +267,8 @@ static int ov5647_i2c_write_reg(uint16_t reg, uint8_t val)
   buf[1] = reg & 0xff;          /* Register address low byte */
   buf[2] = val;                  /* Data byte */
 
-  msg.frequency = OV5647_I2C_FREQ;
-  msg.addr      = OV5647_I2C_ADDR;
+  msg.frequency = SC2336_I2C_FREQ;
+  msg.addr      = SC2336_I2C_ADDR;
   msg.flags     = 0;            /* Write */
   msg.buffer    = buf;
   msg.length    = 3;
@@ -195,7 +276,7 @@ static int ov5647_i2c_write_reg(uint16_t reg, uint8_t val)
   ret = I2C_TRANSFER(g_i2c_dev, &msg, 1);
   if (ret < 0)
     {
-      syslog(LOG_ERR, "OV5647: I2C write failed reg=0x%04x ret=%d\n",
+      syslog(LOG_ERR, "SC2336: I2C write failed reg=0x%04x ret=%d\n",
              reg, ret);
     }
 
@@ -203,13 +284,13 @@ static int ov5647_i2c_write_reg(uint16_t reg, uint8_t val)
 }
 
 /****************************************************************************
- * Name: ov5647_i2c_read_reg
+ * Name: sc2336_i2c_read_reg
  *
  * Description:
- *   Read a single byte from an OV5647 register (16-bit address).
+ *   Read a single byte from an SC2336 register (16-bit address).
  ****************************************************************************/
 
-static int ov5647_i2c_read_reg(uint16_t reg, uint8_t *val)
+static int sc2336_i2c_read_reg(uint16_t reg, uint8_t *val)
 {
   struct i2c_msg_s msgs[2];
   uint8_t addr_buf[2];
@@ -220,16 +301,16 @@ static int ov5647_i2c_read_reg(uint16_t reg, uint8_t *val)
   addr_buf[0] = (reg >> 8) & 0xff;
   addr_buf[1] = reg & 0xff;
 
-  msgs[0].frequency = OV5647_I2C_FREQ;
-  msgs[0].addr      = OV5647_I2C_ADDR;
+  msgs[0].frequency = SC2336_I2C_FREQ;
+  msgs[0].addr      = SC2336_I2C_ADDR;
   msgs[0].flags     = 0;         /* Write */
   msgs[0].buffer    = addr_buf;
   msgs[0].length    = 2;
 
   /* Second message: read data (with repeated start) */
 
-  msgs[1].frequency = OV5647_I2C_FREQ;
-  msgs[1].addr      = OV5647_I2C_ADDR;
+  msgs[1].frequency = SC2336_I2C_FREQ;
+  msgs[1].addr      = SC2336_I2C_ADDR;
   msgs[1].flags     = I2C_M_READ;
   msgs[1].buffer    = val;
   msgs[1].length    = 1;
@@ -247,7 +328,7 @@ static int ov5647_i2c_read_reg(uint16_t reg, uint8_t *val)
   ret = I2C_TRANSFER(g_i2c_dev, &msgs[0], 1);  /* Write addr */
   if (ret < 0)
     {
-      syslog(LOG_ERR, "OV5647: I2C write-addr failed reg=0x%04x ret=%d\n",
+      syslog(LOG_ERR, "SC2336: I2C write-addr failed reg=0x%04x ret=%d\n",
              reg, ret);
       return ret;
     }
@@ -255,7 +336,7 @@ static int ov5647_i2c_read_reg(uint16_t reg, uint8_t *val)
   ret = I2C_TRANSFER(g_i2c_dev, &msgs[1], 1);  /* Read data */
   if (ret < 0)
     {
-      syslog(LOG_ERR, "OV5647: I2C read failed reg=0x%04x ret=%d\n",
+      syslog(LOG_ERR, "SC2336: I2C read failed reg=0x%04x ret=%d\n",
              reg, ret);
     }
 
@@ -263,26 +344,26 @@ static int ov5647_i2c_read_reg(uint16_t reg, uint8_t *val)
 }
 
 /****************************************************************************
- * Name: ov5647_check_chip_id
+ * Name: sc2336_check_chip_id
  *
  * Description:
- *   Read and verify the OV5647 chip ID.
+ *   Read and verify the SC2336 chip ID.
  ****************************************************************************/
 
-static int ov5647_check_chip_id(void)
+static int sc2336_check_chip_id(void)
 {
   uint8_t id_h;
   uint8_t id_l;
   uint16_t chip_id;
   int ret;
 
-  ret = ov5647_i2c_read_reg(OV5647_CHIP_ID_H_REG, &id_h);
+  ret = sc2336_i2c_read_reg(SC2336_CHIP_ID_H_REG, &id_h);
   if (ret < 0)
     {
       return ret;
     }
 
-  ret = ov5647_i2c_read_reg(OV5647_CHIP_ID_L_REG, &id_l);
+  ret = sc2336_i2c_read_reg(SC2336_CHIP_ID_L_REG, &id_l);
   if (ret < 0)
     {
       return ret;
@@ -290,12 +371,12 @@ static int ov5647_check_chip_id(void)
 
   chip_id = ((uint16_t)id_h << 8) | id_l;
 
-  syslog(LOG_INFO, "OV5647: Chip ID = 0x%04x (expected 0x%04x)\n",
-         chip_id, OV5647_CHIP_ID);
+  syslog(LOG_INFO, "SC2336: Chip ID = 0x%04x (expected 0x%04x)\n",
+         chip_id, SC2336_CHIP_ID);
 
-  if (chip_id != OV5647_CHIP_ID)
+  if (chip_id != SC2336_CHIP_ID)
     {
-      syslog(LOG_ERR, "OV5647: Chip ID mismatch!\n");
+      syslog(LOG_ERR, "SC2336: Chip ID mismatch!\n");
       return -ENODEV;
     }
 
@@ -303,39 +384,80 @@ static int ov5647_check_chip_id(void)
 }
 
 /****************************************************************************
- * Name: ov5647_write_init_sequence
+ * Name: sc2336_write_init_sequence
  *
  * Description:
  *   Write the initialization register sequence to the sensor.
+ *   The table is terminated by SC2336_REG_END; SC2336_REG_DELAY marks
+ *   a delay (value = milliseconds).
  ****************************************************************************/
 
-static int ov5647_write_init_sequence(void)
+static int sc2336_write_init_sequence(void)
 {
   int ret;
   unsigned int i;
+  unsigned int count = 0;
 
-  for (i = 0; i < OV5647_INIT_REGS_COUNT; i++)
+  for (i = 0; i < SC2336_INIT_REGS_COUNT; i++)
     {
-      ret = ov5647_i2c_write_reg(g_ov5647_init_regs[i].reg,
-                                 g_ov5647_init_regs[i].val);
+      uint16_t reg = g_sc2336_init_regs[i].reg;
+      uint8_t  val = g_sc2336_init_regs[i].val;
+
+      if (reg == SC2336_REG_END)
+        {
+          break;
+        }
+
+      if (reg == SC2336_REG_DELAY)
+        {
+          usleep((useconds_t)val * 1000);
+          continue;
+        }
+
+      if (reg == SC2336_REG_SW_RESET)
+        {
+          /* Writing 0x01 to 0x0103 triggers an immediate internal reset.
+           * The sensor resets so quickly that it NACKs the data byte and
+           * stays unresponsive on the I2C bus for a variable period while
+           * it re-initializes. The reset command still takes effect, so we
+           * tolerate the NACK and then poll the sensor (chip-ID read) until
+           * it acknowledges again before continuing with the sequence.
+           */
+
+          int w;
+
+          sc2336_i2c_write_reg(reg, val);   /* NACK expected; reset applied */
+
+          for (w = 0; w < 50; w++)          /* up to ~500ms */
+            {
+              uint8_t id_h;
+
+              usleep(10000);                /* 10ms per poll */
+              if (sc2336_i2c_read_reg(SC2336_CHIP_ID_H_REG, &id_h) >= 0)
+                {
+                  break;
+                }
+            }
+
+          syslog(LOG_INFO, "SC2336: sensor ready %d ms after reset\n",
+                 (w + 1) * 10);
+          count++;
+          continue;
+        }
+
+      ret = sc2336_i2c_write_reg(reg, val);
       if (ret < 0)
         {
-          syslog(LOG_ERR, "OV5647: Init sequence failed at index %d\n", i);
+          syslog(LOG_ERR, "SC2336: Init sequence failed at index %d "
+                 "(reg=0x%04x)\n", i, reg);
           return ret;
         }
 
-      /* Small delay between writes for stability */
-
-      if (g_ov5647_init_regs[i].reg == 0x0103)
-        {
-          /* After software reset, wait 10ms */
-
-          usleep(10000);
-        }
+      count++;
     }
 
-  syslog(LOG_INFO, "OV5647: Init sequence written (%d registers)\n",
-         (int)OV5647_INIT_REGS_COUNT);
+  syslog(LOG_INFO, "SC2336: Init sequence written (%u registers)\n",
+         count);
   return OK;
 }
 
@@ -357,7 +479,7 @@ int esp_cam_sensor_init(void)
       return OK;
     }
 
-  syslog(LOG_INFO, "OV5647: Initializing camera sensor\n");
+  syslog(LOG_INFO, "SC2336: Initializing camera sensor\n");
 
   /* Get the I2C bus instance.
    * The I2C bus should already be initialized in board bringup.
@@ -365,178 +487,54 @@ int esp_cam_sensor_init(void)
    */
 
 #ifdef CONFIG_I2C_DRIVER
-  g_i2c_dev = esp_i2cbus_initialize(OV5647_I2C_PORT);
+  g_i2c_dev = esp_i2cbus_initialize(SC2336_I2C_PORT);
   if (g_i2c_dev == NULL)
     {
-      syslog(LOG_ERR, "OV5647: Failed to get I2C bus %d\n", OV5647_I2C_PORT);
+      syslog(LOG_ERR, "SC2336: Failed to get I2C bus %d\n", SC2336_I2C_PORT);
       return -ENODEV;
     }
 #else
-  syslog(LOG_WARNING, "OV5647: I2C not enabled, sensor init skipped\n");
+  syslog(LOG_WARNING, "SC2336: I2C not enabled, sensor init skipped\n");
   g_sensor_initialized = true;
   return OK;
 #endif
 
-  /* Scan I2C bus for any responsive device (diagnostic) */
+  /* Verify chip ID with retries (sensor may need time after power up) */
 
-  syslog(LOG_INFO, "OV5647: Scanning I2C bus for devices...\n");
-  {
-    struct i2c_msg_s msg;
-    uint8_t dummy = 0;
-    int found = 0;
-
-    for (uint8_t addr = 0x08; addr < 0x78; addr++)
-      {
-        msg.frequency = 100000;
-        msg.addr      = addr;
-        msg.flags     = I2C_M_READ;
-        msg.buffer    = &dummy;
-        msg.length    = 1;
-
-        ret = I2C_TRANSFER(g_i2c_dev, &msg, 1);
-        if (ret >= 0)
-          {
-            syslog(LOG_INFO, "OV5647: I2C device at 0x%02x\n", addr);
-            found++;
-          }
-      }
-
-    if (found > 10)
-      {
-        /* Too many devices = SDA stuck low (bus fault).
-         * Attempt I2C bus recovery by sending clock pulses on SCL.
-         * This makes any slave holding SDA low release it.
-         */
-
-        syslog(LOG_WARNING,
-               "OV5647: %d addresses responded (SDA stuck low?). "
-               "Attempting bus recovery...\n", found);
-
-        /* Manually toggle SCL GPIO to recover bus.
-         * Configure GPIO8 (SCL) as output, pulse it 9+ times.
-         */
-
-        volatile uint32_t *gpio_out_w1ts = (volatile uint32_t *)0x500E0008;
-        volatile uint32_t *gpio_out_w1tc = (volatile uint32_t *)0x500E000C;
-        volatile uint32_t *gpio_enable_w1ts = (volatile uint32_t *)0x500E0024;
-        volatile uint32_t *io_mux_gpio8 = (volatile uint32_t *)(0x500E1000 + 0x04 + 8 * 4);
-
-        /* Save current IO MUX config */
-
-        uint32_t saved_mux = *io_mux_gpio8;
-
-        /* Set GPIO8 as simple GPIO output */
-
-        *io_mux_gpio8 = (1 << 12);  /* func_sel = 1 (GPIO) */
-        *gpio_enable_w1ts = (1 << 8);
-
-        /* Send 9 clock pulses */
-
-        for (int i = 0; i < 9; i++)
-          {
-            *gpio_out_w1tc = (1 << 8);  /* SCL low */
-            for (volatile int d = 0; d < 4000; d++) { }
-            *gpio_out_w1ts = (1 << 8);  /* SCL high */
-            for (volatile int d = 0; d < 4000; d++) { }
-          }
-
-        /* Generate STOP condition: SDA low->high while SCL is high */
-
-        /* First pull SDA low */
-
-        volatile uint32_t *io_mux_gpio7 = (volatile uint32_t *)(0x500E1000 + 0x04 + 7 * 4);
-        uint32_t saved_mux7 = *io_mux_gpio7;
-        *io_mux_gpio7 = (1 << 12);
-        *gpio_enable_w1ts = (1 << 7);
-        *gpio_out_w1tc = (1 << 7);   /* SDA low */
-        for (volatile int d = 0; d < 4000; d++) { }
-        *gpio_out_w1ts = (1 << 7);   /* SDA high (STOP) */
-        for (volatile int d = 0; d < 4000; d++) { }
-
-        /* Restore IO MUX config for I2C function */
-
-        *io_mux_gpio8 = saved_mux;
-        *io_mux_gpio7 = saved_mux7;
-
-        syslog(LOG_INFO, "OV5647: Bus recovery complete, "
-               "re-initializing I2C...\n");
-
-        /* Re-initialize I2C to restore proper state */
-
-        usleep(10000);  /* 10ms settle */
-      }
-    else if (found == 0)
-      {
-        syslog(LOG_WARNING,
-               "OV5647: No I2C devices found! Check camera connection.\n");
-      }
-    else
-      {
-        syslog(LOG_INFO, "OV5647: Found %d device(s) on I2C bus\n", found);
-      }
-  }
-
-  /* Verify chip ID with retries (camera may need time after power up) */
-
-  /* First, reset I2C controller to clear any stuck state from prior ops.
-   * The I2C FSM may be stuck if a previous transfer was interrupted.
-   */
-
-  {
-    /* I2C0 base = 0x500C4000 */
-    /* HP_SYS_CLKRST_HP_RST_EN0 at 0x500E60C0: bit22 = I2C0 reset */
-
-    volatile uint32_t *rst_en0 = (volatile uint32_t *)0x500E60C0;
-    uint32_t val = *rst_en0;
-    *rst_en0 = val | (1 << 22);   /* Assert I2C0 reset */
-    for (volatile int d = 0; d < 1000; d++) { }
-    *rst_en0 = val & ~(1 << 22);  /* Deassert I2C0 reset */
-    for (volatile int d = 0; d < 1000; d++) { }
-
-    syslog(LOG_INFO, "OV5647: I2C0 controller reset done\n");
-
-    /* Re-acquire I2C bus after reset */
-
-    g_i2c_dev = esp_i2cbus_initialize(OV5647_I2C_PORT);
-    if (g_i2c_dev == NULL)
-      {
-        syslog(LOG_ERR, "OV5647: Failed to re-get I2C bus after reset\n");
-        return -ENODEV;
-      }
-  }
+  syslog(LOG_INFO, "SC2336: Checking chip ID...\n");
 
   for (retry = 0; retry < 3; retry++)
     {
-      ret = ov5647_check_chip_id();
+      ret = sc2336_check_chip_id();
       if (ret >= 0)
         {
           break;
         }
 
-      syslog(LOG_WARNING, "OV5647: Chip ID check failed (attempt %d/3), "
+      syslog(LOG_WARNING, "SC2336: Chip ID check failed (attempt %d/3), "
              "retrying in 100ms...\n", retry + 1);
       usleep(100000);  /* 100ms delay between retries */
     }
 
   if (ret < 0)
     {
-      syslog(LOG_ERR, "OV5647: Chip ID verification failed after 3 attempts\n");
-      syslog(LOG_ERR, "OV5647: Ensure camera module is connected to "
-             "MIPI CSI connector\n");
+      syslog(LOG_ERR, "SC2336: Chip ID verification failed after 3 "
+             "attempts. Ensure camera module is connected to the "
+             "MIPI CSI connector.\n");
       return ret;
     }
 
   /* Write initialization register sequence */
 
-  ret = ov5647_write_init_sequence();
+  ret = sc2336_write_init_sequence();
   if (ret < 0)
     {
       return ret;
     }
 
   g_sensor_initialized = true;
-  syslog(LOG_INFO, "OV5647: Sensor initialized (%dx%d @ %dfps RAW8)\n",
-         OV5647_WIDTH, OV5647_HEIGHT, OV5647_FPS);
+  syslog(LOG_INFO, "SC2336: Sensor initialized (%dx%d @ %dfps RAW8)\n",
+         SC2336_WIDTH, SC2336_HEIGHT, SC2336_FPS);
   return OK;
 }
 
@@ -551,19 +549,11 @@ int esp_cam_sensor_start(void)
       return -EINVAL;
     }
 
-  /* Start streaming: write 0x00 to stream control register */
+  /* Start streaming: exit sleep mode (SC2336_REG_SLEEP_MODE = 1) */
 
-  ov5647_i2c_write_reg(OV5647_STREAM_ON_REG, 0x00);
+  sc2336_i2c_write_reg(SC2336_REG_SLEEP_MODE, 0x01);
 
-  /* Set MIPI pad output enable */
-
-  ov5647_i2c_write_reg(OV5647_IO_PAD_OUTPUT, 0x00);
-
-  /* Exit standby */
-
-  ov5647_i2c_write_reg(0x0100, 0x01);
-
-  syslog(LOG_INFO, "OV5647: Streaming started\n");
+  syslog(LOG_INFO, "SC2336: Streaming started\n");
   return OK;
 }
 
@@ -578,14 +568,10 @@ int esp_cam_sensor_stop(void)
       return -EINVAL;
     }
 
-  /* Stop streaming: write 0x01 to stream control register */
+  /* Stop streaming: enter sleep mode (SC2336_REG_SLEEP_MODE = 0) */
 
-  ov5647_i2c_write_reg(OV5647_STREAM_ON_REG, 0x01);
+  sc2336_i2c_write_reg(SC2336_REG_SLEEP_MODE, 0x00);
 
-  /* Enter standby */
-
-  ov5647_i2c_write_reg(0x0100, 0x00);
-
-  syslog(LOG_INFO, "OV5647: Streaming stopped\n");
+  syslog(LOG_INFO, "SC2336: Streaming stopped\n");
   return OK;
 }

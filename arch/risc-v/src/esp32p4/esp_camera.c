@@ -37,6 +37,7 @@
 #include <errno.h>
 #include <debug.h>
 #include <semaphore.h>
+#include <sys/time.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/semaphore.h>
@@ -71,6 +72,8 @@ struct esp_cam_data_s
   imgdata_capture_t      capture_cb;
   void                  *capture_arg;
   sem_t                  frame_sem;
+  FAR uint8_t           *next_buf;   /* Next DMA destination buffer */
+  uint32_t               next_size;  /* Size of next DMA buffer */
 };
 
 struct esp_cam_sensor_s
@@ -258,12 +261,14 @@ static int esp_imgdata_set_buf(FAR struct imgdata_s *data,
                                FAR imgdata_format_t *datafmts,
                                uint8_t *addr, uint32_t size)
 {
-  /* Buffer management is handled internally by the CSI driver.
-   * This callback is informational only.
+  /* Record the next DMA destination buffer. This is called both before
+   * start_capture (initial buffer) and from the frame-done path (via the
+   * V4L2 complete_capture handler) to supply the next buffer.
    */
 
-  syslog(LOG_INFO, "ESP Camera: set_buf addr=%p size=%lu\n",
-         addr, (unsigned long)size);
+  g_esp_cam_data.next_buf  = addr;
+  g_esp_cam_data.next_size = size;
+  esp_csi_set_buffer(addr, size);
   return OK;
 }
 
@@ -289,6 +294,45 @@ static int esp_imgdata_validate_frame(FAR struct imgdata_s *data,
   return OK;
 }
 
+/****************************************************************************
+ * Name: esp_cam_frame_done
+ *
+ * Description:
+ *   Invoked from the DW-GDMA ISR when a frame completes. Hands the filled
+ *   buffer up to the V4L2 layer via capture_cb (which synchronously queues
+ *   the next buffer through esp_imgdata_set_buf) and returns that next
+ *   buffer to the ISR so it can re-arm the DMA.
+ ****************************************************************************/
+
+static int esp_cam_frame_done(FAR void *arg,
+                              FAR uint8_t **next_buf,
+                              FAR uint32_t *next_size)
+{
+  struct timeval ts;
+
+  /* Invalidate stale "next" so we can detect whether the V4L2 layer
+   * supplied a fresh buffer during the capture callback.
+   */
+
+  g_esp_cam_data.next_buf = NULL;
+
+  if (g_esp_cam_data.capture_cb != NULL)
+    {
+      gettimeofday(&ts, NULL);
+
+      /* Report a completed RGB565 frame. complete_capture() will call
+       * esp_imgdata_set_buf() synchronously with the next buffer.
+       */
+
+      g_esp_cam_data.capture_cb(0, ESP_CSI_FRAME_SIZE,
+                                &ts, g_esp_cam_data.capture_arg);
+    }
+
+  *next_buf  = g_esp_cam_data.next_buf;
+  *next_size = g_esp_cam_data.next_size;
+  return OK;
+}
+
 static int esp_imgdata_start_capture(FAR struct imgdata_s *data,
                                      uint8_t nr_datafmts,
                                      FAR imgdata_format_t *datafmts,
@@ -303,7 +347,11 @@ static int esp_imgdata_start_capture(FAR struct imgdata_s *data,
   g_esp_cam_data.capture_cb = callback;
   g_esp_cam_data.capture_arg = arg;
 
-  /* Start the CSI controller */
+  /* Register the DMA frame-done callback with the CSI driver */
+
+  esp_csi_register_frame_cb(esp_cam_frame_done, NULL);
+
+  /* Start the CSI controller (arms DMA + enables bridge) */
 
   ret = esp_csi_start();
   if (ret < 0)
@@ -312,11 +360,6 @@ static int esp_imgdata_start_capture(FAR struct imgdata_s *data,
     }
 
   g_esp_cam_data.streaming = true;
-
-  /* TODO: In full implementation, DMA ISR would call capture_cb
-   * when each frame completes. For now, the framework is in place.
-   */
-
   return OK;
 }
 
@@ -344,7 +387,7 @@ static int esp_imgsensor_init(FAR struct imgsensor_s *sensor)
 {
   syslog(LOG_INFO, "ESP Camera: imgsensor init\n");
 
-  /* Initialize the OV5647 sensor */
+  /* Initialize the SC2336 sensor */
 
   return esp_cam_sensor_init();
 }
@@ -358,7 +401,7 @@ static int esp_imgsensor_uninit(FAR struct imgsensor_s *sensor)
 static const char *esp_imgsensor_get_driver_name(
                     FAR struct imgsensor_s *sensor)
 {
-  return "ESP32P4-OV5647";
+  return "ESP32P4-SC2336";
 }
 
 static int esp_imgsensor_validate_frame(FAR struct imgsensor_s *sensor,
@@ -430,6 +473,10 @@ static int esp_imgsensor_set_value(FAR struct imgsensor_s *sensor,
  * Public Functions
  ****************************************************************************/
 
+#ifdef CONFIG_ESP32P4_CAMERA_DMA_SELFTEST
+void esp_camera_dma_selftest(void);
+#endif
+
 /****************************************************************************
  * Name: esp_camera_initialize
  *
@@ -478,5 +525,95 @@ int esp_camera_initialize(void)
 
   syslog(LOG_INFO, "ESP Camera: %s initialized successfully\n",
          ESP_CAMERA_DEVPATH);
+
+#ifdef CONFIG_ESP32P4_CAMERA_DMA_SELFTEST
+  esp_camera_dma_selftest();
+#endif
+
   return OK;
 }
+
+#ifdef CONFIG_ESP32P4_CAMERA_DMA_SELFTEST
+/****************************************************************************
+ * Name: esp_camera_dma_selftest
+ *
+ * Description:
+ *   Display-independent bring-up test for the CSI + DW-GDMA path. Brings up
+ *   the sensor, arms the DMA into a scratch buffer, streams briefly, then
+ *   reports the completed frame count and a few captured bytes. This lets
+ *   us validate frame capture without depending on the V4L2/display stack.
+ ****************************************************************************/
+
+static volatile uint32_t g_selftest_frames;
+static FAR uint8_t       *g_selftest_buf;
+
+static int esp_cam_selftest_cb(FAR void *arg,
+                               FAR uint8_t **next_buf,
+                               FAR uint32_t *next_size)
+{
+  g_selftest_frames++;
+
+  /* Reuse the same scratch buffer to keep the DMA running */
+
+  *next_buf  = g_selftest_buf;
+  *next_size = ESP_CSI_FRAME_SIZE;
+  return OK;
+}
+
+void esp_camera_dma_selftest(void)
+{
+  int ret;
+  int i;
+
+  syslog(LOG_INFO, "ESP Camera: === DMA self-test ===\n");
+
+  /* Bring up the sensor (chip ID + init sequence) */
+
+  ret = esp_cam_sensor_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ESP Camera: selftest sensor init failed: %d\n", ret);
+      return;
+    }
+
+  g_selftest_buf = (FAR uint8_t *)kmm_memalign(64, ESP_CSI_FRAME_SIZE);
+  if (g_selftest_buf == NULL)
+    {
+      syslog(LOG_ERR, "ESP Camera: selftest buffer alloc failed\n");
+      return;
+    }
+
+  memset(g_selftest_buf, 0xa5, ESP_CSI_FRAME_SIZE);
+
+  g_selftest_frames = 0;
+  esp_csi_register_frame_cb(esp_cam_selftest_cb, NULL);
+  esp_csi_set_buffer(g_selftest_buf, ESP_CSI_FRAME_SIZE);
+
+  /* Start sensor streaming then CSI/DMA */
+
+  esp_cam_sensor_start();
+  esp_csi_start();
+
+  /* Let a few frames flow (30fps -> ~33ms/frame) */
+
+  for (i = 0; i < 10; i++)
+    {
+      usleep(50000);
+    }
+
+  /* Dump DMA/bridge/host state to see where the pipeline is */
+
+  esp_csi_dump_status();
+
+  esp_csi_stop();
+  esp_cam_sensor_stop();
+
+  syslog(LOG_INFO, "ESP Camera: self-test frames=%lu, "
+         "buf[0..7]=%02x %02x %02x %02x %02x %02x %02x %02x\n",
+         (unsigned long)g_selftest_frames,
+         g_selftest_buf[0], g_selftest_buf[1], g_selftest_buf[2],
+         g_selftest_buf[3], g_selftest_buf[4], g_selftest_buf[5],
+         g_selftest_buf[6], g_selftest_buf[7]);
+  syslog(LOG_INFO, "ESP Camera: === DMA self-test end ===\n");
+}
+#endif

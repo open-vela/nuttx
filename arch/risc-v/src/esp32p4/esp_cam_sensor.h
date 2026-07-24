@@ -35,27 +35,37 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* OV5647 I2C Configuration */
+/* SC2336 I2C Configuration
+ *
+ * NOTE: The ESP32-P4-Function-EV-Board is populated with an SC2336
+ * (SmartSens) MIPI-CSI sensor, NOT an OV5647.  Verified via ESP-IDF
+ * reference firmware which detected PID 0xcb3a at SCCB address 0x30.
+ */
 
-#define OV5647_I2C_ADDR        0x36     /* 7-bit I2C address */
-#define OV5647_I2C_PORT        0        /* I2C port 0 */
-#define OV5647_I2C_FREQ        100000   /* 100 kHz */
-#define OV5647_SCL_GPIO        8        /* GPIO8 = SCL */
-#define OV5647_SDA_GPIO        7        /* GPIO7 = SDA */
+#define SC2336_I2C_ADDR        0x30     /* 7-bit I2C address */
+#define SC2336_I2C_PORT        0        /* I2C port 0 */
+#define SC2336_I2C_FREQ        100000   /* 100 kHz */
+#define SC2336_SCL_GPIO        8        /* GPIO8 = SCL */
+#define SC2336_SDA_GPIO        7        /* GPIO7 = SDA */
 
-/* OV5647 Chip ID */
+/* SC2336 Chip ID */
 
-#define OV5647_CHIP_ID_H_REG   0x300a   /* Chip ID high byte register */
-#define OV5647_CHIP_ID_L_REG   0x300b   /* Chip ID low byte register */
-#define OV5647_CHIP_ID_H_VAL   0x56     /* Expected high byte */
-#define OV5647_CHIP_ID_L_VAL   0x47     /* Expected low byte */
-#define OV5647_CHIP_ID         0x5647   /* Full chip ID */
+#define SC2336_CHIP_ID_H_REG   0x3107   /* Chip ID high byte register */
+#define SC2336_CHIP_ID_L_REG   0x3108   /* Chip ID low byte register */
+#define SC2336_CHIP_ID         0xcb3a   /* Full chip ID (PID) */
 
-/* OV5647 Output Configuration */
+/* SC2336 key control registers */
 
-#define OV5647_WIDTH           1024     /* Output width */
-#define OV5647_HEIGHT          600      /* Output height */
-#define OV5647_FPS             30       /* Target frame rate */
+#define SC2336_REG_SLEEP_MODE  0x0100   /* Stream/sleep: 1=stream, 0=sleep */
+#define SC2336_REG_SW_RESET    0x0103   /* Software reset (bit0) */
+#define SC2336_REG_END         0xffff   /* Init table terminator */
+#define SC2336_REG_DELAY       0xfffe   /* Init table delay marker */
+
+/* SC2336 Output Configuration */
+
+#define SC2336_WIDTH           1024     /* Output width */
+#define SC2336_HEIGHT          600      /* Output height */
+#define SC2336_FPS             30       /* Target frame rate */
 
 /****************************************************************************
  * Public Function Prototypes
@@ -65,7 +75,7 @@
  * Name: esp_cam_sensor_init
  *
  * Description:
- *   Initialize the OV5647 camera sensor over I2C.
+ *   Initialize the SC2336 camera sensor over I2C.
  *   - Verifies chip ID
  *   - Sends initialization register sequence
  *   - Configures 1024x600 @ 30fps RAW8 output

@@ -31,8 +31,22 @@
 #include <string.h>
 #include <errno.h>
 #include <debug.h>
+#include <sys/time.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/irq.h>
+#include <nuttx/cache.h>
+
+#include "esp_irq.h"
+#include "riscv_internal.h"
+
+#include "hal/dw_gdma_ll.h"
+#include "hal/dw_gdma_types.h"
+#include "hal/mipi_csi_ll.h"
+#include "hal/mipi_csi_phy_ll.h"
+#include "hal/mipi_csi_host_ll.h"
+#include "hal/mipi_csi_brg_ll.h"
+#include "soc/interrupts.h"
 
 #include "esp_mipi_csi.h"
 
@@ -45,6 +59,35 @@
 #define MIPI_CSI_HOST_BASE    0x500d0000
 #define MIPI_CSI_BRIDGE_BASE  0x500d1000
 #define HP_SYS_CLKRST_BASE   0x500e6000
+
+/* ISP register base (DR_REG_HPPERIPH0_BASE + 0xA1000) */
+
+#define ISP_BASE              0x500a1000
+#define ISP_CLK_EN_REG        (ISP_BASE + 0x04)
+#define ISP_CNTL_REG          (ISP_BASE + 0x08)
+#define ISP_FRAME_CFG_REG     (ISP_BASE + 0x10)
+#define ISP_INT_CLR_REG       (ISP_BASE + 0x70)
+
+/* ISP_CNTL_REG bit definitions */
+
+#define ISP_MIPI_DATA_EN      (1 << 0)   /* MIPI data input enable (gate) */
+#define ISP_EN                (1 << 1)   /* ISP global enable */
+#define ISP_DEMOSAIC_EN       (1 << 6)   /* Demosaic enable */
+#define ISP_RGB2YUV_EN        (1 << 10)  /* RGB2YUV enable */
+#define ISP_YUV2RGB_EN        (1 << 13)  /* YUV2RGB enable */
+
+/* ISP_CNTL_REG field positions */
+
+#define ISP_DATA_TYPE_SHIFT   25   /* 2 bits: 0=RAW8, 1=RAW10, 2=RAW12 */
+#define ISP_IN_SRC_SHIFT      27   /* 2 bits: 0=CSI, 1=CAM/DVP, 2=DMA */
+#define ISP_OUT_TYPE_SHIFT    29   /* 3 bits: 0=RAW8, 1=YUV422, 2=RGB888 */
+
+/* ISP_FRAME_CFG_REG field positions */
+
+#define ISP_VADR_NUM_SHIFT    0    /* 12 bits: vertical rows - 1 */
+#define ISP_HADR_NUM_SHIFT    12   /* 12 bits: horizontal pixels - 1 */
+#define ISP_HSYNC_START_BIT   (1 << 29)
+#define ISP_HSYNC_END_BIT     (1 << 30)
 
 /* PMU LDO register for MIPI PHY power */
 
@@ -189,35 +232,122 @@ static void esp_csi_ldo_enable(void)
 
 static void esp_csi_clock_enable(void)
 {
+  int __DECLARE_RCC_ATOMIC_ENV;
+  (void)__DECLARE_RCC_ATOMIC_ENV;
+
+  /* Enable CSI host bus clock and CSI bridge module clock, release resets */
+
+  mipi_csi_ll_enable_host_bus_clock(0, true);
+  mipi_csi_ll_reset_host_clock(0);
+  mipi_csi_ll_enable_brg_module_clock(0, true);
+  mipi_csi_ll_reset_brg_module_clock(0);
+
+  /* PHY config clock source + enable (reset pulse) */
+
+  mipi_csi_ll_set_phy_clock_source(0, MIPI_CSI_PHY_CLK_SRC_DEFAULT);
+  mipi_csi_ll_enable_phy_config_clock(0, false);
+  mipi_csi_ll_enable_phy_config_clock(0, true);
+
+  syslog(LOG_INFO, "CSI: Clocks enabled (LL)\n");
+}
+
+/****************************************************************************
+ * Name: esp_csi_isp_init
+ *
+ * Description:
+ *   Initialize the ISP as a passthrough (RAW8 → RAW8) to open the MIPI
+ *   data gate. On ESP32-P4 rev3, the CSI→bridge data path shares the ISP
+ *   pipeline; the ISP's mipi_data_en bit is the master gate for MIPI data
+ *   entering the CSI/ISP/bridge shared bus. Without enabling ISP and
+ *   setting mipi_data_en=1, no pixel data reaches the bridge/DMA.
+ *
+ *   We configure ISP in bypass mode:
+ *   - Input source = CSI (isp_in_src = 0)
+ *   - Data type = RAW8
+ *   - Output type = RAW8
+ *   - All processing blocks disabled (demosaic, rgb2yuv, etc.)
+ *   - mipi_data_en = 1, isp_en = 1
+ *   - Frame dimensions match sensor output
+ ****************************************************************************/
+
+static void esp_csi_isp_init(void)
+{
   uint32_t reg;
 
-  /* Step 2: Enable CSI Host bus clock */
+  /* Step 1: Enable ISP module clock via HP_SYS_CLKRST struct.
+   * The struct is already accessible from the mipi_csi_ll includes.
+   * peri_clk_ctrl25.reg_isp_clk_en = 1
+   * peri_clk_ctrl25.reg_isp_clk_src_sel = 0 (XTAL 40MHz)
+   */
 
-  reg = REG_READ(HP_SYS_CLKRST_BASE + SOC_CLK_CTRL1_OFF);
-  reg |= CSI_HOST_SYS_CLK_EN | CSI_BRG_SYS_CLK_EN;
-  REG_WRITE(HP_SYS_CLKRST_BASE + SOC_CLK_CTRL1_OFF, reg);
+  HP_SYS_CLKRST.peri_clk_ctrl25.reg_isp_clk_en = 1;
+  HP_SYS_CLKRST.peri_clk_ctrl25.reg_isp_clk_src_sel = 0;
 
-  /* Step 3: Reset CSI Host */
+  /* Step 2: Reset ISP module via HP_SYS_CLKRST.hp_rst_en0.reg_rst_en_isp */
 
-  REG_SET_BIT(HP_SYS_CLKRST_BASE + HP_RST_EN0_OFF, RST_EN_CSI_HOST);
-  REG_CLR_BIT(HP_SYS_CLKRST_BASE + HP_RST_EN0_OFF, RST_EN_CSI_HOST);
+  HP_SYS_CLKRST.hp_rst_en0.reg_rst_en_isp = 1;
 
-  /* Reset CSI Bridge */
+  /* Brief delay for reset */
 
-  REG_SET_BIT(HP_SYS_CLKRST_BASE + HP_RST_EN0_OFF, RST_EN_CSI_BRG);
-  REG_CLR_BIT(HP_SYS_CLKRST_BASE + HP_RST_EN0_OFF, RST_EN_CSI_BRG);
+  volatile uint32_t i;
+  for (i = 0; i < 100; i++)
+    {
+      __asm__ volatile("nop");
+    }
 
-  /* Step 4: Set PHY clock source = PLL_F20M (value 0) */
+  HP_SYS_CLKRST.hp_rst_en0.reg_rst_en_isp = 0;
 
-  reg = REG_READ(HP_SYS_CLKRST_BASE + PERI_CLK_CTRL03_OFF);
-  reg &= ~CSI_DPHY_CLK_SRC_MASK;  /* Clear src sel bits = PLL_F20M */
-  REG_WRITE(HP_SYS_CLKRST_BASE + PERI_CLK_CTRL03_OFF, reg);
+  /* Step 3: Configure ISP registers for bypass (RAW8 passthrough) */
 
-  /* Step 5: Enable PHY configuration clock */
+  /* Clear ISP_CNTL: disable everything first */
 
-  REG_SET_BIT(HP_SYS_CLKRST_BASE + PERI_CLK_CTRL03_OFF, CSI_DPHY_CFG_CLK_EN);
+  REG_WRITE(ISP_CNTL_REG, 0);
 
-  syslog(LOG_INFO, "CSI: Clocks enabled\n");
+  /* Enable ISP register clock (ISP_CLK_EN bit0) */
+
+  REG_WRITE(ISP_CLK_EN_REG, 1);
+
+  /* Clear all pending interrupts */
+
+  REG_WRITE(ISP_INT_CLR_REG, 0xFFFFFFFF);
+
+  /* Configure ISP_CNTL:
+   *   bit 0: mipi_data_en = 1 (open the MIPI data gate!)
+   *   bit 1: isp_en = 1 (ISP global enable)
+   *   bit 6: demosaic_en = 1 (RAW Bayer → RGB)
+   *   bit 10: rgb2yuv_en = 1 (needed for output pipeline)
+   *   bit 13: yuv2rgb_en = 1 (YUV → RGB output)
+   *   bits [26:25]: isp_data_type = 0 (RAW8)
+   *   bits [28:27]: isp_in_src = 0 (CSI host)
+   *   bits [31:29]: isp_out_type = 4 (RGB565)
+   */
+
+  reg = ISP_MIPI_DATA_EN | ISP_EN |
+        ISP_DEMOSAIC_EN | ISP_RGB2YUV_EN | ISP_YUV2RGB_EN |
+        (4u << ISP_OUT_TYPE_SHIFT);  /* isp_out_type = 4 = RGB565 */
+  REG_WRITE(ISP_CNTL_REG, reg);
+
+  /* Step 4: Configure frame dimensions
+   *
+   * ISP_FRAME_CFG:
+   *   vadr_num[11:0]  = VRES - 1 (vertical rows)
+   *   hadr_num[23:12] = HRES - 1 (horizontal pixels)
+   *   hsync_start_exist[29] = 1
+   *   hsync_end_exist[30] = 1
+   */
+
+  reg = ((ESP_CSI_VRES - 1) << ISP_VADR_NUM_SHIFT) |
+        ((ESP_CSI_HRES - 1) << ISP_HADR_NUM_SHIFT) |
+        ISP_HSYNC_START_BIT |
+        ISP_HSYNC_END_BIT;
+  REG_WRITE(ISP_FRAME_CFG_REG, reg);
+
+  syslog(LOG_INFO, "CSI: ISP initialized as RAW8→RGB565 "
+         "(mipi_data_en=1, demosaic+rgb2yuv+yuv2rgb, %dx%d)\n",
+         ESP_CSI_HRES, ESP_CSI_VRES);
+  syslog(LOG_INFO, "CSI: ISP_CNTL=0x%08lx ISP_FRAME_CFG=0x%08lx\n",
+         (unsigned long)REG_READ(ISP_CNTL_REG),
+         (unsigned long)REG_READ(ISP_FRAME_CFG_REG));
 }
 
 /****************************************************************************
@@ -230,51 +360,45 @@ static void esp_csi_clock_enable(void)
  *   - Release PHY reset
  ****************************************************************************/
 
+static void esp_csi_phy_write_reg(csi_host_dev_t *host, uint8_t addr,
+                                  uint8_t val)
+{
+  /* DW MIPI D-PHY test interface write sequence (matches HAL) */
+
+  mipi_csi_phy_ll_write_clock(host, 0, false);
+  mipi_csi_phy_ll_write_reg_addr(host, addr);
+  mipi_csi_phy_ll_write_clock(host, 1, false);
+  mipi_csi_phy_ll_write_clock(host, 0, false);
+  mipi_csi_phy_ll_write_reg_val(host, val);
+  mipi_csi_phy_ll_write_clock(host, 1, false);
+  mipi_csi_phy_ll_write_clock(host, 0, false);
+}
+
 static void esp_csi_phy_init(void)
 {
-  /* CSI Host PHY control registers (offsets from CSI Host base) */
+  csi_host_dev_t *host = MIPI_CSI_HOST_LL_GET_HW(0);
 
-  #define CSI_PHY_SHUTDOWNZ_OFF  0x0040
-  #define CSI_DPHY_RSTZ_OFF      0x0044
-  #define CSI_CSI2_RESETN_OFF    0x0048
-  #define CSI_PHY_TEST_CTRL0_OFF 0x0050
-  #define CSI_PHY_TEST_CTRL1_OFF 0x0054
+  /* Assert PHY shutdown + resets (matches mipi_csi_hal_init) */
 
-  /* Step 6: Assert resets (active low signals - write 0 to assert) */
+  mipi_csi_phy_ll_enable_shutdown_input(host, true);
+  mipi_csi_phy_ll_enable_reset_output(host, true);
+  mipi_csi_host_ll_enable_reset_output(host, true);
 
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_SHUTDOWNZ_OFF, 0);  /* phy_shutdownz = 0 */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_DPHY_RSTZ_OFF, 0);      /* dphy_rstz = 0 */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_CSI2_RESETN_OFF, 0);    /* csi2_resetn = 0 */
+  /* Reset PHY test reg addr/val to defaults */
 
-  /* Clear PHY test interface */
+  mipi_csi_phy_ll_write_reg_addr(host, 0x0);
+  mipi_csi_phy_ll_write_clock(host, 0, true);
+  mipi_csi_phy_ll_write_clock(host, 0, false);
 
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_TEST_CTRL0_OFF, 0x01); /* clear */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_TEST_CTRL0_OFF, 0x00);
+  /* Program PHY PLL HS frequency range for the configured lane rate */
 
-  /* Step 7: Configure PHY PLL frequency range via test interface.
-   * Write register 0x44 with hs_freq_sel << 1.
-   * Sequence: set addr → clock↑ → clock↓ → set val → clock↑ → clock↓
-   */
+  esp_csi_phy_write_reg(host, 0x44, ESP_CSI_PHY_HS_FREQ_SEL << 1);
 
-  /* Write address 0x44 */
+  /* Release PHY shutdown + resets */
 
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_TEST_CTRL1_OFF,
-            (1 << 16) | 0x44);                           /* testen=1, addr=0x44 */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_TEST_CTRL0_OFF, 0x02); /* clock=1 */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_TEST_CTRL0_OFF, 0x00); /* clock=0 */
-
-  /* Write value: hs_freq_sel << 1 for 200 Mbps */
-
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_TEST_CTRL1_OFF,
-            (ESP_CSI_PHY_HS_FREQ_SEL << 1) & 0xFF);     /* testen=0, data */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_TEST_CTRL0_OFF, 0x02); /* clock=1 */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_TEST_CTRL0_OFF, 0x00); /* clock=0 */
-
-  /* Step 8: Release resets */
-
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_PHY_SHUTDOWNZ_OFF, 1);  /* phy_shutdownz = 1 */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_DPHY_RSTZ_OFF, 1);      /* dphy_rstz = 1 */
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_CSI2_RESETN_OFF, 1);    /* csi2_resetn = 1 */
+  mipi_csi_phy_ll_enable_shutdown_input(host, false);
+  mipi_csi_phy_ll_enable_reset_output(host, false);
+  mipi_csi_host_ll_enable_reset_output(host, false);
 
   syslog(LOG_INFO, "CSI: D-PHY initialized (hs_freq_sel=0x%02x)\n",
          ESP_CSI_PHY_HS_FREQ_SEL);
@@ -292,23 +416,13 @@ static void esp_csi_phy_init(void)
 
 static void esp_csi_host_init(void)
 {
-  /* Host register offsets */
+  csi_host_dev_t *host = MIPI_CSI_HOST_LL_GET_HW(0);
 
-  #define CSI_N_LANES_OFF       0x0004
-  #define CSI_VC_EXTENSION_OFF  0x000c
-  #define CSI_SCRAMBLING_OFF    0x0020
+  /* Active lanes, disable VC extension and scrambling (matches HAL) */
 
-  /* Step 10: Set active lanes = 2 (register value = lanes - 1 = 1) */
-
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_N_LANES_OFF, ESP_CSI_LANE_NUM - 1);
-
-  /* Step 11: Disable virtual channel extension (write 1 to disable) */
-
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_VC_EXTENSION_OFF, 1);
-
-  /* Step 12: Disable scrambling */
-
-  REG_WRITE(MIPI_CSI_HOST_BASE + CSI_SCRAMBLING_OFF, 0);
+  mipi_csi_host_ll_set_active_lanes_num(host, ESP_CSI_LANE_NUM);
+  mipi_csi_host_ll_enable_virtual_channel_extension(host, false);
+  mipi_csi_host_ll_enable_scrambling(host, false);
 
   syslog(LOG_INFO, "CSI: Host configured (%d lanes)\n", ESP_CSI_LANE_NUM);
 }
@@ -327,66 +441,44 @@ static void esp_csi_host_init(void)
 
 static void esp_csi_bridge_init(void)
 {
-  /* Bridge register offsets */
+  csi_brg_dev_t *brg = MIPI_CSI_BRG_LL_GET_HW(0);
 
-  #define CSI_BRG_EN_OFF          0x0000
-  #define CSI_BRG_HOST_CTRL_OFF   0x0004
-  #define CSI_BRG_FRAME_CFG_OFF   0x0010
-  #define CSI_BRG_DATA_TYPE_OFF   0x0014
-  #define CSI_BRG_BUF_FLOW_OFF    0x0018
-  #define CSI_BRG_DMA_REQ_OFF     0x001c
-  #define CSI_BRG_ENDIAN_OFF      0x0024
-  #define CSI_BRG_CM_CTRL_OFF     0x0080
+  /* Enable the bridge PHY/host clock */
 
-  uint32_t reg;
+  mipi_csi_brg_ll_enable_clock(brg, true);
 
-  /* Step 13: Set frame size (h_pixel and v_row) */
-
-  reg = (ESP_CSI_HRES & 0xFFF) | ((ESP_CSI_VRES & 0xFFF) << 12);
-  REG_WRITE(MIPI_CSI_BRIDGE_BASE + CSI_BRG_FRAME_CFG_OFF, reg);
-
-  /* Step 14: Set FIFO almost-full threshold */
-
-  REG_WRITE(MIPI_CSI_BRIDGE_BASE + CSI_BRG_BUF_FLOW_OFF,
-            ESP_CSI_BRG_AFULL_THRD);
-
-  /* Step 15: Set data type filter range [0x12, 0x2F] */
-
-  reg = (ESP_CSI_BRG_DT_MIN & 0x3F) | ((ESP_CSI_BRG_DT_MAX & 0x3F) << 8);
-  REG_WRITE(MIPI_CSI_BRIDGE_BASE + CSI_BRG_DATA_TYPE_OFF, reg);
-
-  /* Step 16: Set DMA burst length */
-
-  REG_WRITE(MIPI_CSI_BRIDGE_BASE + CSI_BRG_DMA_REQ_OFF,
-            ESP_CSI_BRG_BURST_LEN);
-
-  /* Step 17: Configure color format conversion (RAW8 → RGB565)
-   * Enable color conversion, set input=RAW8, output=RGB565, bypass=false.
-   * CM_CTRL register layout (approximate):
-   *   bit[0]    : cm_en (enable)
-   *   bit[1]    : cm_bypass
-   *   bit[3:2]  : cm_rx (input format: 0=RGB888, 1=RGB565, 2=YUV422, 3=YUV420)
-   *   bit[5:4]  : cm_tx (output format: same encoding)
-   *   For RAW8 input with color conversion, we rely on the Bridge's
-   *   internal demosaic treating RAW8 as a special input mode.
-   *
-   * NOTE: The exact register layout depends on chip revision.
-   * This is a simplified version that sets known-good values.
+  /* Frame geometry: H pixels and V rows.
+   * NOTE: mipi_csi_hal_init passes frame_height as the H pixel count and
+   * frame_width as the V row count for this sensor orientation.
    */
 
-  reg = 0;
-  reg |= (1 << 0);  /* cm_en = 1 (enable conversion) */
-  reg &= ~(1 << 1); /* cm_bypass = 0 (don't bypass) */
-  /* Input: RAW8 maps to a special mode, output: RGB565 = 1 */
-  reg |= (1 << 4);  /* cm_tx = 1 (RGB565 output) */
-  REG_WRITE(MIPI_CSI_BRIDGE_BASE + CSI_BRG_CM_CTRL_OFF, reg);
+  mipi_csi_brg_ll_set_intput_data_h_pixel_num(brg, ESP_CSI_HRES);
+  mipi_csi_brg_ll_set_intput_data_v_row_num(brg, ESP_CSI_VRES);
 
-  /* Enable Bridge clock */
 
-  REG_SET_BIT(MIPI_CSI_BRIDGE_BASE + CSI_BRG_HOST_CTRL_OFF, (1 << 0));
 
-  syslog(LOG_INFO, "CSI: Bridge configured (%dx%d, RAW8->RGB565)\n",
-         ESP_CSI_HRES, ESP_CSI_VRES);
+  /* FIFO almost-full threshold and RAW8 data-type filter [0x12, 0x2f] */
+
+  mipi_csi_brg_ll_set_flow_ctl_buf_afull_thrd(brg, ESP_CSI_BRG_AFULL_THRD);
+  mipi_csi_brg_ll_set_data_type_min(brg, ESP_CSI_BRG_DT_MIN);
+  mipi_csi_brg_ll_set_data_type_max(brg, ESP_CSI_BRG_DT_MAX);
+  mipi_csi_brg_ll_set_output_byte_endian(brg, false);
+
+  /* DMA burst length (64-bit words per burst), bridge is flow controller */
+
+  mipi_csi_brg_ll_set_burst_len(brg, ESP_CSI_BRG_BURST_LEN);
+
+  /* Color-mode conversion: RAW8 in == RAW8 out, so enable the color-mode
+   * block in bypass (passthrough). This matches esp_cam_ctlr_csi's
+   * s_csi_ctlr_format_conversion for the src==dst case and is required
+   * for the bridge to forward pixel data on rev >= 3.0.
+   */
+
+  mipi_csi_brg_ll_enable_color_conversion(brg, true);
+  mipi_csi_brg_ll_set_color_mode_bypass(brg, true);
+
+  syslog(LOG_INFO, "CSI: Bridge configured (%dx%d RAW8, burst=%d)\n",
+         ESP_CSI_HRES, ESP_CSI_VRES, ESP_CSI_BRG_BURST_LEN);
 }
 
 /****************************************************************************
@@ -399,54 +491,214 @@ static void esp_csi_bridge_init(void)
  *   or future interrupt-driven DMA.
  ****************************************************************************/
 
+/****************************************************************************
+ * Name: esp_csi_dma_arm
+ *
+ * Description:
+ *   Program the DW-GDMA channel transfer (source = CSI bridge FIFO,
+ *   destination = dst) and enable the channel. Must be called with the
+ *   destination buffer already validated (non-NULL, large enough).
+ ****************************************************************************/
+
+static void esp_csi_dma_arm(FAR uint8_t *dst)
+{
+  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
+  const uint8_t ch = ESP_CSI_DMA_CHANNEL;
+
+  /* Source: CSI bridge FIFO, fixed address, 64-bit, burst 512/16 */
+
+  dw_gdma_ll_channel_set_src_addr(dev, ch, ESP_CSI_BRG_MEM_BASE);
+  dw_gdma_ll_channel_set_src_burst_mode(dev, ch, DW_GDMA_BURST_MODE_FIXED);
+  dw_gdma_ll_channel_set_src_trans_width(dev, ch, DW_GDMA_TRANS_WIDTH_64);
+  dw_gdma_ll_channel_set_src_burst_items(dev, ch, DW_GDMA_BURST_ITEMS_512);
+  dw_gdma_ll_channel_set_src_burst_len(dev, ch, 16);
+  dw_gdma_ll_channel_set_src_master_port(dev, ch, ESP_CSI_BRG_MEM_BASE);
+
+  /* Destination: frame buffer, incrementing address, 64-bit */
+
+  dw_gdma_ll_channel_set_dst_addr(dev, ch, (uint32_t)(uintptr_t)dst);
+  dw_gdma_ll_channel_set_dst_burst_mode(dev, ch, DW_GDMA_BURST_MODE_INCREMENT);
+  dw_gdma_ll_channel_set_dst_trans_width(dev, ch, DW_GDMA_TRANS_WIDTH_64);
+  dw_gdma_ll_channel_set_dst_burst_items(dev, ch, DW_GDMA_BURST_ITEMS_512);
+  dw_gdma_ll_channel_set_dst_burst_len(dev, ch, 16);
+  dw_gdma_ll_channel_set_dst_master_port(dev, ch, (uintptr_t)dst);
+
+  /* One RAW8 frame worth of 64-bit items */
+
+  dw_gdma_ll_channel_set_trans_block_size(dev, ch, ESP_CSI_DMA_XFER_ITEMS);
+
+  /* Contiguous single-block transfer, source is flow controller (CSI) */
+
+  dw_gdma_ll_channel_set_src_multi_block_type(dev, ch,
+                                     DW_GDMA_BLOCK_TRANSFER_CONTIGUOUS);
+  dw_gdma_ll_channel_set_dst_multi_block_type(dev, ch,
+                                     DW_GDMA_BLOCK_TRANSFER_CONTIGUOUS);
+  dw_gdma_ll_channel_set_trans_flow(dev, ch, DW_GDMA_ROLE_PERIPH_CSI,
+                                    DW_GDMA_ROLE_MEM, DW_GDMA_FLOW_CTRL_SRC);
+
+  /* Hardware handshake, CSI as source peripheral */
+
+  dw_gdma_ll_channel_set_src_handshake_interface(dev, ch,
+                                                 DW_GDMA_HANDSHAKE_HW);
+  dw_gdma_ll_channel_set_dst_handshake_interface(dev, ch,
+                                                 DW_GDMA_HANDSHAKE_HW);
+  dw_gdma_ll_channel_set_src_handshake_periph(dev, ch,
+                                              DW_GDMA_ROLE_PERIPH_CSI);
+  dw_gdma_ll_channel_set_src_outstanding_limit(dev, ch, 5);
+  dw_gdma_ll_channel_set_dst_outstanding_limit(dev, ch, 5);
+  dw_gdma_ll_channel_set_priority(dev, ch, 1);
+
+  /* Enable block-transfer-done interrupt for this single block */
+
+  dw_gdma_ll_channel_set_block_markers(dev, ch, true, true, true);
+  dw_gdma_ll_channel_clear_intr(dev, ch, UINT32_MAX);
+  dw_gdma_ll_channel_enable_intr_generation(dev, ch,
+                             DW_GDMA_LL_CHANNEL_EVENT_BLOCK_TFR_DONE, true);
+  dw_gdma_ll_channel_enable_intr_propagation(dev, ch,
+                             DW_GDMA_LL_CHANNEL_EVENT_BLOCK_TFR_DONE, true);
+
+  /* Enable the channel */
+
+  dw_gdma_ll_channel_enable(dev, ch, true);
+}
+
+/****************************************************************************
+ * Name: esp_csi_dma_isr
+ *
+ * Description:
+ *   DW-GDMA interrupt handler. On block-transfer-done for the CSI channel,
+ *   invalidate the completed buffer's cache, notify the upper layer, and
+ *   re-arm the DMA with the next buffer.
+ ****************************************************************************/
+
+static int esp_csi_dma_isr(int irq, void *context, void *arg)
+{
+  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
+  const uint8_t ch = ESP_CSI_DMA_CHANNEL;
+  uint32_t status;
+
+  /* --- Handle DSI channel 1 first (if it fired) --- */
+
+  {
+    uint32_t dsi_st = dev->ch[1].int_st0.val;
+    if (dsi_st)
+      {
+        extern void esp_dsi_dma_isr_handler(void);
+        esp_dsi_dma_isr_handler();
+      }
+  }
+
+  /* --- Handle CSI channel 0 --- */
+
+  status = dev->ch[ch].int_st0.val;
+
+  if ((status & DW_GDMA_LL_CHANNEL_EVENT_BLOCK_TFR_DONE) == 0)
+    {
+      /* Not our event - clear whatever fired and return */
+
+      dw_gdma_ll_channel_clear_intr(dev, ch, status);
+      return OK;
+    }
+
+  dw_gdma_ll_channel_clear_intr(dev, ch, status);
+
+  g_csi_dev.frame_count++;
+
+  /* Invalidate cache for the just-filled buffer so the CPU sees DMA data */
+
+  if (g_csi_dev.dma_dst != NULL)
+    {
+      up_invalidate_dcache((uintptr_t)g_csi_dev.dma_dst,
+                           (uintptr_t)g_csi_dev.dma_dst +
+                           g_csi_dev.dma_dst_size);
+    }
+
+  /* Notify upper layer and obtain the next destination buffer */
+
+  if (g_csi_dev.frame_cb != NULL)
+    {
+      FAR uint8_t *next = NULL;
+      uint32_t next_size = 0;
+
+      g_csi_dev.frame_cb(g_csi_dev.frame_cb_arg, &next, &next_size);
+
+      if (next != NULL && next_size >= ESP_CSI_FRAME_SIZE)
+        {
+          g_csi_dev.dma_dst = next;
+          g_csi_dev.dma_dst_size = next_size;
+          esp_csi_dma_arm(next);
+        }
+      else
+        {
+          /* No buffer available: leave DMA disarmed until next start */
+
+          g_csi_dev.dma_dst = NULL;
+        }
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: esp_csi_dma_init
+ *
+ * Description:
+ *   Initialize the DW-GDMA controller and allocate the CSI DMA channel
+ *   interrupt. Also allocates internal backup frame buffers.
+ ****************************************************************************/
+
 static int esp_csi_dma_init(void)
 {
-  /* Allocate double frame buffers from heap (PSRAM-backed on ESP32-P4).
-   * In a production driver, use heap_caps_aligned_alloc with SPIRAM cap.
-   * For NuttX, we use kmm_memalign for cache-aligned allocation.
+  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
+  int __DECLARE_RCC_ATOMIC_ENV;
+  (void)__DECLARE_RCC_ATOMIC_ENV;
+
+  /* Allocate internal backup frame buffers (used when no v4l2 buffer is
+   * queued). RAW8 sized, 64-byte (cache line) aligned.
    */
 
   g_csi_dev.frame_buffer[0] = (uint8_t *)kmm_memalign(64,
-                                                       ESP_CSI_FRAME_SIZE);
-  if (g_csi_dev.frame_buffer[0] == NULL)
-    {
-      syslog(LOG_ERR, "CSI: Failed to allocate frame buffer 0\n");
-      return -ENOMEM;
-    }
-
+                                                      ESP_CSI_FRAME_SIZE);
   g_csi_dev.frame_buffer[1] = (uint8_t *)kmm_memalign(64,
-                                                       ESP_CSI_FRAME_SIZE);
-  if (g_csi_dev.frame_buffer[1] == NULL)
+                                                      ESP_CSI_FRAME_SIZE);
+  if (g_csi_dev.frame_buffer[0] == NULL || g_csi_dev.frame_buffer[1] == NULL)
     {
-      kmm_free(g_csi_dev.frame_buffer[0]);
-      g_csi_dev.frame_buffer[0] = NULL;
-      syslog(LOG_ERR, "CSI: Failed to allocate frame buffer 1\n");
+      syslog(LOG_ERR, "CSI: Failed to allocate frame buffers\n");
       return -ENOMEM;
     }
-
-  /* Clear buffers */
 
   memset(g_csi_dev.frame_buffer[0], 0, ESP_CSI_FRAME_SIZE);
   memset(g_csi_dev.frame_buffer[1], 0, ESP_CSI_FRAME_SIZE);
-
   g_csi_dev.active_buf = 0;
 
-  /* TODO: Configure DW-GDMA channel with:
-   *   Source: CSI Bridge FIFO (ESP_CSI_BRG_MEM_BASE), FIXED address
-   *   Dest: frame_buffer[active_buf], INCREMENT address
-   *   Transfer size: ESP_CSI_FRAME_SIZE / 8 (64-bit words)
-   *   Flow controller: source (CSI Bridge)
-   *   Callback: frame complete → switch buffer, post semaphore
-   *
-   * For initial bring-up, DMA is not fully configured.
-   * The frame buffer will contain test pattern or zeros until DMA is done.
-   */
+  /* Enable DW-GDMA bus clock and release reset */
 
-  syslog(LOG_INFO, "CSI: DMA buffers allocated (2 x %d bytes)\n",
-         ESP_CSI_FRAME_SIZE);
-  syslog(LOG_INFO, "CSI: buf[0]=%p buf[1]=%p\n",
-         g_csi_dev.frame_buffer[0], g_csi_dev.frame_buffer[1]);
+  dw_gdma_ll_enable_bus_clock(0, true);
+  dw_gdma_ll_reset_register(0);
 
+  /* Reset and enable the controller, enable global interrupt */
+
+  dw_gdma_ll_reset(dev);
+  dw_gdma_ll_enable_controller(dev, true);
+  dw_gdma_ll_enable_intr_global(dev, true);
+
+  /* Hook the DW-GDMA interrupt */
+
+  g_csi_dev.cpuint = esp_setup_irq(ETS_DW_GDMA_INTR_SOURCE,
+                                   ESP_IRQ_PRIORITY_DEFAULT,
+                                   ESP_IRQ_TRIGGER_LEVEL,
+                                   esp_csi_dma_isr, NULL);
+  if (g_csi_dev.cpuint < 0)
+    {
+      syslog(LOG_ERR, "CSI: Failed to setup DW-GDMA IRQ: %d\n",
+             g_csi_dev.cpuint);
+      return g_csi_dev.cpuint;
+    }
+
+  up_enable_irq(ESP_SOURCE2IRQ(ETS_DW_GDMA_INTR_SOURCE));
+
+  syslog(LOG_INFO, "CSI: DW-GDMA initialized (xfer_items=%d, frame=%d bytes)\n",
+         ESP_CSI_DMA_XFER_ITEMS, ESP_CSI_FRAME_SIZE);
   return OK;
 }
 
@@ -478,6 +730,10 @@ int esp_csi_init(void)
   /* Steps 2-5: Enable clocks */
 
   esp_csi_clock_enable();
+
+  /* ISP initialization: open the MIPI data gate (must be before bridge) */
+
+  esp_csi_isp_init();
 
   /* Steps 6-8: Initialize D-PHY */
 
@@ -513,6 +769,9 @@ int esp_csi_init(void)
 
 int esp_csi_start(void)
 {
+  FAR uint8_t *dst;
+  uint32_t size;
+
   if (!g_csi_dev.initialized)
     {
       return -EINVAL;
@@ -523,12 +782,35 @@ int esp_csi_start(void)
       return OK;
     }
 
-  /* Enable CSI Bridge to start receiving data */
+  /* Choose the initial DMA destination: a buffer set via esp_csi_set_buffer
+   * if available, otherwise the internal backup buffer.
+   */
 
-  REG_SET_BIT(MIPI_CSI_BRIDGE_BASE + 0x0000, (1 << 0));
+  if (g_csi_dev.dma_dst != NULL &&
+      g_csi_dev.dma_dst_size >= ESP_CSI_FRAME_SIZE)
+    {
+      dst  = g_csi_dev.dma_dst;
+      size = g_csi_dev.dma_dst_size;
+    }
+  else
+    {
+      dst  = g_csi_dev.frame_buffer[0];
+      size = ESP_CSI_FRAME_SIZE;
+    }
+
+  g_csi_dev.dma_dst = dst;
+  g_csi_dev.dma_dst_size = size;
+
+  /* Arm the DMA before enabling the bridge so the first frame is captured */
+
+  esp_csi_dma_arm(dst);
+
+  /* Enable CSI Bridge (csi_en register) to start receiving data */
+
+  mipi_csi_brg_ll_enable(MIPI_CSI_BRG_LL_GET_HW(0), true);
 
   g_csi_dev.streaming = true;
-  syslog(LOG_INFO, "CSI: Streaming started\n");
+  syslog(LOG_INFO, "CSI: Streaming started (dst=%p)\n", dst);
   return OK;
 }
 
@@ -548,13 +830,102 @@ int esp_csi_stop(void)
       return OK;
     }
 
-  /* Disable CSI Bridge */
+  /* Disable CSI Bridge (csi_en register) */
 
-  REG_CLR_BIT(MIPI_CSI_BRIDGE_BASE + 0x0000, (1 << 0));
+  mipi_csi_brg_ll_enable(MIPI_CSI_BRG_LL_GET_HW(0), false);
+
+  /* Disable the DMA channel */
+
+  dw_gdma_ll_channel_enable(DW_GDMA_LL_GET_HW(0), ESP_CSI_DMA_CHANNEL, false);
 
   g_csi_dev.streaming = false;
-  syslog(LOG_INFO, "CSI: Streaming stopped\n");
+  syslog(LOG_INFO, "CSI: Streaming stopped (%lu frames)\n",
+         (unsigned long)g_csi_dev.frame_count);
   return OK;
+}
+
+/****************************************************************************
+ * Name: esp_csi_register_frame_cb
+ ****************************************************************************/
+
+int esp_csi_register_frame_cb(esp_csi_frame_cb_t cb, FAR void *arg)
+{
+  g_csi_dev.frame_cb = cb;
+  g_csi_dev.frame_cb_arg = arg;
+  return OK;
+}
+
+/****************************************************************************
+ * Name: esp_csi_set_buffer
+ ****************************************************************************/
+
+int esp_csi_set_buffer(FAR uint8_t *buf, uint32_t size)
+{
+  if (buf == NULL || size < ESP_CSI_FRAME_SIZE)
+    {
+      return -EINVAL;
+    }
+
+  g_csi_dev.dma_dst = buf;
+  g_csi_dev.dma_dst_size = size;
+  return OK;
+}
+
+/****************************************************************************
+ * Name: esp_csi_dump_status
+ *
+ * Description:
+ *   Diagnostic: dump DW-GDMA channel and CSI bridge state to isolate where
+ *   the capture pipeline stalls. DAR advancing past the buffer start means
+ *   the DMA moved data (bridge produced DMA requests).
+ ****************************************************************************/
+
+void esp_csi_dump_status(void)
+{
+  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
+  const uint8_t ch = ESP_CSI_DMA_CHANNEL;
+  csi_brg_dev_t *brg = MIPI_CSI_BRG_LL_GET_HW(0);
+  csi_host_dev_t *host = MIPI_CSI_HOST_LL_GET_HW(0);
+  int i;
+
+  /* Sample repeatedly: the D-PHY returns to stop-state between frames,
+   * so a single sample is unreliable. Watch DAR advance and PHY activity
+   * over several samples.
+   */
+
+  for (i = 0; i < 8; i++)
+    {
+      syslog(LOG_INFO, "CSI-DIAG[%d]: dar=0x%08lx chen=0x%lx dma_ist=0x%lx | "
+             "brg_en=%lu brg_iraw=0x%lx | phy_ss=0x%lx phy_rx=0x%lx "
+             "ist_main=0x%lx\n",
+             i,
+             (unsigned long)dev->ch[ch].dar0.val,
+             (unsigned long)dev->chen0.val,
+             (unsigned long)dev->ch[ch].int_st0.val,
+             (unsigned long)brg->csi_en.val,
+             (unsigned long)brg->int_raw.val,
+             (unsigned long)host->phy_stopstate.val,
+             (unsigned long)host->phy_rx.val,
+             (unsigned long)host->int_st_main.val);
+      up_udelay(2000);   /* 2ms between samples */
+    }
+
+  /* Decode which CSI-2 frame errors are latched */
+
+  syslog(LOG_INFO, "CSI-DIAG: bndry_fatal=0x%lx seq_fatal=0x%lx "
+         "phy_fatal=0x%lx pkt_fatal=0x%lx\n",
+         (unsigned long)host->int_st_bndry_frame_fatal.val,
+         (unsigned long)host->int_st_seq_frame_fatal.val,
+         (unsigned long)host->int_st_phy_fatal.val,
+         (unsigned long)host->int_st_pkt_fatal.val);
+
+  /* ISP status: verify mipi_data_en is set */
+
+  syslog(LOG_INFO, "CSI-DIAG: ISP_CNTL=0x%08lx ISP_FRAME_CFG=0x%08lx "
+         "ISP_CLK_EN=0x%08lx\n",
+         (unsigned long)REG_READ(ISP_CNTL_REG),
+         (unsigned long)REG_READ(ISP_FRAME_CFG_REG),
+         (unsigned long)REG_READ(ISP_CLK_EN_REG));
 }
 
 /****************************************************************************
