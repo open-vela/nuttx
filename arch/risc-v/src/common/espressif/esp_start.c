@@ -573,10 +573,17 @@ void __esp_start(void)
   esp_mmu_map_init();
 
 #ifdef CONFIG_ESPRESSIF_SPIRAM
-  /* ESP32-P4 PSRAM requires the analog I2C master clock to be enabled
-   * for MPLL configuration (used as PSRAM clock source).
-   * In ESP-IDF, the bootloader keeps this clock always enabled.
-   * NuttX simple boot must explicitly enable it before PSRAM init.
+  /* ESP32-P4 PSRAM requires:
+   * 1. Analog I2C master clock for MPLL configuration
+   * 2. LDO channel 2 (1800mV) to power MPLL
+   * In ESP-IDF, the bootloader keeps these always enabled.
+   * NuttX simple boot must explicitly enable them before PSRAM init.
+   *
+   * NOTE: We use direct register writes here because:
+   * - This code runs very early (before esp_clk_init)
+   * - The HAL esp_ldo_acquire_channel() API is in flash-mapped memory and
+   *   uses critical sections + logging that may not be safe this early
+   * - Register-direct approach matches what bootloader_hardware_init() does
    */
   {
     extern void _regi2c_ctrl_ll_master_enable_clock(bool enable);
@@ -588,7 +595,29 @@ void __esp_start(void)
     REGI2C_WRITE_MASK(I2C_BIAS, I2C_BIAS_DREG_1P1, 10);
     REGI2C_WRITE_MASK(I2C_BIAS, I2C_BIAS_DREG_1P1_PVT, 10);
 
-    /* Wait for analog circuits to stabilize after enabling clocks/bias.
+    /* Enable LDO channel 2 at 1800mV to power MPLL.
+     * PMU.ext_ldo[3] corresponds to LDO channel 2 (index_array={0,3,1,4}).
+     * Without this, periph_rtc_mpll_acquire() enables MPLL but it has no
+     * supply voltage, causing s_check_psram_connected() to fail with 0x106.
+     *
+     * Register layout (pmu_ext_ldo_reg_t at 0x501151D0):
+     *   bit7: force_tieh_sel = 1 (software control)
+     *   bit8: xpd = 1 (enable LDO output)
+     *   bit14: tieh = 0 (use Vref*Mul, not 3.3V rail)
+     *
+     * Analog config (pmu_ext_ldo_ana_reg_t at 0x501151D4):
+     *   bits[31:28]: dref = 6
+     *   bits[25:23]: mul = 5
+     *   → Vout ≈ 1800mV (exact match for default without eFuse calibration)
+     */
+    volatile uint32_t *pmu_ext_ldo3_reg = (volatile uint32_t *)0x501151D0;
+    volatile uint32_t *pmu_ext_ldo3_ana = (volatile uint32_t *)0x501151D4;
+
+    /* Set voltage first (dref=6, mul=5), then enable */
+    *pmu_ext_ldo3_ana = (6u << 28) | (5u << 23);
+    *pmu_ext_ldo3_reg = (1u << 7) | (1u << 8);
+
+    /* Wait for analog circuits to stabilize after enabling clocks/bias/LDO.
      * Use busy-wait since ets_delay_us may be unreliable before esp_clk_init.
      */
     for (volatile int d = 0; d < 100000; d++) { }

@@ -26,7 +26,11 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common/espressif espressif)
 set(SRCS esp_chip_rev.c)
 
 if(CONFIG_ESP32P4_MIPI_DSI)
-  list(APPEND SRCS esp_mipi_dsi.c)
+  list(APPEND SRCS
+    esp_dw_gdma_nuttx.c
+    esp_lcd_dsi_bus_nuttx.c
+    esp_lcd_panel_dpi_nuttx.c
+    esp_dsi_fb.c)
 endif()
 
 if(CONFIG_ESP32P4_CAMERA)

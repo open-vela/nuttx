@@ -157,8 +157,22 @@ config ESP32P4_CAMERA
 	---help---
 		Enable the MIPI-CSI camera driver for ESP32-P4.
 		This registers a V4L2 capture device at /dev/video0
-		using the OV5647 sensor via MIPI-CSI 2-lane interface.
-		Output format: RGB565 1024x600 @ 30fps.
+		using the SC2336 sensor via MIPI-CSI 2-lane interface.
+		Native format: RAW8 1024x600 @ 30fps.
+
+if ESP32P4_CAMERA
+
+config ESP32P4_CAMERA_DMA_SELFTEST
+	bool "Camera CSI/DMA boot self-test"
+	default n
+	---help---
+		Run a display-independent bring-up test of the CSI + DW-GDMA
+		capture path at boot: bring up the sensor, arm the DMA into a
+		scratch buffer, stream briefly, and report the completed frame
+		count and captured bytes over syslog. Useful for validating
+		frame capture without the V4L2/display stack.
+
+endif # ESP32P4_CAMERA
 
 endif # ARCH_CHIP_ESP32P4
 
