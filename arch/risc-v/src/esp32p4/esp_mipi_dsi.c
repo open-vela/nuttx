@@ -36,8 +36,13 @@
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/nuttx.h>
+#include <nuttx/cache.h>
+#include <string.h>
 
 #include "esp_mipi_dsi.h"
+#include "esp_cache.h"
+#include "soc/soc.h"       /* SOC_NON_CACHEABLE_OFFSET_SRAM */
+#include "hal/cache_ll.h"  /* CACHE_LL_L2MEM_NON_CACHE_ADDR */
 
 /* HAL includes */
 
@@ -46,6 +51,8 @@
 #include "hal/mipi_dsi_host_ll.h"
 #include "hal/mipi_dsi_phy_ll.h"
 #include "hal/mipi_dsi_brg_ll.h"
+#include "hal/dw_gdma_ll.h"
+#include "hal/dw_gdma_types.h"
 
 /****************************************************************************
  * MIPI PHY LDO Configuration (Direct Register Access)
@@ -115,9 +122,13 @@
 #define PANEL_VBP            ESP_DSI_VBP
 #define PANEL_VFP            ESP_DSI_VFP
 
-/* Bridge FIFO memory base address for DMA writes */
+/* Bridge FIFO memory base address for DMA writes.
+ * MUST match HAL's MIPI_DSI_BRG_MEM_BASE (0x50105000) - the DMA master
+ * port selection logic compares against this exact value to route the
+ * transfer to the DSI bridge instead of generic memory.
+ */
 
-#define MIPI_DSI_BRG_MEM_BASE  0x50108000
+#define MIPI_DSI_BRG_MEM_BASE  0x50105000
 
 /****************************************************************************
  * GPIO Configuration for Panel Reset and Backlight
@@ -188,6 +199,16 @@ static mipi_dsi_hal_context_t g_dsi_hal;
 
 static uint8_t *g_framebuffer;
 
+/* DW-GDMA Link List Item for DSI refresh (self-cycling).
+ * Must be 64-byte aligned, accessed via non-cached alias for writes,
+ * but the next-pointer stored inside uses the cached address (DMA
+ * fetches LLI through the cache).
+ */
+
+static uint8_t g_dsi_lli_mem[128]
+    __attribute__((aligned(64)));
+static dw_gdma_link_list_item_t *g_dsi_lli_nc;  /* non-cached alias */
+
 /* EK79007 panel initialization sequence */
 
 static const struct panel_cmd_s g_ek79007_init[] =
@@ -201,6 +222,7 @@ static const struct panel_cmd_s g_ek79007_init[] =
   { 0x85, 0xe3, 1, 0   },
   { 0x86, 0x88, 1, 0   },
   { 0x11, 0x00, 0, 120 },  /* Sleep Out, wait 120ms */
+  { 0x29, 0x00, 0, 50  },  /* Display On, wait 50ms */
 };
 
 /****************************************************************************
@@ -298,17 +320,22 @@ static void dsi_reset_panel(void)
 
   dsi_configure_gpio_output(DSI_PANEL_RESET_GPIO);
 
-  /* Pull low (assert reset, active low) */
+  /* Pull low (assert reset, active low) - hold 20ms */
 
   dsi_gpio_set_level(DSI_PANEL_RESET_GPIO, false);
-  dsi_delay_ms(10);
+  dsi_delay_ms(20);
 
   /* Pull high (release reset) */
 
   dsi_gpio_set_level(DSI_PANEL_RESET_GPIO, true);
-  dsi_delay_ms(10);
 
-  lcdinfo("Panel reset complete (GPIO %d)\n", DSI_PANEL_RESET_GPIO);
+  /* EK79007AD datasheet Power On Sequence:
+   * After GRB release: wait 30ms
+   * Then LP11 must be maintained for 55ms minimum
+   * Total wait: 100ms before sending any DCS command
+   */
+
+  dsi_delay_ms(100);
 }
 
 /****************************************************************************
@@ -447,14 +474,23 @@ static int dsi_init_phy(void)
 
   mipi_dsi_hal_init(&g_dsi_hal, &hal_cfg);
 
-  /* Step 5: Configure PHY PLL (calculates M/N, writes PHY registers) */
+  /* Step 5: Configure PHY PLL.
+   *
+   * ESP-IDF does NOT re-assert PHY shutdown/reset before PLL config.
+   * It relies on mipi_dsi_hal_init having already done the correct
+   * power-up sequence (shutdownz→rstz→enableclk→forcepll).
+   * Previous NuttX workaround re-asserted reset here, which may leave
+   * PHY in an incorrect state (PHY_STATUS bits 2,4,7 extra vs ESP-IDF).
+   */
+
+  /* Write PLL M/N/HS-freq-range via test interface */
 
   mipi_dsi_hal_configure_phy_pll(&g_dsi_hal, DSI_PHY_CLK_FREQ,
                                  (float)DSI_LANE_RATE_MBPS);
 
-  /* Step 6: Wait for PLL lock and lanes stopped */
+  /* Step 6: Wait for PLL lock */
 
-  timeout = 10000;
+  timeout = 100000;
   while (!mipi_dsi_phy_ll_is_pll_locked(g_dsi_hal.host) && timeout > 0)
     {
       timeout--;
@@ -462,25 +498,26 @@ static int dsi_init_phy(void)
 
   if (timeout <= 0)
     {
-      lcdwarn("WARNING: DSI PHY PLL failed to lock (continuing anyway)\n");
+      syslog(LOG_ERR, "[DSI] ERROR: PHY PLL failed to lock!\n");
+    }
+  else
+    {
+      syslog(LOG_INFO, "[DSI] PHY PLL locked (timeout remaining=%d)\n",
+             timeout);
     }
 
-  timeout = 10000;
+  /* Wait for lanes to reach stop state */
+
+  timeout = 100000;
   while (!mipi_dsi_phy_ll_are_lanes_stopped(g_dsi_hal.host,
          DSI_NUM_LANES) && timeout > 0)
     {
       timeout--;
     }
 
-  if (timeout <= 0)
-    {
-      lcdwarn("WARNING: DSI lanes failed to enter stop state "
-              "(continuing anyway)\n");
-    }
-
-  lcdinfo("DSI PHY initialized, PLL %s\n",
-          mipi_dsi_phy_ll_is_pll_locked(g_dsi_hal.host) ?
-          "locked" : "NOT locked (soft fail)");
+  syslog(LOG_INFO, "[DSI] PHY init done, PLL %s, lanes %s\n",
+         mipi_dsi_phy_ll_is_pll_locked(g_dsi_hal.host) ? "LOCKED" : "UNLOCKED",
+         (timeout > 0) ? "stopped" : "NOT stopped");
   return OK;
 }
 
@@ -619,7 +656,7 @@ static void dsi_configure_dpi(void)
 
   mipi_dsi_host_ll_dpi_set_vcid(host, 0);
   mipi_dsi_host_ll_dpi_set_color_coding(host,
-      LCD_COLOR_FMT_RGB565, 0);
+      LCD_COLOR_FMT_RGB888, 0);
 
   /* All signals active high */
 
@@ -654,19 +691,23 @@ static void dsi_configure_dpi(void)
    */
 
   mipi_dsi_brg_ll_set_num_pixel_bits(bridge,
-      PANEL_HRES * PANEL_VRES * 16);  /* RGB565 = 16 bits per pixel */
+      PANEL_HRES * PANEL_VRES * 24);  /* RGB888 = 24 bits per pixel */
   mipi_dsi_brg_ll_set_underrun_discard_count(bridge, PANEL_HRES);
   mipi_dsi_brg_ll_set_input_color_format(bridge,
-      LCD_COLOR_FMT_RGB565);  /* Input: RGB565 from framebuffer */
+      LCD_COLOR_FMT_RGB888);  /* Input: RGB888 from framebuffer */
   mipi_dsi_brg_ll_set_output_color_format(bridge,
-      LCD_COLOR_FMT_RGB565, 0);  /* Output: RGB565 (no conversion) */
+      LCD_COLOR_FMT_RGB888, 0);  /* Output: RGB888 (no conversion) */
   mipi_dsi_brg_ll_set_flow_controller(bridge,
       MIPI_DSI_LL_FLOW_CONTROLLER_DMA);
   mipi_dsi_brg_ll_set_multi_block_number(bridge, 1);
   mipi_dsi_brg_ll_set_burst_len(bridge, 256);
   mipi_dsi_brg_ll_set_empty_threshold(bridge, 1024 - 256);
-  mipi_dsi_brg_ll_enable(bridge, true);
-  mipi_dsi_brg_ll_update_dpi_config(bridge);
+
+  /* NOTE: Bridge enable and DPI config update are deferred to
+   * esp_mipi_dsi_start_refresh() — they must happen AFTER panel
+   * DCS init (sleep out) and AFTER DMA is ready to feed the FIFO.
+   * Enabling bridge too early causes underrun with sleeping panel.
+   */
 
   lcdinfo("DPI configured: %dx%d @ %d MHz\n",
           PANEL_HRES, PANEL_VRES, DSI_DPI_CLK_MHZ);
@@ -714,16 +755,18 @@ static int dsi_alloc_framebuffer(void)
       return OK;
     }
 
-  /* Fill full framebuffer with blue (0x001F in RGB565) */
+  /* Fill full framebuffer with RED (RGB888: R=0xFF, G=0, B=0) */
 
-  uint16_t *fb16 = (uint16_t *)g_framebuffer;
+  uint8_t *fb8 = (uint8_t *)g_framebuffer;
   int i;
-  for (i = 0; i < (ESP_DSI_FB_SIZE / 2); i++)
+  for (i = 0; i < ESP_DSI_FB_SIZE; i += 3)
     {
-      fb16[i] = 0x001f;  /* Blue */
+      fb8[i + 0] = 0xff;  /* R */
+      fb8[i + 1] = 0x00;  /* G */
+      fb8[i + 2] = 0x00;  /* B */
     }
 
-  syslog(LOG_INFO, "Framebuffer allocated: %p, size=%d bytes\n",
+  syslog(LOG_INFO, "Framebuffer allocated: %p, size=%d bytes (filled RED)\n",
          g_framebuffer, ESP_DSI_FB_SIZE);
   return OK;
 }
@@ -744,19 +787,12 @@ static int dsi_alloc_framebuffer(void)
 
 static void dsi_start_video(void)
 {
-  mipi_dsi_host_soc_handle_t host = g_dsi_hal.host;
-  mipi_dsi_bridge_soc_handle_t bridge = g_dsi_hal.bridge;
-
-  /* Step 20: Switch to video mode */
-
-  mipi_dsi_host_ll_enable_video_mode(host, true);
-
-  /* Enable DPI output from bridge */
-
-  mipi_dsi_brg_ll_enable_dpi_output(bridge, true);
-  mipi_dsi_brg_ll_update_dpi_config(bridge);
-
-  lcdinfo("DSI video mode started\n");
+  /* Video mode and DPI output are NOT enabled here.
+   * Per ESP-IDF reference, the correct sequence is:
+   *   1. Start DMA first (so bridge has data to send)
+   *   2. THEN enable video mode + DPI output
+   * This is done in esp_mipi_dsi_start_refresh() after DMA channel enable.
+   */
 }
 
 /****************************************************************************
@@ -771,40 +807,9 @@ static void dsi_start_video(void)
 
 static void dsi_write_fb_to_bridge(void)
 {
-  volatile uint32_t *brg_mem = (volatile uint32_t *)MIPI_DSI_BRG_MEM_BASE;
-  uint32_t *fb32 = (uint32_t *)g_framebuffer;
-  uint32_t fb_size;
-  uint32_t words;
-  uint32_t i;
-
-  /* Determine actual buffer size based on whether full alloc succeeded */
-
-  if (g_framebuffer == NULL)
-    {
-      return;
-    }
-
-  /* Check if we got a small buffer by testing allocation */
-
-  fb_size = ESP_DSI_FB_SIZE;
-
-  /* Try to detect small buffer: if the first pixel at offset 0 is red
-   * (0xF800) we are using the small test buffer.
+  /* No-op: framebuffer refresh is handled by DW-GDMA in
+   * esp_mipi_dsi_start_refresh() called from bringup.
    */
-
-  uint16_t *fb16 = (uint16_t *)g_framebuffer;
-  if (fb16[0] == 0xf800)
-    {
-      fb_size = 4096;
-      syslog(LOG_INFO, "Writing small test buffer to bridge (%lu bytes)\n",
-             (unsigned long)fb_size);
-    }
-
-  words = fb_size / 4;
-  for (i = 0; i < words; i++)
-    {
-      *brg_mem = fb32[i];
-    }
 }
 
 /****************************************************************************
@@ -821,70 +826,80 @@ static void dsi_write_fb_to_bridge(void)
 
 int esp_mipi_dsi_initialize(void)
 {
-  syslog(LOG_INFO, "[DSI] === NOOP TEST - just return OK ===\n");
-  return OK;
+  int ret;
 
-#if 0 /* Full DSI init - disabled for crash debugging */
+  syslog(LOG_INFO, "[DSI] === MIPI-DSI init START ===\n");
+
+  /* Phase 1: Enable PHY LDO and clocks */
+
+  dsi_enable_phy_ldo();
+  dsi_enable_clocks();
+
   /* Phase 2: Initialize PHY (Steps 4-6) */
 
-  syslog(LOG_INFO, "[DSI] Phase 2: PHY init...\n");
   ret = dsi_init_phy();
   if (ret < 0)
     {
       return ret;
     }
 
-  syslog(LOG_INFO, "[DSI] Phase 2: done\n");
 
   /* Phase 3: Configure Host for command mode (Steps 7-12) */
 
-  syslog(LOG_INFO, "[DSI] Phase 3: host config...\n");
   dsi_configure_host();
-  syslog(LOG_INFO, "[DSI] Phase 3: done\n");
 
-  /* Phase 4: Send panel DCS commands (Step 13) */
+  /* Phase 4: Reset panel and send DCS commands */
 
-  syslog(LOG_INFO, "[DSI] Phase 4: panel cmds...\n");
+  dsi_reset_panel();
   dsi_send_panel_commands();
-  syslog(LOG_INFO, "[DSI] Phase 4: done\n");
 
   /* Phase 5: Configure DPI / Video mode (Steps 14-17) */
 
-  syslog(LOG_INFO, "[DSI] Phase 5: DPI config...\n");
   dsi_configure_dpi();
-  syslog(LOG_INFO, "[DSI] Phase 5: done\n");
 
   /* Phase 6: Allocate framebuffer */
 
-  syslog(LOG_INFO, "[DSI] Phase 6: FB alloc...\n");
   ret = dsi_alloc_framebuffer();
   if (ret < 0)
     {
-      syslog(LOG_ERR, "[DSI] Phase 6: FAILED %d\n", ret);
       return ret;
     }
 
-  syslog(LOG_INFO, "[DSI] Phase 6: done\n");
 
   /* Phase 7: Start video output (Steps 20-21) */
 
-  syslog(LOG_INFO, "[DSI] Phase 7: video start...\n");
   dsi_start_video();
-  syslog(LOG_INFO, "[DSI] Phase 7: done\n");
 
   /* Write initial framebuffer content to bridge */
 
-  syslog(LOG_INFO, "[DSI] Phase 7.5: FB write to bridge...\n");
-  dsi_write_fb_to_bridge();
-  syslog(LOG_INFO, "[DSI] Phase 7.5: done\n");
 
-  /* Phase 8: Enable backlight (GPIO 26) */
+  /* Start continuous framebuffer refresh via DMA.
+   * EK79007AD requires: HS Video Pattern started BEFORE backlight.
+   * DMA will continuously feed bridge FIFO from framebuffer.
+   */
 
-  syslog(LOG_INFO, "[DSI] Phase 8: backlight...\n");
+  /* DMA refresh disabled (causes hang during bringup).
+   * Use CPU refresh thread instead.
+   */
+
+  /* Wait 200ms for AVDD to stabilize before enabling backlight
+   * (per EK79007AD datasheet power-on sequence)
+   */
+
+  dsi_delay_ms(200);
+
+  /* Enable backlight */
+
   dsi_enable_backlight();
+
   syslog(LOG_INFO, "[DSI] === MIPI-DSI init COMPLETE ===\n");
+
+  /* Note: Continuous refresh not started here.
+   * The fb0 pandisplay ioctl will call esp_mipi_dsi_flush_fb()
+   * when nxcamera/apps write to the framebuffer.
+   */
+
   return OK;
-#endif
 }
 
 /****************************************************************************
@@ -894,4 +909,275 @@ int esp_mipi_dsi_initialize(void)
 uint8_t *esp_mipi_dsi_get_fb(void)
 {
   return g_framebuffer;
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_flush_fb
+ *
+ * Description:
+ *   Flush the framebuffer content to the DSI bridge FIFO. Must be called
+ *   after the framebuffer is updated (e.g., after each camera frame is
+ *   rendered). In video mode, the bridge continuously reads from its FIFO
+ *   and sends to the panel via DPI. This CPU copy feeds the FIFO.
+ *
+ ****************************************************************************/
+
+void esp_mipi_dsi_flush_fb(void)
+{
+  volatile uint32_t *brg_mem = (volatile uint32_t *)MIPI_DSI_BRG_MEM_BASE;
+  uint32_t *fb32 = (uint32_t *)g_framebuffer;
+  uint32_t words;
+  uint32_t i;
+
+  if (g_framebuffer == NULL)
+    {
+      return;
+    }
+
+  words = ESP_DSI_FB_SIZE / 4;
+  for (i = 0; i < words; i++)
+    {
+      brg_mem[0] = fb32[i];
+    }
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_start_refresh
+ *
+ * Description:
+ *   Start continuous DW-GDMA transfer from framebuffer to DSI bridge FIFO
+ *   using a self-looping link list (LLI whose next pointer points to
+ *   itself). This provides infinite hardware-driven refresh without ISR.
+ *
+ *   Mirrors ESP-IDF esp_lcd_panel_dpi.c: MEM→PERIPH_DSI, flow=SELF,
+ *   HW handshake, LIST block transfer mode.
+ *
+ *   MUST be called after DW-GDMA controller is enabled (camera init).
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: dsi_dma_init_lli
+ *
+ * Description:
+ *   Initialize the self-cycling DMA Link List Item (LLI) for DSI refresh.
+ *   The LLI's next pointer points to itself → infinite hardware cycling.
+ ****************************************************************************/
+
+static void dsi_dma_init_lli(void)
+{
+  dw_gdma_link_list_item_t *lli_cached =
+      (dw_gdma_link_list_item_t *)g_dsi_lli_mem;
+  g_dsi_lli_nc = (dw_gdma_link_list_item_t *)
+      ((uintptr_t)lli_cached + SOC_NON_CACHEABLE_OFFSET_SRAM);
+
+  /* Flush+invalidate the LLI memory so non-cached alias sees zeros */
+
+  esp_cache_msync(lli_cached, sizeof(g_dsi_lli_mem),
+                  ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+                  ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+
+  /* Configure LLI transfer: framebuffer → bridge FIFO */
+
+  dw_gdma_ll_lli_set_src_addr(g_dsi_lli_nc,
+                              (uint32_t)(uintptr_t)g_framebuffer);
+  dw_gdma_ll_lli_set_dst_addr(g_dsi_lli_nc, MIPI_DSI_BRG_MEM_BASE);
+  dw_gdma_ll_lli_set_trans_block_size(g_dsi_lli_nc,
+                                      ESP_DSI_FB_SIZE / 8);
+
+  /* Source: PSRAM framebuffer, incrementing, 64-bit, burst 512×16 */
+
+  dw_gdma_ll_lli_set_src_master_port(g_dsi_lli_nc,
+                                     (uintptr_t)g_framebuffer);
+  dw_gdma_ll_lli_set_src_burst_mode(g_dsi_lli_nc,
+                                    DW_GDMA_BURST_MODE_INCREMENT);
+  dw_gdma_ll_lli_set_src_trans_width(g_dsi_lli_nc,
+                                     DW_GDMA_TRANS_WIDTH_64);
+  dw_gdma_ll_lli_set_src_burst_items(g_dsi_lli_nc,
+                                     DW_GDMA_BURST_ITEMS_512);
+  dw_gdma_ll_lli_set_src_burst_len(g_dsi_lli_nc, 16);
+
+  /* Destination: bridge FIFO, fixed address, 64-bit, burst 256×16 */
+
+  dw_gdma_ll_lli_set_dst_master_port(g_dsi_lli_nc,
+                                     MIPI_DSI_BRG_MEM_BASE);
+  dw_gdma_ll_lli_set_dst_burst_mode(g_dsi_lli_nc,
+                                    DW_GDMA_BURST_MODE_FIXED);
+  dw_gdma_ll_lli_set_dst_trans_width(g_dsi_lli_nc,
+                                     DW_GDMA_TRANS_WIDTH_64);
+  dw_gdma_ll_lli_set_dst_burst_items(g_dsi_lli_nc,
+                                     DW_GDMA_BURST_ITEMS_256);
+  dw_gdma_ll_lli_set_dst_burst_len(g_dsi_lli_nc, 16);
+
+  /* Self-cycling: next pointer = this LLI (cached address for HW) */
+
+  dw_gdma_ll_lli_set_next_item_addr(g_dsi_lli_nc,
+                                    (uint32_t)(uintptr_t)lli_cached);
+  dw_gdma_ll_lli_set_link_list_master_port(g_dsi_lli_nc,
+                                           DW_GDMA_LL_MASTER_PORT_MEMORY);
+
+  /* Block markers: valid=1, last=1, intr on done=1 */
+
+  dw_gdma_ll_lli_set_block_markers(g_dsi_lli_nc, true, true, true);
+}
+
+/****************************************************************************
+ * Name: dsi_dma_start_linked_list
+ *
+ * Description:
+ *   Configure DMA channel 1 for linked-list mode and start it.
+ *   The channel will continuously cycle through the single self-pointing
+ *   LLI, pushing framebuffer data to the bridge without CPU intervention.
+ ****************************************************************************/
+
+static void dsi_dma_start_linked_list(void)
+{
+  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
+  const uint8_t ch = 1;
+
+  /* Declare RCC atomic env variable required by LL macros */
+
+  int __DECLARE_RCC_ATOMIC_ENV;
+  (void)__DECLARE_RCC_ATOMIC_ENV;
+
+  /* Initialize DW-GDMA controller (bus clock, reset, enable).
+   * This is idempotent — safe to call even if camera already did it.
+   */
+
+  dw_gdma_ll_enable_bus_clock(0, true);
+  dw_gdma_ll_reset_register(0);
+  dw_gdma_ll_reset(dev);
+  dw_gdma_ll_enable_controller(dev, true);
+  dw_gdma_ll_enable_intr_global(dev, true);
+
+  /* Linked-list mode for both src and dst */
+
+  dw_gdma_ll_channel_set_src_multi_block_type(dev, ch,
+                                     DW_GDMA_BLOCK_TRANSFER_LIST);
+  dw_gdma_ll_channel_set_dst_multi_block_type(dev, ch,
+                                     DW_GDMA_BLOCK_TRANSFER_LIST);
+
+  /* Flow: MEM → PERIPH_DSI, DMA is flow controller */
+
+  dw_gdma_ll_channel_set_trans_flow(dev, ch,
+                                    DW_GDMA_ROLE_MEM,
+                                    DW_GDMA_ROLE_PERIPH_DSI,
+                                    DW_GDMA_FLOW_CTRL_SELF);
+
+  /* Hardware handshake for DSI bridge */
+
+  dw_gdma_ll_channel_set_src_handshake_interface(dev, ch,
+                                                 DW_GDMA_HANDSHAKE_HW);
+  dw_gdma_ll_channel_set_dst_handshake_interface(dev, ch,
+                                                 DW_GDMA_HANDSHAKE_HW);
+  dw_gdma_ll_channel_set_dst_handshake_periph(dev, ch,
+                                              DW_GDMA_ROLE_PERIPH_DSI);
+
+  /* Outstanding requests (match ESP-IDF golden: src=5, dst=2) */
+
+  dw_gdma_ll_channel_set_src_outstanding_limit(dev, ch, 5);
+  dw_gdma_ll_channel_set_dst_outstanding_limit(dev, ch, 2);
+  dw_gdma_ll_channel_set_priority(dev, ch, 1);
+
+  /* Point channel at our LLI (cached address — HW fetches via cache) */
+
+  dw_gdma_ll_channel_set_link_list_master_port(dev, ch,
+                                               DW_GDMA_LL_MASTER_PORT_MEMORY);
+  dw_gdma_ll_channel_set_link_list_head_addr(dev, ch,
+      (uint32_t)(uintptr_t)g_dsi_lli_mem);
+
+  /* Enable DMA_TFR_DONE interrupt for ch1 so the shared ISR can re-arm.
+   * Only TFR_DONE — do not propagate other events to avoid storm.
+   */
+
+  dw_gdma_ll_channel_clear_intr(dev, ch, UINT32_MAX);
+  dw_gdma_ll_channel_enable_intr_generation(dev, ch, UINT32_MAX, false);
+  dw_gdma_ll_channel_enable_intr_propagation(dev, ch, UINT32_MAX, false);
+
+  /* Now selectively enable only DMA_TFR_DONE */
+
+  dw_gdma_ll_channel_enable_intr_generation(dev, ch,
+                         DW_GDMA_LL_CHANNEL_EVENT_DMA_TFR_DONE, true);
+  dw_gdma_ll_channel_enable_intr_propagation(dev, ch,
+                         DW_GDMA_LL_CHANNEL_EVENT_DMA_TFR_DONE, true);
+
+  /* Enable the channel — DMA starts immediately */
+
+  dw_gdma_ll_channel_enable(dev, ch, true);
+}
+
+/****************************************************************************
+ * Name: esp_dsi_dma_isr_handler
+ *
+ * Description:
+ *   Called from the shared DW-GDMA ISR when channel 1 fires DMA_TFR_DONE.
+ *   Re-points LLP at our self-cycling LLI and re-enables the channel.
+ ****************************************************************************/
+
+void esp_dsi_dma_isr_handler(void)
+{
+  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
+  const uint8_t ch = 1;
+
+  /* Clear all ch1 interrupts */
+
+  dw_gdma_ll_channel_clear_intr(dev, ch, UINT32_MAX);
+
+  /* Re-point LLP and re-enable channel */
+
+  dw_gdma_ll_channel_set_link_list_head_addr(dev, ch,
+      (uint32_t)(uintptr_t)g_dsi_lli_mem);
+  dw_gdma_ll_channel_enable(dev, ch, true);
+}
+
+void esp_mipi_dsi_start_refresh(void)
+{
+  if (g_framebuffer == NULL)
+    {
+      return;
+    }
+
+  /* Write back framebuffer to physical PSRAM for DMA access.
+   * On ESP32-P4, PSRAM at 0x48xxxxxx has non-cached alias at 0x88xxxxxx.
+   * Belt-and-suspenders: do cache writeback AND write through non-cached.
+   */
+
+  esp_cache_msync((void *)g_framebuffer, ESP_DSI_FB_SIZE,
+                  ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
+  /* Also fill via non-cached alias to guarantee physical write */
+  {
+    volatile uint8_t *fb_nc = (volatile uint8_t *)
+        ((uintptr_t)g_framebuffer + 0x40000000);
+    uint32_t j;
+    for (j = 0; j < ESP_DSI_FB_SIZE; j += 3)
+      {
+        fb_nc[j + 0] = 0xff;  /* R */
+        fb_nc[j + 1] = 0x00;  /* G */
+        fb_nc[j + 2] = 0x00;  /* B */
+      }
+  }
+
+  /* Initialize the self-cycling LLI descriptor */
+
+  dsi_dma_init_lli();
+
+  /* Enable the bridge (must happen after panel DCS init, before DMA) */
+
+  syslog(LOG_INFO, "[DSI] Enabling bridge...\n");
+  mipi_dsi_brg_ll_enable(g_dsi_hal.bridge, true);
+  mipi_dsi_brg_ll_update_dpi_config(g_dsi_hal.bridge);
+
+  /* Start linked-list DMA — begins pushing FB to bridge FIFO */
+
+  syslog(LOG_INFO, "[DSI] Starting DMA linked-list...\n");
+  dsi_dma_start_linked_list();
+
+  /* NOW enable video mode + DPI output (bridge has data to send) */
+
+  syslog(LOG_INFO, "[DSI] Enabling video mode + DPI output...\n");
+  mipi_dsi_host_ll_enable_video_mode(g_dsi_hal.host, true);
+  mipi_dsi_brg_ll_enable_dpi_output(g_dsi_hal.bridge, true);
+  mipi_dsi_brg_ll_update_dpi_config(g_dsi_hal.bridge);
+
+  syslog(LOG_INFO, "[DSI] Linked-list DMA refresh started\n");
 }
