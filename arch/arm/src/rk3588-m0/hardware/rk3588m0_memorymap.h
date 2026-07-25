@@ -66,6 +66,32 @@
 #define RK3588M0_PERIPH_WINDOW    0x40000000 /* M0 view of the fixed window   */
 #define RK3588M0_PERIPH_PHYS_BASE 0xf0000000 /* physical address it maps to   */
 
+/* Off-chip DDR: two views of the SAME 512MB region, both relocated by
+ * soc_con11, which u-boot programs from the FIT "exsram_start" property (SIP
+ * MCU_EXSRAM_START_ADDR).  Read the TRM arithmetic carefully - both rows
+ * subtract 0x60000000, not their own base:
+ *
+ *   0x60000000-0x7FFFFFFF  Normal WBWA  phys = addr - 0x60000000 + base
+ *   0x80000000-0x9FFFFFFF  Normal WT    phys = addr - 0x60000000 + base
+ *
+ * So these are not two independent windows: the write-through view sits
+ * 0x20000000 above the write-back view of the same physical byte.  Accessing
+ * 0x80000000 does not reach "base", it reaches base + 0x20000000.
+ *
+ * That cost one hardware round: a store to 0x80000000 with base = 0x07b00000
+ * landed at 0x27b00000 instead, so the intended location read back as
+ * never-written (and the core did not fault, which is why it looked healthy).
+ *
+ * Consequently EXSRAM_BASE below is the write-back view, which is the one whose
+ * address maps directly onto exsram_start.  Reaching a given physical address
+ * through the write-through view would require exsram_start to be 0x20000000
+ * lower, which is not generally possible.
+ */
+
+#define RK3588M0_EXSRAM_BASE      0x60000000 /* maps 1:1 onto exsram_start   */
+#define RK3588M0_EXSRAM_WT_ALIAS  0x80000000 /* same bytes, +0x20000000 skew */
+#define RK3588M0_EXSRAM_WT_SKEW   0x20000000
+
 /* Convert a physical peripheral address to the M0's view of it */
 
 #define RK3588M0_PERIPH(phys) \

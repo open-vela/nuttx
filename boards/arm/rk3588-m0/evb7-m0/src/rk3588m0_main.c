@@ -66,9 +66,25 @@
 int m0_main(int argc, char *argv[])
 {
   uint32_t count = 0;
+  uint32_t readback;
 
   syslog(LOG_INFO, "[M0] NuttX up on PMU Cortex-M0, %luHz core clock\n",
          (unsigned long)BOARD_MCU_FREQUENCY);
+
+  /* Prove the DDR window before anything relies on it: store a marker through
+   * the 0x60000000 view and read it back through the code window, which covers
+   * the same physical bytes. Agreement means soc_con11 was programmed as
+   * intended (from the FIT exsram_start property) and that the store is visible
+   * without cache maintenance - the two properties rpmsg vrings will depend on.
+   */
+
+  putreg32(BOARD_SHMEM_MAGIC, BOARD_SHMEM_BASE);
+  readback = getreg32(BOARD_SHMEM_CODE_VIEW);
+
+  syslog(LOG_INFO, "[M0] shmem window: wrote 0x%08lx, code view reads "
+                   "0x%08lx -> %s\n",
+         (unsigned long)BOARD_SHMEM_MAGIC, (unsigned long)readback,
+         readback == BOARD_SHMEM_MAGIC ? "OK" : "MISMATCH");
 
   for (; ; )
     {
@@ -79,6 +95,13 @@ int m0_main(int argc, char *argv[])
       sleep(1);
 
       putreg32(++count, BOARD_HEARTBEAT_COUNT_ADDR);
+
+      /* Mirror the counter into the shared window so Linux can watch it move at
+       * physical 0x07b00004 as well - the same liveness proof, but travelling
+       * through the DDR window the vrings will use.
+       */
+
+      putreg32(count, BOARD_SHMEM_BASE + 4);
 
       /* Keep the shared console quiet: print rarely, since Linux and the cpu_l3
        * NuttX share this UART.

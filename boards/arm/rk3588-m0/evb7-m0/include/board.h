@@ -59,4 +59,34 @@
 #define BOARD_HEARTBEAT_COUNT_ADDR 0x00000804
 #define BOARD_HEARTBEAT_MAGIC      0x414d5030 /* "AMP0" */
 
+/* Shared-memory window check.
+ *
+ * The off-chip DDR window (relocated by soc_con11 from the FIT "exsram_start"
+ * property) is where rpmsg vrings will live, so it is worth proving before
+ * anything depends on it. Rather than carve out new memory - and therefore
+ * touch the Linux device tree - the test aims the window at an unused part of
+ * the region this core already owns:
+ *
+ *   exsram_start   = 0x07b00000   (1MB into mcu_reserved; the image is ~23KB)
+ *   M0 sees it at    0x60000000   via the DDR window
+ *   and also at      0x00100000   via the code window (same physical bytes)
+ *
+ * Writing through one view and reading back through the other confirms the
+ * window lands where intended, and Linux can check the same words at physical
+ * 0x07b00000 with /dev/mem.
+ *
+ * Use the 0x60000000 view, not 0x80000000. Per TRM Table 9-3 both DDR rows
+ * subtract 0x60000000, so the write-through alias at 0x80000000 reaches
+ * base + 0x20000000, not base - which is exactly how the first attempt wrote to
+ * 0x27b00000 and left the intended location untouched.
+ *
+ * Cache coherency is handled by the uncache range instead: uc_start/uc_end in
+ * the FIT already cover this region, so accesses bypass the cache and Linux
+ * sees the stores without any maintenance.
+ */
+
+#define BOARD_SHMEM_BASE           0x60000000 /* DDR window == exsram_start  */
+#define BOARD_SHMEM_CODE_VIEW      0x00100000 /* same bytes via code window  */
+#define BOARD_SHMEM_MAGIC          0x30535845 /* "EXS0" */
+
 #endif /* __BOARDS_ARM_RK3588_M0_EVB7_M0_INCLUDE_BOARD_H */
