@@ -76,6 +76,13 @@ void rk3588m0_boardinitialize(void)
 #ifdef CONFIG_BOARD_LATE_INITIALIZE
 void board_late_initialize(void)
 {
+  /* Keep this hook trivial. In the flat build it runs on the idle thread's
+   * stack, which is deliberately small, and bringing up rptun from here is
+   * enough to overflow it: OpenAMP is stack hungry (the cpu_l3 port runs its
+   * rptun thread with 64KB). rpmsg is therefore started from m0_main instead,
+   * which has a task stack of its own.
+   */
+
   syslog(LOG_INFO, "[M0] NuttX on RK3588 PMU Cortex-M0\n");
 }
 #endif

@@ -92,6 +92,55 @@
 #define RK3588M0_EXSRAM_WT_ALIAS  0x80000000 /* same bytes, +0x20000000 skew */
 #define RK3588M0_EXSRAM_WT_SKEW   0x20000000
 
+/* rpmsg shared memory, carved out of mcu_reserved (physical 0x07a00000, 2MB) so
+ * that no new region has to be reserved from Linux:
+ *
+ *   0x07a00000  1MB    code, data, bss, heap   (code window, 0x00000000)
+ *   0x07b00000  64KB   vring0 + vring1         (exsram window, 0x60000000)
+ *   0x07b10000  256KB  rpmsg buffer pool       (exsram window, 0x60010000)
+ *
+ * exsram_start in the FIT points at 0x07b00000, so the shared area starts at
+ * RK3588M0_EXSRAM_BASE from this core's point of view, while Linux addresses the
+ * same bytes physically through its own reserved-memory nodes.
+ *
+ * Sizes follow the Linux side (include/linux/rpmsg/rockchip_rpmsg.h): each vring
+ * is RPMSG_VRING_SIZE = 0x8000 with the pair occupying RPMSG_VRING_OVERHEAD, and
+ * a direction holds RPMSG_BUF_COUNT = 64 buffers of 512 bytes.
+ *
+ * IMPORTANT: the heap must stay below the vrings. CONFIG_RAM_SIZE is therefore
+ * 1MB, not the full 2MB of the carveout - otherwise the heap grows straight into
+ * vring0.
+ */
+
+#define RK3588M0_RPMSG_PHYS       0x07b00000 /* == FIT exsram_start          */
+
+#define RK3588M0_VRING0           (RK3588M0_EXSRAM_BASE + 0x00000)
+#define RK3588M0_VRING1           (RK3588M0_EXSRAM_BASE + 0x08000)
+#define RK3588M0_VRING_SIZE       0x8000
+#define RK3588M0_VRING_ALIGN      0x1000
+
+#define RK3588M0_RPMSG_POOL       (RK3588M0_EXSRAM_BASE + 0x10000)
+#define RK3588M0_RPMSG_POOL_SIZE  0x40000
+
+#define RK3588M0_RPMSG_BUF_COUNT  64
+#define RK3588M0_RPMSG_BUF_SIZE   512
+
+/* Extent of the shared window, i.e. how much of the carveout past
+ * RK3588M0_RPMSG_PHYS is reachable at RK3588M0_EXSRAM_BASE. Used by the address
+ * translation hooks to decide whether an address needs rebasing between the
+ * physical view Linux writes into the vrings and this core's window view.
+ */
+
+#define RK3588M0_RPMSG_WINDOW_SIZE 0x100000  /* 1MB: vrings + buffer pool */
+
+/* Writable copy of the resource table. OpenAMP writes notify ids back into the
+ * table, so it cannot be used from .rodata - that mistake crashed the cpu_l3
+ * port, where .rodata is mapped read-only. Park it just past the buffer pool,
+ * inside the uncached shared window.
+ */
+
+#define RK3588M0_RSC_TABLE       (RK3588M0_EXSRAM_BASE + 0x50000)
+
 /* Convert a physical peripheral address to the M0's view of it */
 
 #define RK3588M0_PERIPH(phys) \
@@ -117,12 +166,63 @@
 
 #define RK3588M0_UART_LSR_THRE    (1 << 5) /* Transmit holding register empty */
 
-/* Mailbox 0 (physical 0xFEC60000): the doorbell used by the rockchip AMP
- * rpmsg transport.  Listed here for the follow-on rpmsg work.
+/* Mailboxes: the doorbell used by the rockchip AMP rpmsg transport.
+ *
+ * This core shares mailbox0 with the cpu_l3 link but on different channels.
+ * mailbox1 looked like the tidier choice and was tried first, but its registers
+ * turn out to be inaccessible: the Linux mailbox driver aborted with a
+ * synchronous external abort the moment rockchip_mbox_startup() read
+ * B2A_INTEN. Note that its probe "version: 0x0100" message proves nothing -
+ * for the 1.0.0 controller that value is a driver constant, not a register
+ * read, so probe never touched the hardware. mailbox0, by contrast, is proven
+ * working by the cpu_l3 link.
+ *
+ * Channel map on mailbox0:
+ *   ch0  cpu_l3 link TX (B2A) - do not touch
+ *   ch1  this core's TX (B2A)
+ *   ch2  this core's RX (A2B)
+ *   ch3  cpu_l3 link RX (A2B) - do not touch
+ *
+ * The rockchip link-id packs a 4-bit master cpu id and a 4-bit remote id, and
+ * the RK3576 AMP dtsi documents the MCU as remote 4, hence link-id 0x04 here.
  */
 
-#define RK3588_MAILBOX0_PHYS      0xfec60000
+#define RK3588_MAILBOX0_PHYS      0xfec60000 /* cpu_l3 link - do not touch */
+#define RK3588_MAILBOX1_PHYS      0xfec70000 /* this core's link          */
+#define RK3588_MAILBOX2_PHYS      0xfece0000 /* unused                    */
+
 #define RK3588M0_MAILBOX0_BASE    RK3588M0_PERIPH(RK3588_MAILBOX0_PHYS)
+#define RK3588M0_MAILBOX1_BASE    RK3588M0_PERIPH(RK3588_MAILBOX1_PHYS)
+
+/* Mailbox register layout (rockchip,rk3368-mailbox).  A2B is the direction the
+ * A cores write and this core reads; B2A is the reverse.  Writing the CMD
+ * register is what latches the doorbell - writing DAT alone does nothing, a
+ * detail that cost a debugging round on the cpu_l3 side.
+ */
+
+#define RK3588M0_MBOX_A2B_INTEN   0x00
+#define RK3588M0_MBOX_A2B_STATUS  0x04
+#define RK3588M0_MBOX_A2B_CMD(n)  (0x08 + (n) * 0x08)
+#define RK3588M0_MBOX_A2B_DAT(n)  (0x0c + (n) * 0x08)
+#define RK3588M0_MBOX_B2A_INTEN   0x28
+#define RK3588M0_MBOX_B2A_STATUS  0x2c
+#define RK3588M0_MBOX_B2A_CMD(n)  (0x30 + (n) * 0x08)
+#define RK3588M0_MBOX_B2A_DAT(n)  (0x34 + (n) * 0x08)
+
+/* Channels 1 and 2 of mailbox0: this core announces on B2A channel 1 (the Linux
+ * "rpmsg-rx" mailbox of the M0 link) and listens on A2B channel 2 (its
+ * "rpmsg-tx"). Channels 0 and 3 belong to the cpu_l3 link.
+ */
+
+#define RK3588M0_MBOX_TX_CHAN     1
+#define RK3588M0_MBOX_RX_CHAN     2
+
+/* Handshake value Linux checks in the DAT register before accepting a kick
+ * (include/linux/rpmsg/rockchip_rpmsg.h RPMSG_MBOX_MAGIC).
+ */
+
+#define RK3588M0_RPMSG_MBOX_MAGIC 0x524d5347 /* "RMSG" */
+#define RK3588M0_RPMSG_LINK_ID    0x04       /* master cpu0, remote id 4 */
 
 /* PMU1_GRF (physical 0xFD58A000).  SOC_STS at offset 0x0060 reports the M0's
  * own state: halted (bit 7), lockup (bit 8), sleeping (bit 9), deepsleep

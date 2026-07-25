@@ -33,6 +33,10 @@
 #include "arm_internal.h"
 #include "chip.h"
 
+#ifdef CONFIG_RPTUN
+#  include "rk3588m0_rptun.h"
+#endif
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -85,6 +89,20 @@ int m0_main(int argc, char *argv[])
                    "0x%08lx -> %s\n",
          (unsigned long)BOARD_SHMEM_MAGIC, (unsigned long)readback,
          readback == BOARD_SHMEM_MAGIC ? "OK" : "MISMATCH");
+
+  /* Bring up rpmsg from here rather than board_late_initialize: that hook runs
+   * on the idle thread's small stack in the flat build, and OpenAMP needs far
+   * more than that.
+   */
+
+#ifdef CONFIG_RPTUN
+  {
+    int ret = rk3588m0_rptun_init("rpmsg", "linux");
+
+    syslog(LOG_INFO, "[M0] rptun init %s (%d)\n",
+           ret >= 0 ? "ok" : "FAILED", ret);
+  }
+#endif
 
   for (; ; )
     {
