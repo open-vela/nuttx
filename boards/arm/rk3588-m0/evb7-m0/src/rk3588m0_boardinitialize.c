@@ -73,6 +73,24 @@ void rk3588m0_boardinitialize(void)
  *
  ****************************************************************************/
 
+#ifdef CONFIG_RPMSG_UART
+/****************************************************************************
+ * Name: rpmsg_serialinit
+ *
+ * Description:
+ *   drivers_initialize() calls this unconditionally when CONFIG_RPMSG_UART is
+ *   set, but that phase is far too early: the rpmsg tunnel does not exist yet,
+ *   so the device-created callback would never fire. The real uart_rpmsg_init()
+ *   therefore happens in m0_main, next to the rptun bring-up. This stub only
+ *   satisfies the unconditional call.
+ *
+ ****************************************************************************/
+
+void rpmsg_serialinit(void)
+{
+}
+#endif
+
 #ifdef CONFIG_BOARD_LATE_INITIALIZE
 void board_late_initialize(void)
 {

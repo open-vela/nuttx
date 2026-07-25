@@ -23,6 +23,9 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+
+#include <stdint.h>
+
 #include <nuttx/arch.h>
 
 #include "chip.h"
@@ -60,6 +63,10 @@ FAR void *up_addrenv_pa_to_va(uintptr_t pa)
     {
       return (FAR void *)(pa - RK3588M0_RPMSG_PHYS + RK3588M0_EXSRAM_BASE);
     }
+
+  /* Not a shared-window address, so it is one of this core's own pointers. The
+   * code window is flat, which makes passing it through the correct answer.
+   */
 
   return (FAR void *)pa;
 }

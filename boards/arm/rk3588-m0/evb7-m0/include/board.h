@@ -55,8 +55,17 @@
  * The addresses below are the M0's view; physical = 0x07a00000 + offset.
  */
 
-#define BOARD_HEARTBEAT_MAGIC_ADDR 0x00000800
-#define BOARD_HEARTBEAT_COUNT_ADDR 0x00000804
+/* These live in the observation area above the heap, not at offset 0x800 where
+ * the bare-metal firmware kept them: that firmware was 40 bytes long, whereas a
+ * 65KB NuttX image puts 0x800 inside .text, so writing there was quietly
+ * overwriting instructions. See RK3588M0_DIAG_BASE for the carveout layout.
+ *
+ *   busybox devmem 0x07ae0000 32   magic
+ *   busybox devmem 0x07ae0004 32   counter, increments once per second
+ */
+
+#define BOARD_HEARTBEAT_MAGIC_ADDR (RK3588M0_DIAG_BASE + 0x00)
+#define BOARD_HEARTBEAT_COUNT_ADDR (RK3588M0_DIAG_BASE + 0x04)
 #define BOARD_HEARTBEAT_MAGIC      0x414d5030 /* "AMP0" */
 
 /* Shared-memory window check.

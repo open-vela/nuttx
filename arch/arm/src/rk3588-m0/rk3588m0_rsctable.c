@@ -42,19 +42,26 @@
  * Sizes come from include/linux/rpmsg/rockchip_rpmsg.h (RPMSG_BUF_COUNT = 64,
  * RPMSG_VRING_ALIGN = 0x1000, RPMSG_VRING_SIZE = 0x8000).
  *
- * The addresses here are this core's WINDOW view (RK3588M0_EXSRAM_BASE and up),
- * not physical: OpenAMP dereferences them directly. Linux addresses the same
- * bytes physically through its own reserved-memory nodes, and
- * rk3588m0_addrenv.c rebases between the two views for anything that travels
- * inside the vrings.
+ * All addresses in this table are PHYSICAL, matching what Linux uses. OpenAMP
+ * treats resource-table addresses as physical and runs them through
+ * up_addrenv_pa_to_va() before dereferencing, so this core's window view is
+ * produced in exactly one place - rk3588m0_addrenv.c - and the two address
+ * spaces never get mixed up.
+ *
+ * An earlier version put the window view (0x60000000 and up) here instead. It
+ * appeared to work, because those addresses fall outside the translation window
+ * and were passed through unchanged, but it meant vring addresses were already
+ * translated while buffer addresses were not - two conventions in one table.
+ * The diagnostics caught it: pa_to_va was handed 0x60008000, i.e. vring1's own
+ * view, as if it were physical.
  */
 
 #define NUM_VRINGS              0x02
 #define RL_BUFFER_COUNT         RK3588M0_RPMSG_BUF_COUNT
 #define VRING_ALIGN             RK3588M0_VRING_ALIGN
-#define VDEV0_VRING_BASE        RK3588M0_VRING0
+#define VDEV0_VRING_BASE        RK3588M0_VRING0_PHYS
 #define VRING_SIZE              RK3588M0_VRING_SIZE
-#define RSC_BUFFER_BASE         RK3588M0_RPMSG_POOL
+#define RSC_BUFFER_BASE         RK3588M0_RPMSG_POOL_PHYS
 #define RSC_BUFFER_SIZE         RK3588M0_RPMSG_POOL_SIZE
 #define RESOURCE_TABLE_BASE     RK3588M0_RSC_TABLE
 #define NO_RESOURCE_ENTRIES     (2)

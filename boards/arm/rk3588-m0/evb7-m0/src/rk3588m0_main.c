@@ -25,9 +25,13 @@
 #include <nuttx/config.h>
 
 #include <stdint.h>
+#include <fcntl.h>
+#include <sys/mount.h>
+#include <sched.h>
 #include <unistd.h>
 #include <debug.h>
 
+#include <nuttx/kthread.h>
 #include <arch/board/board.h>
 
 #include "arm_internal.h"
@@ -37,6 +41,20 @@
 #  include "rk3588m0_rptun.h"
 #endif
 
+#ifdef CONFIG_RPMSG_UART
+#  include <nuttx/serial/uart_rpmsg.h>
+#endif
+
+#ifdef CONFIG_SYSTEM_NSH
+int nsh_main(int argc, char *argv[]);
+#endif
+
+/****************************************************************************
+ * Private Function Prototypes
+ ****************************************************************************/
+
+static int m0_heartbeat(int argc, char *argv[]);
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -45,32 +63,25 @@
  * Name: m0_main
  *
  * Description:
- *   Initial task for the first-milestone bring-up of NuttX on the RK3588 PMU
- *   Cortex-M0.  There is no shell yet: the shared UART2 is only borrowed for
- *   output, so a console would mean fighting Linux's fiq-debugger for input.
- *   An nsh over rpmsg is the plan instead, reusing what already works on the
- *   cpu_l3 side.
+ *   Initial task on the RK3588 PMU Cortex-M0. It checks the shared-memory
+ *   window, brings up the rpmsg link to Linux, and then becomes the shell.
  *
- *   What this proves, and how to observe it from Linux:
+ *   The shell talks over rpmsg rather than the UART: the physical UART2 is only
+ *   borrowed for output, so taking it for input would mean fighting Linux's
+ *   fiq-debugger for the port. This mirrors what already works on cpu_l3.
  *
- *     - the image boots and the scheduler runs: the syslog lines below appear
- *       on the shared console (interleaved with Linux output, as expected);
- *     - SysTick actually fires: sleep() only returns if the tick is running, so
- *       a counter that keeps advancing means timer + scheduler are alive.
- *
- *       busybox devmem 0x07a00800 32   -> 0x414D5030 ("AMP0"), set at boot
- *       busybox devmem 0x07a00804 32   -> increments once per second
- *
- *   That is deliberately the same contract the bare-metal firmware used, so the
- *   existing checks keep working - only now the counter advancing also proves
- *   the tick, because it is driven by sleep() rather than a delay loop.
+ *   Startup order matters. Both rpmsg bring-up steps run here rather than in
+ *   board_late_initialize, which executes on the idle thread's stack in the flat
+ *   build - OpenAMP overflows it, and the symptom is misleading: the boot
+ *   progress characters still appear because they bypass syslog, but no syslog
+ *   line is ever printed.
  *
  ****************************************************************************/
 
 int m0_main(int argc, char *argv[])
 {
-  uint32_t count = 0;
   uint32_t readback;
+  int ret;
 
   syslog(LOG_INFO, "[M0] NuttX up on PMU Cortex-M0, %luHz core clock\n",
          (unsigned long)BOARD_MCU_FREQUENCY);
@@ -95,14 +106,130 @@ int m0_main(int argc, char *argv[])
    * more than that.
    */
 
+#ifdef CONFIG_RPMSG_UART
+  /* Register the virtual serial port before the tunnel comes up, so the
+   * device-created callback can arm its endpoint as soon as rpmsg is ready.
+   *
+   * isconsole = false, as on cpu_l3: asking for /dev/console fails with EEXIST
+   * because the arch serial layer already owns it, and uart_rpmsg unwinds by
+   * unregistering its rpmsg callback - which silently prevents the channel from
+   * ever being announced. nsh is bound to this port through CONFIG_NSH_ALTCONDEV
+   * instead.
+   */
+
+  {
+    ret = uart_rpmsg_init("linux", "m0", 4096, false);
+
+    syslog(LOG_INFO, "[M0] uart_rpmsg init %s (%d)\n",
+           ret >= 0 ? "ok" : "FAILED", ret);
+  }
+#endif
+
 #ifdef CONFIG_RPTUN
   {
-    int ret = rk3588m0_rptun_init("rpmsg", "linux");
+    ret = rk3588m0_rptun_init("rpmsg", "linux");
 
     syslog(LOG_INFO, "[M0] rptun init %s (%d)\n",
            ret >= 0 ? "ok" : "FAILED", ret);
   }
 #endif
+
+#ifdef CONFIG_SYSTEM_NSH
+  /* Run the heartbeat in the background and hand this task over to nsh, which
+   * takes its stdio from the rpmsg port via CONFIG_NSH_ALTCONDEV.
+   */
+
+  if (kthread_create("m0_hb", SCHED_PRIORITY_DEFAULT, 2048,
+                     m0_heartbeat, NULL) < 0)
+    {
+      syslog(LOG_ERR, "[M0] failed to start heartbeat\n");
+    }
+
+  /* Mount procfs, which several nsh commands read through rather than through a
+   * syscall: free needs /proc/meminfo and ps needs /proc/<pid>. Nothing in
+   * nshlib mounts it - CONFIG_NSH_PROC_MOUNTPOINT only says where to look - and
+   * this board has no nsh arch-init hook, so it has to happen here.
+   */
+
+  ret = mount(NULL, CONFIG_NSH_PROC_MOUNTPOINT, "procfs", 0, NULL);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "[M0] mount procfs failed (%d)\n", ret);
+    }
+
+  /* Populate stdin/stdout/stderr with the rpmsg port before handing over to
+   * nsh.
+   *
+   * This is not merely tidy - nsh does not work without it. There is no
+   * /dev/console on this core (CONFIG_DEV_CONSOLE is unset, as UART2 is
+   * write-only through syslog and is shared with Linux), so descriptors 0-2 are
+   * still free when this task starts. nshlib's alternate-console path assumes
+   * the opposite: for stderr and then stdout it opens the device, dup2()s it
+   * into place, and closes the descriptor the open returned. With 0-2 free the
+   * stdout open itself returns 1, so the dup2 is a no-op and the close then
+   * shuts descriptor 1 - nsh ends up running with no stdout at all. Input keeps
+   * working, so the shell looks alive from the rpmsg side while every prompt and
+   * every command result is dropped by write() with EBADF, never reaching the
+   * serial driver.
+   *
+   * Opening the port here first pushes nsh's own opens up to descriptor 3 and
+   * above, where its dup2/close sequence behaves as intended.
+   */
+
+  {
+    int fd = open(CONFIG_NSH_ALTSTDIN, O_RDWR);
+
+    syslog(LOG_INFO, "[M0] open %s -> %d\n", CONFIG_NSH_ALTSTDIN, fd);
+
+    if (fd < 0)
+      {
+        syslog(LOG_ERR, "[M0] no console device - nsh would be mute\n");
+      }
+    else
+      {
+        if (fd != 0)
+          {
+            dup2(fd, 0);
+          }
+
+        dup2(fd, 1);
+        dup2(fd, 2);
+
+        if (fd > 2)
+          {
+            close(fd);
+          }
+      }
+  }
+
+  ret = nsh_main(argc, argv);
+
+  /* Reaching here means nsh gave up; without this the task would just vanish */
+
+  syslog(LOG_ERR, "[M0] nsh_main returned %d\n", ret);
+  return ret;
+#else
+  return m0_heartbeat(argc, argv);
+#endif
+}
+
+/****************************************************************************
+ * Name: m0_heartbeat
+ *
+ * Description:
+ *   Liveness loop. Driven by sleep() rather than a delay loop, so an advancing
+ *   counter is evidence that the tick is really being delivered and not merely
+ *   that the core is spinning.
+ *
+ *   Observable from Linux:
+ *     busybox devmem 0x07ae0000 32   -> 0x414D5030 ("AMP0"), set at boot
+ *     busybox devmem 0x07ae0004 32   -> increments once per second
+ *
+ ****************************************************************************/
+
+static int m0_heartbeat(int argc, char *argv[])
+{
+  uint32_t count = 0;
 
   for (; ; )
     {

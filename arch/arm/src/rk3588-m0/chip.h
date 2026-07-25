@@ -39,4 +39,25 @@
 
 #include "hardware/rk3588m0_memorymap.h"
 
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
+
+/* Guarded: this header is also included from assembly (arm_exception.S). */
+
+#ifndef __ASSEMBLY__
+
+/****************************************************************************
+ * Name: rk3588m0_boardinitialize
+ *
+ * Description:
+ *   Board-specific initialization, called by __start once .bss is cleared and
+ *   the early console is up. Provided by the board's src/ directory.
+ *
+ ****************************************************************************/
+
+void rk3588m0_boardinitialize(void);
+
+#endif /* __ASSEMBLY__ */
+
 #endif /* __ARCH_ARM_SRC_RK3588_M0_CHIP_H */

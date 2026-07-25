@@ -114,6 +114,19 @@
 
 #define RK3588M0_RPMSG_PHYS       0x07b00000 /* == FIT exsram_start          */
 
+/* Physical addresses, i.e. how Linux names this memory. These are what belongs
+ * in the resource table: OpenAMP treats those entries as physical and runs them
+ * through up_addrenv_pa_to_va() before use.
+ */
+
+#define RK3588M0_VRING0_PHYS      (RK3588M0_RPMSG_PHYS + 0x00000)
+#define RK3588M0_VRING1_PHYS      (RK3588M0_RPMSG_PHYS + 0x08000)
+#define RK3588M0_RPMSG_POOL_PHYS  (RK3588M0_RPMSG_PHYS + 0x10000)
+
+/* The same memory as this core addresses it, for code that dereferences
+ * directly rather than going through the translation hooks.
+ */
+
 #define RK3588M0_VRING0           (RK3588M0_EXSRAM_BASE + 0x00000)
 #define RK3588M0_VRING1           (RK3588M0_EXSRAM_BASE + 0x08000)
 #define RK3588M0_VRING_SIZE       0x8000
@@ -133,13 +146,39 @@
 
 #define RK3588M0_RPMSG_WINDOW_SIZE 0x100000  /* 1MB: vrings + buffer pool */
 
-/* Writable copy of the resource table. OpenAMP writes notify ids back into the
- * table, so it cannot be used from .rodata - that mistake crashed the cpu_l3
- * port, where .rodata is mapped read-only. Park it just past the buffer pool,
- * inside the uncached shared window.
+/* Writable copy of the resource table. OpenAMP writes notify ids back into it,
+ * so it cannot live in .rodata - that mistake crashed the cpu_l3 port, where
+ * .rodata is mapped read-only.
+ *
+ * It sits at the top of this core's own carveout, just above the heap, rather
+ * than past the buffer pool: everything from 0x07b50000 onwards (the end of the
+ * dma pool Linux declares) is ordinary memory that Linux is free to allocate,
+ * so writing a resource table there would corrupt the kernel. CONFIG_RAM_SIZE
+ * is set to stop below this address so the heap cannot reach it either.
  */
 
-#define RK3588M0_RSC_TABLE       (RK3588M0_EXSRAM_BASE + 0x50000)
+#define RK3588M0_RSC_TABLE       0x000f0000  /* phys 0x07af0000 */
+
+/* Observation area, readable from Linux with /dev/mem.
+ *
+ * This deliberately sits above the heap rather than at the bottom of the
+ * carveout. The bare-metal bring-up firmware published its heartbeat at offset
+ * 0x800 because the image was 40 bytes long and everything above it was free;
+ * carrying that address over to NuttX was a mistake, because a 65KB image puts
+ * offset 0x800 in the middle of .text, so every counter write was overwriting
+ * instructions. It survived only because the corrupted functions happened not to
+ * run again - the diagnostics gave it away by reading back machine code from the
+ * miss counter that was never written.
+ *
+ * Layout of the carveout (offsets are this core's view, physical adds
+ * 0x07a00000):
+ *
+ *   0x00000-0xe0000  code, data, bss, heap   (CONFIG_RAM_SIZE stops here)
+ *   0xe0000          this observation area
+ *   0xf0000          writable resource table
+ */
+
+#define RK3588M0_DIAG_BASE       0x000e0000  /* phys 0x07ae0000 */
 
 /* Convert a physical peripheral address to the M0's view of it */
 

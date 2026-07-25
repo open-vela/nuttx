@@ -53,6 +53,7 @@
 #include <nuttx/nuttx.h>
 #include <nuttx/rptun/rptun.h>
 #include <nuttx/signal.h>
+#include <stdbool.h>
 
 #include "arm_internal.h"
 #include "chip.h"
