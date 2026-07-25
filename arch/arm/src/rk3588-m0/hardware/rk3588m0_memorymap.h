@@ -263,6 +263,59 @@
 #define RK3588M0_RPMSG_MBOX_MAGIC 0x524d5347 /* "RMSG" */
 #define RK3588M0_RPMSG_LINK_ID    0x04       /* master cpu0, remote id 4 */
 
+/* SoC interrupt id of the mailbox0 doorbells this core can receive.
+ *
+ * TRM Table 1-3 numbers every interrupt in the SoC, and that numbering is what
+ * both the GIC and this core's INTMUX index. Ids 93-96 are irq_mailbox0_ap0..3,
+ * raised by B2A writes and taken by Linux (its dts asks for GIC_SPI 61..64,
+ * i.e. the same ids less the 32 SGI/PPI slots). Ids 97-100 are
+ * irq_mailbox0_bb0..3, raised by A2B writes - the direction that reaches this
+ * core.
+ */
+
+#define RK3588_MBOX0_BB_INTID(n)  (97 + (n))
+
+/* Interrupt multiplexer (TRM chapter 9).
+ *
+ * This core's NVIC has 32 lines, but the SoC has 512 interrupt sources, so
+ * external lines 16-23 are fed by two INTMUX instances instead of a fixed
+ * source (TRM Table 9-7). INTMUX0 covers source ids 0-255 and drives external
+ * lines 16-19; INTMUX1 covers 256-511 and drives 20-23. Each line carries 64
+ * sources: line 16 gets ids 0-63, line 17 gets 64-127, and so on.
+ *
+ * Enabling is per source, eight sources to a register: id 99 lives in
+ * ENABLE_GROUP12 bit 3.
+ *
+ * The FLAG registers are deliberately unused here. The manual describes their
+ * polarity two contradictory ways ("1'b0: Interrupt in service" alongside
+ * "1'b1: Interrupt out of service"), and there is no need to trust either: the
+ * handler reads the mailbox status register, which is unambiguous.
+ *
+ * pclk_pmucm0_intmux (CRU_GATE_CON19 bit 4) and presetn_pmucm0_intmux
+ * (CRU_SOFTRST_CON19 bit 4) both reset to 0, meaning clocked and out of reset,
+ * so no CRU work is needed to use this block.
+ */
+
+#define RK3588_INTMUX0_PMU_PHYS   0xfecf0000 /* source ids 0-255            */
+#define RK3588_INTMUX1_PMU_PHYS   0xfecf4000 /* source ids 256-511          */
+                                             /* 0xfecf8000/c000 are DDR_M0  */
+
+#define RK3588M0_INTMUX0_BASE     RK3588M0_PERIPH(RK3588_INTMUX0_PMU_PHYS)
+#define RK3588M0_INTMUX1_BASE     RK3588M0_PERIPH(RK3588_INTMUX1_PMU_PHYS)
+
+#define RK3588M0_INTMUX_ENABLE(g) (0x00 + (g) * 4)  /* g = id / 8, bits 7:0 */
+#define RK3588M0_INTMUX_FLAG(g)   (0x80 + (g) * 4)  /* read-only, unused    */
+
+/* Which INTMUX register and bit carry a given SoC interrupt id, and which
+ * external NVIC line it emerges on.
+ */
+
+#define RK3588M0_INTMUX_BASE_OF(id)  ((id) < 256 ? RK3588M0_INTMUX0_BASE : \
+                                                   RK3588M0_INTMUX1_BASE)
+#define RK3588M0_INTMUX_GROUP_OF(id) (((id) % 256) / 8)
+#define RK3588M0_INTMUX_BIT_OF(id)   (1u << ((id) % 8))
+#define RK3588M0_INTMUX_EXTINT_OF(id) (16 + ((id) / 64))
+
 /* PMU1_GRF (physical 0xFD58A000).  SOC_STS at offset 0x0060 reports the M0's
  * own state: halted (bit 7), lockup (bit 8), sleeping (bit 9), deepsleep
  * (bit 10).  Useful from the Linux side to tell a wedged M0 (lockup) from an

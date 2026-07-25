@@ -45,14 +45,17 @@
 
 #include <nuttx/config.h>
 
+#include <assert.h>
 #include <string.h>
 #include <debug.h>
 
+#include <nuttx/arch.h>
+#include <nuttx/clock.h>
 #include <nuttx/irq.h>
 #include <nuttx/kthread.h>
 #include <nuttx/nuttx.h>
 #include <nuttx/rptun/rptun.h>
-#include <nuttx/signal.h>
+#include <nuttx/semaphore.h>
 #include <stdbool.h>
 
 #include "arm_internal.h"
@@ -68,11 +71,42 @@
 #define TX_CHAN         RK3588M0_MBOX_TX_CHAN
 #define RX_CHAN         RK3588M0_MBOX_RX_CHAN
 
-/* RX poll cadence. The cpu_l3 link ran happily at 5ms, and rpmsg latency here
- * is bounded by this figure.
+/* The SoC interrupt this core's RX doorbell arrives on, and the NVIC line the
+ * INTMUX delivers it to. A2B channel 2 is irq_mailbox0_bb2, source id 99, which
+ * falls in the 64-127 block and therefore emerges on external line 17.
  */
 
-#define RPTUN_POLL_MS   5
+#define MBOX_RX_INTID   RK3588_MBOX0_BB_INTID(RX_CHAN)
+#define MBOX_RX_IRQ     (RK3588M0_IRQ_EXTINT + \
+                         RK3588M0_INTMUX_EXTINT_OF(MBOX_RX_INTID))
+
+/* Pin the two numbers the routing above derives, because getting either wrong
+ * fails silently: no interrupt is ever delivered, and the re-arm wakeup below
+ * quietly carries the link at its own cadence instead. Values for A2B channel
+ * 2, from TRM Table 1-3 (irq_mailbox0_bb2 = id 99) and Table 9-7 (ids 64-127
+ * emerge on external line 17, i.e. vector 33).
+ */
+
+static_assert(MBOX_RX_INTID == 99, "mailbox0 A2B ch2 is SoC interrupt id 99");
+static_assert(MBOX_RX_IRQ == 33, "SoC id 99 arrives on NVIC vector 33");
+static_assert(RK3588M0_INTMUX_GROUP_OF(MBOX_RX_INTID) == 12, "id 99 -> group 12");
+static_assert(RK3588M0_INTMUX_BIT_OF(MBOX_RX_INTID) == (1u << 3), "id 99 -> bit 3");
+
+/* How often the receive thread re-arms the doorbell when nothing has arrived.
+ *
+ * This is not a poll cadence - reception is interrupt-driven - but the enables
+ * it re-asserts are not ours alone. A2B_INTEN is one register shared with the
+ * cpu_l3 link, which read-modify-writes it from its own keepalive and from
+ * every notify; if either straddles our update, our bit is lost and the
+ * doorbell goes quiet with no way to notice. Re-asserting costs two register
+ * writes per interval and bounds the outage instead.
+ *
+ * The same wakeup doubles as a safety net: it re-checks the mailbox status, so
+ * a kick that somehow failed to raise an interrupt still gets serviced within
+ * one interval rather than stalling the link.
+ */
+
+#define RPTUN_REARM_MS  100
 
 /****************************************************************************
  * Private Types
@@ -89,6 +123,7 @@ struct rk3588m0_rptun_dev_s
   rptun_callback_t              callback;
   void                         *arg;
   struct rk3588m0_rptun_shmem_s *shmem;
+  sem_t                         rxsem;
   char                          cpuname[RPMSG_NAME_SIZE + 1];
   char                          shmemname[RPMSG_NAME_SIZE + 1];
 };
@@ -230,57 +265,132 @@ static int rk3588m0_rptun_register_callback(struct rptun_dev_s *dev,
 }
 
 /****************************************************************************
- * Name: rk3588m0_rptun_rx_poll
+ * Name: rk3588m0_rptun_rearm
  *
  * Description:
- *   Watch the mailbox for a kick from Linux. Every pending A2B channel is
- *   drained and acknowledged defensively, then OpenAMP is told to look at the
- *   rings.
+ *   Re-assert both enables the doorbell depends on: our channel's bit in the
+ *   mailbox A2B interrupt enable, and our source's bit in the INTMUX. Both
+ *   writes are idempotent.
+ *
+ *   The mailbox half is the one that actually needs repeating, because that
+ *   register is shared with the cpu_l3 link. The INTMUX half is private to this
+ *   core and is only included so that a single call restores the whole path.
  *
  ****************************************************************************/
 
-static int rk3588m0_rptun_rx_poll(int argc, char *argv[])
+static void rk3588m0_rptun_rearm(void)
+{
+  putreg32(getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_INTEN) | (1u << RX_CHAN),
+           MBOX_BASE + RK3588M0_MBOX_A2B_INTEN);
+
+  putreg32(getreg32(RK3588M0_INTMUX_BASE_OF(MBOX_RX_INTID) +
+                    RK3588M0_INTMUX_ENABLE(
+                        RK3588M0_INTMUX_GROUP_OF(MBOX_RX_INTID))) |
+           RK3588M0_INTMUX_BIT_OF(MBOX_RX_INTID),
+           RK3588M0_INTMUX_BASE_OF(MBOX_RX_INTID) +
+           RK3588M0_INTMUX_ENABLE(
+               RK3588M0_INTMUX_GROUP_OF(MBOX_RX_INTID)));
+}
+
+/****************************************************************************
+ * Name: rk3588m0_rptun_ack
+ *
+ * Description:
+ *   Acknowledge a doorbell on our channel, if one is pending. Returns true
+ *   when there was something to acknowledge.
+ *
+ *   Only our own channel is touched. The four A2B channels of mailbox0 share
+ *   one status register, and channels 0 and 3 carry the cpu_l3 link's traffic:
+ *   clearing those would consume a doorbell meant for the other core, whose
+ *   handler would then find nothing pending and never tell its OpenAMP to look
+ *   at the rings.
+ *
+ ****************************************************************************/
+
+static bool rk3588m0_rptun_ack(void)
+{
+  if ((getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_STATUS) & (1u << RX_CHAN)) == 0u)
+    {
+      return false;
+    }
+
+  /* Reading CMD and DAT and writing the bit back is what clears it. The
+   * doorbell is level-triggered, so this has to happen before the handler
+   * returns or the same interrupt is taken again immediately.
+   */
+
+  getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_CMD(RX_CHAN));
+  getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_DAT(RX_CHAN));
+  putreg32(1u << RX_CHAN, MBOX_BASE + RK3588M0_MBOX_A2B_STATUS);
+
+  return true;
+}
+
+/****************************************************************************
+ * Name: rk3588m0_rptun_isr
+ *
+ * Description:
+ *   Mailbox doorbell handler: Linux has put something in the rings.
+ *
+ *   The handler only acknowledges the doorbell and wakes the receive thread; it
+ *   does not call into OpenAMP itself. That differs from the cpu_l3 port, which
+ *   can afford to, and the reason is the stack: this core is built with
+ *   CONFIG_ARCH_INTERRUPTSTACK=0, so a handler runs on the stack of whichever
+ *   thread it interrupted - possibly the 2KB heartbeat thread - while walking
+ *   the vrings needs far more than that. Handing the work to a thread with a
+ *   known 16KB stack keeps it bounded, and also keeps a slow core from doing
+ *   ring processing with interrupts disabled.
+ *
+ ****************************************************************************/
+
+static int rk3588m0_rptun_isr(int irq, void *context, void *arg)
+{
+  struct rk3588m0_rptun_dev_s *dev = arg;
+
+  if (rk3588m0_rptun_ack())
+    {
+      nxsem_post(&dev->rxsem);
+    }
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: rk3588m0_rptun_rx
+ *
+ * Description:
+ *   Receive thread. Waits for the handler's signal and hands OpenAMP the
+ *   rings. The wait is bounded so the same loop also re-arms the doorbell and
+ *   re-checks the mailbox; see RPTUN_REARM_MS for why both are needed.
+ *
+ ****************************************************************************/
+
+static int rk3588m0_rptun_rx(int argc, char *argv[])
 {
   struct rk3588m0_rptun_dev_s *dev = &g_rptun_dev;
 
   for (; ; )
     {
-      uint32_t status;
+      bool kicked;
 
-      /* Keep our RX channel enabled. A2B_INTEN is shared with the cpu_l3 link,
-       * which read-modify-writes it from its own keepalive thread; if that
-       * happens to straddle our own update, our bit is lost. Re-asserting it
-       * here is idempotent and costs one register write per poll.
+      kicked = nxsem_tickwait(&dev->rxsem, MSEC2TICK(RPTUN_REARM_MS)) >= 0;
+
+      rk3588m0_rptun_rearm();
+
+      /* A pending bit here means a kick that produced no interrupt - either it
+       * arrived while the enable was clobbered, or it landed before the handler
+       * was attached. Service it the same way.
        */
 
-      putreg32(getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_INTEN) | (1u << RX_CHAN),
-               MBOX_BASE + RK3588M0_MBOX_A2B_INTEN);
-
-      status = getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_STATUS);
-
-      if (status != 0u)
+      if (rk3588m0_rptun_ack())
         {
-          unsigned int ch;
-
-          for (ch = 0; ch < 4; ch++)
-            {
-              if (status & (1u << ch))
-                {
-                  /* Reading CMD/DAT and writing the bit back clears it */
-
-                  getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_CMD(ch));
-                  getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_DAT(ch));
-                  putreg32(1u << ch, MBOX_BASE + RK3588M0_MBOX_A2B_STATUS);
-                }
-            }
-
-          if (dev->callback != NULL)
-            {
-              dev->callback(dev->arg, RPTUN_NOTIFY_ALL);
-            }
+          kicked = true;
         }
 
-      nxsig_usleep(RPTUN_POLL_MS * 1000);
+      if (kicked && dev->callback != NULL)
+        {
+          dev->callback(dev->arg, RPTUN_NOTIFY_ALL);
+        }
     }
 
   return 0;
@@ -311,10 +421,35 @@ int rk3588m0_rptun_init(const char *shmemname, const char *cpuname)
   memset((void *)RK3588M0_VRING0, 0, RK3588M0_VRING_SIZE);
   memset((void *)RK3588M0_VRING1, 0, RK3588M0_VRING_SIZE);
 
-  /* Let Linux's kicks raise the mailbox status bit we poll for */
+  /* Wire up the doorbell before anything can ring it.
+   *
+   * Three enables stand between a Linux kick and this core's handler, and all
+   * three have to be set: the mailbox has to raise its interrupt for our
+   * channel, the INTMUX has to pass that source through to an NVIC line, and
+   * the NVIC line has to be enabled. rk3588m0_rptun_rearm() does the first two;
+   * the source lands on MBOX_RX_IRQ, computed from the interrupt id rather than
+   * hard-coded, so the channel choice in the memory map stays the only place
+   * that decides it.
+   */
 
-  putreg32(getreg32(MBOX_BASE + RK3588M0_MBOX_A2B_INTEN) | (1u << RX_CHAN),
-           MBOX_BASE + RK3588M0_MBOX_A2B_INTEN);
+  /* Signalling semaphore: the handler only ever posts and the receive thread
+   * only ever waits, so priority inheritance has to be turned off. Otherwise
+   * the thread becomes a permanent holder - it never posts - and gets its
+   * priority boosted by anything else that touches the semaphore.
+   */
+
+  nxsem_init(&dev->rxsem, 0, 0);
+  nxsem_set_protocol(&dev->rxsem, SEM_PRIO_NONE);
+
+  ret = irq_attach(MBOX_RX_IRQ, rk3588m0_rptun_isr, dev);
+  if (ret < 0)
+    {
+      rpmsgerr("ERROR: irq_attach(%d) failed %d\n", MBOX_RX_IRQ, ret);
+      return ret;
+    }
+
+  rk3588m0_rptun_rearm();
+  up_enable_irq(MBOX_RX_IRQ);
 
   dev->rptun.ops = &g_rk3588m0_rptun_ops;
   strncpy(dev->cpuname, cpuname, RPMSG_NAME_SIZE);
@@ -328,10 +463,10 @@ int rk3588m0_rptun_init(const char *shmemname, const char *cpuname)
     }
 
   ret = kthread_create("m0_rptun_rx", CONFIG_RPTUN_PRIORITY,
-                       CONFIG_RPTUN_STACKSIZE, rk3588m0_rptun_rx_poll, NULL);
+                       CONFIG_RPTUN_STACKSIZE, rk3588m0_rptun_rx, NULL);
   if (ret < 0)
     {
-      rpmsgerr("ERROR: rx poll thread failed %d\n", ret);
+      rpmsgerr("ERROR: rx thread failed %d\n", ret);
       return ret;
     }
 

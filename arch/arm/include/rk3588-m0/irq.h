@@ -70,6 +70,19 @@
 #define RK3588M0_IRQ_I2C0       (21) /* I2C0 */
 #define RK3588M0_IRQ_PDM0       (23) /* PDM0 */
 #define RK3588M0_IRQ_PWM0       (27) /* PWM0 */
+
+/* The INTMUX outputs, i.e. external lines 16-23.  Each carries 64 of the SoC's
+ * 512 interrupt sources, numbered as in TRM Table 1-3: line 0 below takes
+ * source ids 0-63, line 1 takes 64-127, and so on up to 448-511.  Sources
+ * 0-255 arrive through INTMUX0 and 256-511 through INTMUX1, but from the NVIC's
+ * point of view the eight lines are contiguous.
+ *
+ * Use RK3588M0_INTMUX_EXTINT_OF(id) to find the line for a source id, then add
+ * RK3588M0_IRQ_EXTINT to get the vector number these constants use.
+ */
+
+#define RK3588M0_IRQ_INTMUX(n)  (RK3588M0_IRQ_EXTINT + 16 + (n)) /* n = 0..7 */
+
 #define RK3588M0_IRQ_WDT_PMU    (28) /* WDT_PMU */
 #define RK3588M0_IRQ_TIMER1_PMU (29) /* TIMER1_PMU */
 #define RK3588M0_IRQ_TIMER0_PMU (30) /* TIMER0_PMU */
