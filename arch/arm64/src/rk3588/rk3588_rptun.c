@@ -32,6 +32,7 @@
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/kthread.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/signal.h>
 #include <nuttx/rptun/rptun.h>
 
@@ -124,6 +125,7 @@ struct rk3588_rptun_dev_s
   rptun_callback_t            callback;
   void                       *arg;
   struct rk3588_rptun_shmem_s *shmem;
+  sem_t                       rxsem;
   char                        cpuname[RPMSG_NAME_SIZE + 1];
   char                        shmemname[RPMSG_NAME_SIZE + 1];
 };
@@ -292,29 +294,74 @@ static int rk3588_rptun_register_callback(struct rptun_dev_s *dev,
   return 0;
 }
 
-/* A2B mailbox interrupt: Linux kicked us. Read/clear status, notify OpenAMP.
- * This is the real RX path (interrupt-driven). Linux sends on A2B ch3
- * (rpmsg-tx = INTID 100); we service every pending A2B channel defensively.
+/* Acknowledge a doorbell on our channel, if one is pending. Returns true when
+ * there was something to acknowledge.
+ *
+ * Only our own channel is touched. The four A2B channels of mailbox0 share one
+ * status register, and channels 1 and 2 carry the PMU M0 link's traffic:
+ * clearing those would consume a doorbell meant for the M0, whose handler would
+ * then find nothing pending and never tell its OpenAMP to look at the rings.
+ * (An earlier version cleared all four "defensively", which is exactly how that
+ * theft happened.)
+ */
+
+static bool rk3588_rptun_ack(void)
+{
+  if ((getreg32b(MBOX0_BASE + MBOX_A2B_STATUS) & (1u << RPMSG_RX_CHAN)) == 0u)
+    {
+      return false;
+    }
+
+  /* Reading CMD and DAT and writing the bit back is what clears it. The
+   * doorbell is level-triggered, so this has to happen before the handler
+   * returns or the same interrupt is taken again immediately.
+   */
+
+  (void)getreg32b(MBOX0_BASE + MBOX_A2B_CMD(RPMSG_RX_CHAN));
+  (void)getreg32b(MBOX0_BASE + MBOX_A2B_DAT(RPMSG_RX_CHAN));
+  putreg32b(1u << RPMSG_RX_CHAN, MBOX0_BASE + MBOX_A2B_STATUS);
+
+  return true;
+}
+
+/* A2B mailbox interrupt: Linux kicked us. Linux sends on A2B ch3 (rpmsg-tx =
+ * INTID 100).
+ *
+ * The handler only acknowledges the doorbell and wakes the receive thread. It
+ * deliberately does not call the rptun callback, even though there is a
+ * dedicated 4KB interrupt stack here: that callback is the entry to the whole
+ * receive path - rptun_callback, remoteproc_get_notification,
+ * virtqueue_notification, rpmsg_virtio_rx_callback - which walks the vrings and
+ * dispatches to every endpoint. Running that with interrupts disabled makes the
+ * worst-case interrupt latency a function of how much traffic Linux queued, and
+ * it puts an unbounded call chain on a stack sized for handlers.
  */
 
 static int rk3588_rptun_isr(int irq, void *context, void *arg)
 {
   struct rk3588_rptun_dev_s *dev = &g_rptun_dev;
-  uint32_t status = getreg32b(MBOX0_BASE + MBOX_A2B_STATUS);
 
-  if (status != 0u)
+  if (rk3588_rptun_ack())
     {
-      unsigned int ch;
+      nxsem_post(&dev->rxsem);
+    }
 
-      for (ch = 0; ch < 4; ch++)
-        {
-          if (status & (1u << ch))
-            {
-              (void)getreg32b(MBOX0_BASE + MBOX_A2B_CMD(ch));
-              (void)getreg32b(MBOX0_BASE + MBOX_A2B_DAT(ch));
-              putreg32b(1u << ch, MBOX0_BASE + MBOX_A2B_STATUS);
-            }
-        }
+  return OK;
+}
+
+/* Receive thread: hands OpenAMP the rings once the handler signals a doorbell.
+ *
+ * Runs with CONFIG_RPTUN_STACKSIZE rather than on the interrupt stack, and at
+ * thread priority, so ring processing cannot extend interrupt latency.
+ */
+
+static int rk3588_rptun_rx(int argc, char *argv[])
+{
+  struct rk3588_rptun_dev_s *dev = &g_rptun_dev;
+
+  for (; ; )
+    {
+      nxsem_wait_uninterruptible(&dev->rxsem);
 
       if (dev->callback != NULL)
         {
@@ -322,7 +369,7 @@ static int rk3588_rptun_isr(int irq, void *context, void *arg)
         }
     }
 
-  return OK;
+  return 0;
 }
 
 /* RX interrupt keepalive thread.
@@ -352,11 +399,26 @@ static int rk3588_rptun_isr(int irq, void *context, void *arg)
 
 static int rk3588_rptun_irq_keepalive(int argc, char *argv[])
 {
+  struct rk3588_rptun_dev_s *dev = &g_rptun_dev;
   int i;
 
   for (i = 0; i < RK3588_RPTUN_KEEPALIVE_ROUNDS; i++)
     {
       rk3588_rptun_irq_rearm();
+
+      /* Pick up a doorbell that arrived while the interrupt was disarmed.
+       * Re-arming alone does not recover it: the mailbox status bit stays set
+       * but the interrupt has already been missed, so without this check the
+       * kick is lost for good. That window is real - the same one on the M0
+       * link accounted for 93 doorbells during startup - and it is exactly the
+       * window this thread exists to cover.
+       */
+
+      if (rk3588_rptun_ack())
+        {
+          nxsem_post(&dev->rxsem);
+        }
+
       nxsig_usleep(RK3588_RPTUN_KEEPALIVE_MS * 1000);
     }
 
@@ -400,6 +462,15 @@ int rk3588_rptun_init(const char *shmemname, const char *cpuname)
   putreg32b(getreg32b(MBOX0_BASE + MBOX_A2B_INTEN) | (1u << RPMSG_RX_CHAN),
             MBOX0_BASE + MBOX_A2B_INTEN);
 
+  /* Signalling semaphore between the handler and the receive thread. Priority
+   * inheritance has to be off: the thread only ever waits and never posts, so
+   * with inheritance enabled it stays a holder forever and gets its priority
+   * boosted by anything else that touches the semaphore.
+   */
+
+  nxsem_init(&dev->rxsem, 0, 0);
+  nxsem_set_protocol(&dev->rxsem, SEM_PRIO_NONE);
+
   ret = irq_attach(RK3588_MBOX_A2B_IRQ, rk3588_rptun_isr, dev);
   if (ret < 0)
     {
@@ -421,6 +492,19 @@ int rk3588_rptun_init(const char *shmemname, const char *cpuname)
       return ret;
     }
 
+  /* The thread that actually processes received rings; the handler only signals
+   * it. Started after rptun_initialize so the callback is registered by the
+   * time a doorbell can wake it.
+   */
+
+  ret = kthread_create("rptun_rx", CONFIG_RPTUN_PRIORITY,
+                       CONFIG_RPTUN_STACKSIZE, rk3588_rptun_rx, NULL);
+  if (ret < 0)
+    {
+      rpmsgerr("ERROR: rx thread failed %d\n", ret);
+      return ret;
+    }
+
   /* Start the bounded RX interrupt keepalive thread: re-arms INTID 100 /
    * IROUTER / A2B_INTEN for the first ~30s to survive Linux's one-time GIC
    * reset (~15s), then exits. RX itself is interrupt-driven (rk3588_rptun_isr);
@@ -429,5 +513,5 @@ int rk3588_rptun_init(const char *shmemname, const char *cpuname)
 
   kthread_create("rptun_ka", 200, 2048, rk3588_rptun_irq_keepalive, NULL);
 
-  return ret;
+  return OK;
 }
