@@ -1,0 +1,25 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_RK3588_M0
+
+comment "RK3588 PMU Cortex-M0 Configuration Options"
+
+config RK3588M0_MCU_FREQUENCY
+	int "PMU_M0 core clock frequency (Hz)"
+	default 200000000
+	---help---
+		Frequency of FCLK_PMU_CM0_CORE, used to program SysTick.
+
+		The clock is a four-way mux off hclk_pmu_cm0_root
+		(clk_pmu1_400m_src / 200m / 100m / xin24m), so the hardware
+		maximum is 400MHz. On RK3588 EVB7 V11 the selected rate is
+		200MHz: PMU_CLKSEL_CON1 (physical 0xFD7F0304) reads
+		0x00000400, i.e. bits[11:10]=0b01 => clk_pmu1_200m_src.
+
+		This port does not reprogram the clock; change this only to
+		match what the boot firmware actually configured.
+
+endif # ARCH_CHIP_RK3588_M0
