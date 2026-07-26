@@ -69,6 +69,7 @@ static struct es8311_lower_s g_es8311_lower[2];
  *   i2c_addr  - The I2C address used by the device
  *   i2c_freq  - The I2C frequency used for the device
  *   i2s_port  - The I2S port used for the device
+ *   enable_input - Register the ES8311 input device when true
  *
  * Returned Value:
  *   Zero is returned on success.  Otherwise, a negated errno value is
@@ -77,7 +78,7 @@ static struct es8311_lower_s g_es8311_lower[2];
  ****************************************************************************/
 
 int esp32s3_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
-                            int i2s_port)
+                              int i2s_port, bool enable_input)
 {
   struct audio_lowerhalf_s *es8311;
   struct i2s_dev_s *i2s;
@@ -176,6 +177,12 @@ int esp32s3_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
         {
           auderr("ERROR: Failed to register /dev/pcm0 device: %d\n", ret);
           goto errout;
+        }
+
+      if (!enable_input)
+        {
+          initialized = true;
+          return OK;
         }
 
       /* Now we can use this I2S interface to initialize the ES8311 input

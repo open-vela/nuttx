@@ -46,4 +46,9 @@
 #  define ES8311_I2C_ADDR       0x18
 #endif
 
+#ifdef CONFIG_AUDIO_ES7210
+#  define ES7210_I2C_FREQ       100000
+#  define ES7210_I2C_ADDR       0x40
+#endif
+
 #endif /* __BOARDS_XTENSA_ESP32S3_ESP32S3_KORVO_2_INCLUDE_BOARD_H */

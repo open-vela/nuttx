@@ -58,6 +58,10 @@ ifeq ($(CONFIG_AUDIO_ES8311),y)
   CSRCS += esp32s3_es8311.c
 endif
 
+ifeq ($(CONFIG_AUDIO_ES7210),y)
+  CSRCS += esp32s3_es7210.c
+endif
+
 ifeq ($(CONFIG_SENSORS_BMP180),y)
   CSRCS += esp32s3_board_bmp180.c
 endif

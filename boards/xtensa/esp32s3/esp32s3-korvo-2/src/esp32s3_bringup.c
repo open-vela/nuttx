@@ -144,9 +144,19 @@ int esp32s3_bringup(void)
 {
   int ret;
 #if (defined(CONFIG_ESP32S3_I2S0) && !defined(CONFIG_AUDIO_CS4344) && \
-     !defined(CONFIG_AUDIO_ES8311)) || defined(CONFIG_ESP32S3_I2S1)
+     !defined(CONFIG_AUDIO_ES8311) && !defined(CONFIG_AUDIO_ES7210)) || \
+    defined(CONFIG_ESP32S3_I2S1)
   bool i2s_enable_tx;
   bool i2s_enable_rx;
+#endif
+#if defined(CONFIG_ESP32S3_I2S) && defined(CONFIG_ESP32S3_I2S0) && \
+    defined(CONFIG_AUDIO_ES8311)
+  bool es8311_enable_input = true;
+#endif
+
+#if defined(CONFIG_ESP32S3_I2S) && defined(CONFIG_ESP32S3_I2S0) && \
+    defined(CONFIG_AUDIO_ES8311) && defined(CONFIG_AUDIO_ES7210)
+  es8311_enable_input = false;
 #endif
 
 #if defined(CONFIG_ESP32S3_SPIRAM) && \
@@ -314,13 +324,14 @@ int esp32s3_bringup(void)
   esp32s3_gpiowrite(SPEAKER_ENABLE_GPIO, true);
 
   ret = esp32s3_es8311_initialize(ESP32S3_I2C0, ES8311_I2C_ADDR,
-                                  ES8311_I2C_FREQ, ESP32S3_I2S0);
+                                  ES8311_I2C_FREQ, ESP32S3_I2S0,
+                                  es8311_enable_input);
   if (ret != OK)
     {
       syslog(LOG_ERR, "Failed to initialize ES8311 audio: %d\n", ret);
     }
 
-#    else
+#    elif !defined(CONFIG_AUDIO_ES7210)
 #      ifdef CONFIG_ESP32S3_I2S0_TX
   i2s_enable_tx = true;
 #      else
@@ -342,6 +353,19 @@ int esp32s3_bringup(void)
     }
 
 #    endif /* CONFIG_AUDIO_ES8311 */
+
+#    ifdef CONFIG_AUDIO_ES7210
+
+  /* Configure ES7210 audio capture on I2C0 and I2S0 */
+
+  ret = esp32s3_es7210_initialize(ESP32S3_I2C0, ES7210_I2C_ADDR,
+                                  ES7210_I2C_FREQ, ESP32S3_I2S0);
+  if (ret != OK)
+    {
+      syslog(LOG_ERR, "Failed to initialize ES7210 audio: %d\n", ret);
+    }
+
+#    endif /* CONFIG_AUDIO_ES7210 */
 #  endif /* CONFIG_ESP32S3_I2S0 */
 
 #  ifdef CONFIG_ESP32S3_I2S1

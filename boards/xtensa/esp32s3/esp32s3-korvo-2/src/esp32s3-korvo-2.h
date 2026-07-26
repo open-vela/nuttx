@@ -29,6 +29,7 @@
 
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 /****************************************************************************
@@ -104,6 +105,7 @@ int board_spiflash_init(void);
  *   i2c_addr  - The I2C address used by the device
  *   i2c_freq  - The I2C frequency used for the device
  *   i2s_port  - The I2S port used for the device
+ *   enable_input - Register the ES8311 input device when true
  *
  * Returned Value:
  *   Zero is returned on success.  Otherwise, a negated errno value is
@@ -113,7 +115,12 @@ int board_spiflash_init(void);
 
 #ifdef CONFIG_AUDIO_ES8311
 int esp32s3_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
-                            int i2s_port);
+                              int i2s_port, bool enable_input);
+#endif
+
+#ifdef CONFIG_AUDIO_ES7210
+int esp32s3_es7210_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
+                              int i2s_port);
 #endif
 
 #endif /* __ASSEMBLY__ */
