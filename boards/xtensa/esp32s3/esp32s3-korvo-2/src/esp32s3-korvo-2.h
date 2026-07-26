@@ -49,6 +49,14 @@
 #  define SPEAKER_ENABLE_GPIO  48
 #endif
 
+/* Display (ST7789V over SPI2) **********************************************/
+
+#define KORVO_2_DISPLAY_SPI         2
+#define KORVO_2_DISPLAY_DC          2
+#define KORVO_2_DISPLAY_BACKLIGHT   14
+
+#define GPIO_LCD_DC                 KORVO_2_DISPLAY_DC
+
 /****************************************************************************
  * Public Types
  ****************************************************************************/
@@ -78,6 +86,30 @@
  ****************************************************************************/
 
 int esp32s3_bringup(void);
+
+/****************************************************************************
+ * Name: board_lcd_initialize
+ ****************************************************************************/
+
+#ifdef CONFIG_ESP32S3_KORVO_2_LCD
+int board_lcd_initialize(void);
+#endif
+
+/****************************************************************************
+ * Name: board_lcd_getdev
+ ****************************************************************************/
+
+#ifdef CONFIG_ESP32S3_KORVO_2_LCD
+struct lcd_dev_s *board_lcd_getdev(int lcddev);
+#endif
+
+/****************************************************************************
+ * Name: board_lcd_uninitialize
+ ****************************************************************************/
+
+#ifdef CONFIG_ESP32S3_KORVO_2_LCD
+void board_lcd_uninitialize(void);
+#endif
 
 /****************************************************************************
  * Name: board_spiflash_init

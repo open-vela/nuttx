@@ -28,6 +28,9 @@
 
 #include <stdio.h>
 #include <fcntl.h>
+#ifdef CONFIG_LCD_DEV
+#  include <nuttx/lcd/lcd_dev.h>
+#endif
 #include <unistd.h>
 #include <syslog.h>
 #include <sys/stat.h>
@@ -453,6 +456,22 @@ int esp32s3_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: board_capture_initialize failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ESP32S3_KORVO_2_LCD
+  ret = board_lcd_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: board_lcd_initialize() failed: %d\n", ret);
+    }
+  else
+    {
+      ret = lcddev_register(0);
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: lcddev_register() failed: %d\n", ret);
+        }
     }
 #endif
 

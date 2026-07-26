@@ -5,5 +5,15 @@
 
 if ARCH_BOARD_ESP32S3_KORVO_2
 
-endif # ARCH_BOARD_ESP32S3_KORVO_2
+config ESP32S3_KORVO_2_LCD
+	bool "Enable ESP32-S3-Korvo-2 LCD"
+	default n
+	select ESP32S3_SPI2
+	select SPI_CMDDATA
+	select LCD
+	select LCD_DEV
+	select LCD_ST7789
+	---help---
+		Enable the ST7789V 240x280 LCD connected through SPI2.
 
+endif # ARCH_BOARD_ESP32S3_KORVO_2
