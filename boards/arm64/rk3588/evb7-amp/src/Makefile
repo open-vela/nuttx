@@ -24,6 +24,10 @@ include $(TOPDIR)/Make.defs
 
 CSRCS = evb7_amp_boardinit.c evb7_amp_bringup.c
 
+ifeq ($(CONFIG_RPTUN),y)
+CSRCS += evb7_amp_shm.c
+endif
+
 ifeq ($(CONFIG_BOARDCTL),y)
 CSRCS += evb7_amp_appinit.c
 ifeq ($(CONFIG_BOARDCTL_RESET),y)

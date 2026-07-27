@@ -29,6 +29,9 @@
 #include <syslog.h>
 #include <stdint.h>
 #include "evb7_amp.h"
+#ifdef CONFIG_RPTUN
+#  include "evb7_amp_shm.h"
+#endif
 
 #ifdef CONFIG_FS_PROCFS
 #  include <nuttx/fs/fs.h>
@@ -160,6 +163,13 @@ int evb7_amp_bringup(void)
     {
       amp_puts("[AMP] rptun init ok\n");
     }
+
+  /* Shared frame area towards Linux. Registered after the tunnel exists, and
+   * with the same remote name, so its device-created callback fires for the
+   * same rpmsg device the console channel uses.
+   */
+
+  evb7_amp_shm_init("linux");
 #endif
 
   UNUSED(ret);
