@@ -28,6 +28,15 @@ ifeq ($(CONFIG_RPTUN),y)
 CSRCS += evb7_amp_shm.c
 endif
 
+# The framebuffer sits on top of the shared area, so it needs both the fb
+# framework and the tunnel that carries the frame notifications.
+
+ifeq ($(CONFIG_RPTUN),y)
+ifeq ($(CONFIG_VIDEO_FB),y)
+CSRCS += evb7_amp_fb.c
+endif
+endif
+
 ifeq ($(CONFIG_BOARDCTL),y)
 CSRCS += evb7_amp_appinit.c
 ifeq ($(CONFIG_BOARDCTL_RESET),y)

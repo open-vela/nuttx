@@ -170,6 +170,14 @@ int evb7_amp_bringup(void)
    */
 
   evb7_amp_shm_init("linux");
+
+#ifdef CONFIG_VIDEO_FB
+  /* /dev/fb0 over the shared area. After the control block exists, since the
+   * framebuffer's flush path publishes through it.
+   */
+
+  evb7_amp_fb_init();
+#endif
 #endif
 
   UNUSED(ret);

@@ -121,6 +121,17 @@
 
 #define AMP_SHM_EPT_NAME   "rpmsg-raw"
 
+/* Which buffer the framebuffer driver hands to applications.
+ *
+ * One buffer, not two: /dev/fb0 is mapped straight into the application's
+ * address space, so a second buffer would only help if something here flipped
+ * between them, and nothing does yet. Tearing is therefore possible if Linux
+ * reads while an application is mid-draw; the frame sequence and checksum in the
+ * control block make that visible rather than mysterious when it matters.
+ */
+
+#define AMP_SHM_FB_INDEX   0
+
 /* "rpmsg-raw" is not an arbitrary choice: it is the only entry in the Linux
  * rpmsg_char driver's id table, so announcing this name is what makes the
  * kernel hand the channel to user space as /dev/rpmsgN with no kernel patch at
@@ -180,5 +191,17 @@ begin_packed_struct struct amp_shm_msg_s
  ****************************************************************************/
 
 int evb7_amp_shm_init(const char *cpuname);
+
+/****************************************************************************
+ * Name: evb7_amp_shm_flush
+ *
+ * Description:
+ *   Publish the framebuffer buffer: checksum it, describe it in the control
+ *   block, and notify Linux. Called by the framebuffer driver when an
+ *   application says it has finished drawing.
+ *
+ ****************************************************************************/
+
+void evb7_amp_shm_flush(void);
 
 #endif /* __BOARDS_ARM64_RK3588_EVB7_AMP_SRC_EVB7_AMP_SHM_H */

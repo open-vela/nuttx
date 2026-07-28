@@ -144,21 +144,42 @@ static uint32_t amp_shm_render(unsigned int index, uint32_t seq)
 }
 
 /****************************************************************************
- * Name: amp_shm_publish
+ * Name: amp_shm_checksum
  *
  * Description:
- *   Draw the next frame, describe it in the control block, and tell Linux.
+ *   Sum a buffer the way the peer does, so both sides can compare a frame they
+ *   never exchanged.
  *
  ****************************************************************************/
 
-static void amp_shm_publish(struct amp_shm_dev_s *dev)
+static uint32_t amp_shm_checksum(unsigned int index)
 {
+  FAR const uint32_t *buf = amp_shm_buffer(index);
+  uint32_t sum = 0;
+  size_t words = AMP_SHM_BUFSIZE / sizeof(uint32_t);
+  size_t i;
+
+  for (i = 0; i < words; i++)
+    {
+      sum += buf[i];
+    }
+
+  return sum;
+}
+
+/****************************************************************************
+ * Name: amp_shm_announce
+ *
+ * Description:
+ *   Describe a finished buffer in the control block and tell Linux about it.
+ *
+ ****************************************************************************/
+
+static void amp_shm_announce(unsigned int index, uint32_t sum)
+{
+  struct amp_shm_dev_s *dev = &g_amp_shm;
   struct amp_shm_msg_s msg;
   uint32_t seq = g_ctrl->frame_seq + 1;
-  unsigned int index = seq % AMP_SHM_NBUFFERS;
-  uint32_t sum;
-
-  sum = amp_shm_render(index, seq);
 
   /* Order matters here. The pixels have to be visible to the other core before
    * anything advertises them, otherwise Linux can be told about a frame it has
@@ -174,12 +195,42 @@ static void amp_shm_publish(struct amp_shm_dev_s *dev)
 
   UP_DMB();
 
+  /* Nothing to notify before the peer has bound the endpoint. The control block
+   * is still updated above, so a late reader (or the -p mode of the host tool)
+   * sees the frame without needing to have been listening.
+   */
+
+  if (dev->ept.dest_addr == RPMSG_ADDR_ANY)
+    {
+      return;
+    }
+
   msg.cmd   = AMP_SHM_CMD_READY;
   msg.seq   = seq;
   msg.index = index;
   msg.sum   = sum;
 
   rpmsg_send(&dev->ept, &msg, sizeof(msg));
+}
+
+/****************************************************************************
+ * Name: amp_shm_publish
+ *
+ * Description:
+ *   Draw the next test frame, describe it, and tell Linux. This is the
+ *   self-contained path used to verify the transport; the framebuffer path
+ *   below publishes what an application drew instead.
+ *
+ ****************************************************************************/
+
+static void amp_shm_publish(struct amp_shm_dev_s *dev)
+{
+  uint32_t seq = g_ctrl->frame_seq + 1;
+  unsigned int index = seq % AMP_SHM_NBUFFERS;
+  uint32_t sum;
+
+  sum = amp_shm_render(index, seq);
+  amp_shm_announce(index, sum);
 
   syslog(LOG_INFO, "[AMP] shm frame %lu -> buf%u sum 0x%08lx\n",
          (unsigned long)seq, index, (unsigned long)sum);
@@ -308,6 +359,26 @@ static void amp_shm_device_destroy(struct rpmsg_device *rdev, void *priv)
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: evb7_amp_shm_flush
+ *
+ * Description:
+ *   Publish whatever an application has drawn into the framebuffer buffer.
+ *   Called from the framebuffer driver's flush hooks.
+ *
+ *   The checksum is recomputed on every flush, which is more work than a
+ *   display path needs - it reads the whole buffer back out of non-cacheable
+ *   memory. It is kept because it costs a few milliseconds at this resolution
+ *   and it means the host tool can still verify, frame by frame, that what it
+ *   displays is what this core drew. Once the path is trusted it can go.
+ *
+ ****************************************************************************/
+
+void evb7_amp_shm_flush(void)
+{
+  amp_shm_announce(AMP_SHM_FB_INDEX, amp_shm_checksum(AMP_SHM_FB_INDEX));
+}
 
 /****************************************************************************
  * Name: evb7_amp_shm_init

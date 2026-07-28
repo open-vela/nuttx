@@ -47,5 +47,18 @@
 int evb7_amp_bringup(void);
 #endif
 
+/****************************************************************************
+ * Name: evb7_amp_fb_init
+ *
+ * Description:
+ *   Register /dev/fb0 backed by the shared frame area, so applications draw
+ *   with ordinary framebuffer calls and Linux composites the result.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_RPTUN) && defined(CONFIG_VIDEO_FB)
+int evb7_amp_fb_init(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_ARM64_RK3588_PINEPHONE_SRC_PINEPHONEPRO_H */

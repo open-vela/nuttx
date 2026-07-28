@@ -4,4 +4,27 @@
 #
 
 if ARCH_BOARD_EVB7_AMP
+
+config EVB7_AMP_FB
+	bool "Framebuffer over the AMP shared area"
+	default n
+	depends on RPTUN
+	select DRIVERS_VIDEO
+	select VIDEO_FB
+	select FB_UPDATE
+	---help---
+		Register /dev/fb0 on top of the shared frame area, so applications on
+		this core draw with ordinary framebuffer calls and Linux puts the
+		result on the panel.
+
+		There is no display controller behind this: the VOP's IOMMU and
+		interrupt are shared across all of its video ports, so it cannot be
+		split between cores. Flushing the framebuffer therefore means
+		"published to Linux", not "on the screen".
+
+		FB_UPDATE is selected because it has no prompt of its own, and without
+		it an application that signals completion with FBIO_UPDATE - which is
+		what the NX and LVGL paths do - would draw into memory that is never
+		announced.
+
 endif # ARCH_BOARD_EVB7_AMP
