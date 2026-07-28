@@ -35,6 +35,12 @@ ifeq ($(CONFIG_RPTUN),y)
 ifeq ($(CONFIG_VIDEO_FB),y)
 CSRCS += evb7_amp_fb.c
 endif
+
+# Touch events arrive over the same rpmsg endpoint as the frame signalling.
+
+ifeq ($(CONFIG_INPUT_TOUCHSCREEN),y)
+CSRCS += evb7_amp_touch.c
+endif
 endif
 
 ifeq ($(CONFIG_BOARDCTL),y)

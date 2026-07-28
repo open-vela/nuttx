@@ -60,5 +60,17 @@ int evb7_amp_bringup(void);
 int evb7_amp_fb_init(void);
 #endif
 
+/****************************************************************************
+ * Name: evb7_amp_touch_init
+ *
+ * Description:
+ *   Register /dev/input0 fed by touch events Linux forwards over rpmsg.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_RPTUN) && defined(CONFIG_INPUT_TOUCHSCREEN)
+int evb7_amp_touch_init(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_ARM64_RK3588_PINEPHONE_SRC_PINEPHONEPRO_H */

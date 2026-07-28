@@ -164,6 +164,15 @@ int evb7_amp_bringup(void)
       amp_puts("[AMP] rptun init ok\n");
     }
 
+#ifdef CONFIG_INPUT_TOUCHSCREEN
+  /* /dev/input0 before the endpoint that feeds it, so no forwarded event can
+   * arrive with nowhere to go. The driver guards against that anyway, but the
+   * ordering makes the guard a backstop rather than the mechanism.
+   */
+
+  evb7_amp_touch_init();
+#endif
+
   /* Shared frame area towards Linux. Registered after the tunnel exists, and
    * with the same remote name, so its device-created callback fires for the
    * same rpmsg device the console channel uses.

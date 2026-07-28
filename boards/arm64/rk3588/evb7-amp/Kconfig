@@ -27,4 +27,24 @@ config EVB7_AMP_FB
 		what the NX and LVGL paths do - would draw into memory that is never
 		announced.
 
+config EVB7_AMP_TOUCH
+	bool "Touchscreen forwarded from Linux"
+	default n
+	depends on RPTUN
+	select INPUT
+	select INPUT_TOUCHSCREEN
+	---help---
+		Register /dev/input0 fed by touch events that Linux decodes and forwards
+		over the shared-frame rpmsg endpoint.
+
+		The panel's touch controller is on i2c5 with its interrupt on a GPIO
+		bank 3 pin. That bank has a single interrupt line shared by all of its
+		pins, and the Type-C power delivery controller's interrupt is on the
+		same bank, so taking the touch interrupt for this core would break
+		charging. Consuming events Linux has already decoded avoids the
+		contention entirely and needs no i2c master on this side.
+
+		Touch therefore depends on Linux running. Nothing here can distinguish
+		"nobody is touching the screen" from "the other core stopped talking".
+
 endif # ARCH_BOARD_EVB7_AMP

@@ -118,6 +118,17 @@
 #define AMP_SHM_CMD_RENDER 1            /* Linux -> here: draw a frame     */
 #define AMP_SHM_CMD_READY  2            /* here -> Linux: frame written    */
 #define AMP_SHM_CMD_ACK    3            /* Linux -> here: what I read      */
+#define AMP_SHM_CMD_TOUCH  4            /* Linux -> here: a touch event    */
+
+/* Touch contact state, matching the three states the framework distinguishes.
+ * Kept as its own small set rather than reusing the TOUCH_* bits from
+ * nuttx/input/touchscreen.h, because those are a NuttX header the Linux side
+ * cannot include.
+ */
+
+#define AMP_TOUCH_DOWN     0
+#define AMP_TOUCH_MOVE     1
+#define AMP_TOUCH_UP       2
 
 #define AMP_SHM_EPT_NAME   "rpmsg-raw"
 
@@ -177,6 +188,36 @@ begin_packed_struct struct amp_shm_msg_s
   uint32_t sum;                         /* checksum, per the sender         */
 } end_packed_struct;
 
+/* Touch events travel over the same endpoint, distinguished by cmd.
+ *
+ * Deliberately also 16 bytes, so a receiver can read one fixed-size message and
+ * then look at cmd, instead of having to know the length before the read. The
+ * two structures are different views of the same wire format.
+ *
+ * Pixels need shared memory; touch does not. A contact is a dozen bytes and
+ * there are a few hundred per second at most, which is idle capacity for an
+ * rpmsg pool built from 512-byte buffers - the exact opposite of the video case,
+ * where that pool would be hopeless.
+ *
+ * x and y are already in this core's framebuffer coordinates. Linux does the
+ * conversion because Linux is the side that knows both the panel geometry and
+ * the touch controller's range; sending raw controller values would force this
+ * core to learn about a device it cannot see, and would put the forward and
+ * inverse scaling in two different programs where they could drift apart.
+ */
+
+begin_packed_struct struct amp_touch_msg_s
+{
+  uint32_t cmd;                         /* AMP_SHM_CMD_TOUCH                */
+  uint32_t seq;                         /* events sent since boot           */
+  uint16_t x;                           /* framebuffer coordinates          */
+  uint16_t y;
+  uint8_t  id;                          /* contact id, stable while touching */
+  uint8_t  state;                       /* AMP_TOUCH_DOWN / MOVE / UP       */
+  uint16_t pressure;                    /* 0 when the controller has none   */
+  uint32_t reserved;
+} end_packed_struct;
+
 /****************************************************************************
  * Public Functions Prototypes
  ****************************************************************************/
@@ -203,5 +244,19 @@ int evb7_amp_shm_init(const char *cpuname);
  ****************************************************************************/
 
 void evb7_amp_shm_flush(void);
+
+/****************************************************************************
+ * Name: evb7_amp_touch_event
+ *
+ * Description:
+ *   Hand a touch event received over rpmsg to the touchscreen driver. Called
+ *   from the shared-frame endpoint callback; defined in evb7_amp_touch.c and
+ *   only present when the touchscreen support is enabled.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_INPUT_TOUCHSCREEN)
+void evb7_amp_touch_event(const struct amp_touch_msg_s *msg);
+#endif
 
 #endif /* __BOARDS_ARM64_RK3588_EVB7_AMP_SRC_EVB7_AMP_SHM_H */

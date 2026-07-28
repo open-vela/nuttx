@@ -258,6 +258,20 @@ static int amp_shm_ept_cb(struct rpmsg_endpoint *ept, void *data,
         amp_shm_publish(dev);
         break;
 
+#ifdef CONFIG_INPUT_TOUCHSCREEN
+      case AMP_SHM_CMD_TOUCH:
+
+        /* Same endpoint, same 16-byte message, different view of it. Touch
+         * shares the channel with the frame signalling rather than getting its
+         * own because Linux's rpmsg_char binds one channel per announced name
+         * and lets one process open it, so a second channel would need a way to
+         * tell the two apart that is no more robust than a cmd field.
+         */
+
+        evb7_amp_touch_event((const struct amp_touch_msg_s *)data);
+        break;
+#endif
+
       case AMP_SHM_CMD_ACK:
 
         /* What Linux read back, checked against what was written. A mismatch
