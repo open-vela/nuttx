@@ -119,6 +119,27 @@
 #define AMP_SHM_CMD_READY  2            /* here -> Linux: frame written    */
 #define AMP_SHM_CMD_ACK    3            /* Linux -> here: what I read      */
 #define AMP_SHM_CMD_TOUCH  4            /* Linux -> here: a touch event    */
+#define AMP_SHM_CMD_HELLO  5            /* Linux -> here: I am listening   */
+
+/* Why a hello is necessary rather than merely tidy.
+ *
+ * This core learns the peer's endpoint address only from the first message it
+ * receives - see rpmsg_virtio_rx_callback(), which fills in ept->dest_addr when
+ * it is still RPMSG_ADDR_ANY. Linux's rpmsg_char driver creates its endpoint
+ * when user space opens /dev/rpmsgN and sends nothing at that point, so without
+ * an explicit hello this core has no address to send to and every frame
+ * notification is dropped.
+ *
+ * That is exactly what happened once an application on this side started
+ * generating frames on its own: 36 frames were published to the control block
+ * and never announced, and the screen stayed black until a touch event - a
+ * message from Linux - incidentally taught this core the address.
+ *
+ * The earlier stages never caught it because every one of their test procedures
+ * happened to have Linux speak first: the frame test asks for frames, and the
+ * touch test is Linux-to-here by nature. A path that only works when the peer
+ * happens to transmit first is not a working path.
+ */
 
 /* Touch contact state, matching the three states the framework distinguishes.
  * Kept as its own small set rather than reusing the TOUCH_* bits from
@@ -175,7 +196,21 @@ begin_packed_struct struct amp_shm_ctrl_s
   uint32_t bufoffset[AMP_SHM_NBUFFERS]; /* from AMP_SHM_BASE                */
   uint32_t frame_seq;                   /* frames written since boot        */
   uint32_t ready_index;                 /* buffer holding the latest frame  */
-  uint32_t ready_sum;                   /* checksum of that buffer          */
+
+  /* Checksum of that buffer, or zero to mean "not computed".
+   *
+   * Zero is a deliberate sentinel rather than a real sum. Checksumming a frame
+   * means reading the whole buffer back out of non-cacheable memory, which is
+   * affordable for a test that publishes a few frames on request and is not
+   * affordable for a display path: at this resolution it is 2MB of uncached
+   * reads on this side and another 2MB on Linux's, per frame.
+   *
+   * So the test pattern still publishes a sum - it gets one for free while
+   * writing the pixels - and the framebuffer path publishes zero. Verification
+   * lives in the mode built for verifying.
+   */
+
+  uint32_t ready_sum;
 } end_packed_struct;
 
 /* rpmsg payload: 16 bytes, same in both directions. */

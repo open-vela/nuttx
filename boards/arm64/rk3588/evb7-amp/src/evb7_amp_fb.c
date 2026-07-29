@@ -47,10 +47,64 @@
 #include <string.h>
 #include <syslog.h>
 
+#include <nuttx/clock.h>
 #include <nuttx/video/fb.h>
 
 #include "evb7_amp.h"
 #include "evb7_amp_shm.h"
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+/* Applications draw here, not into the shared area.
+ *
+ * The shared area has to be mapped non-cacheable, or the other core cannot see
+ * what is written to it. That is fine for a buffer that gets filled once and
+ * handed over, and ruinous for one that a graphics toolkit renders into: drawing
+ * blends, which reads the destination pixel before writing it, and an uncached
+ * read is a full trip to DRAM with no line fill and no prefetch to amortise it.
+ *
+ * Measured on this board with LVGL: rendering straight into the shared area took
+ * about 255ms per full frame, against about 43ms for the host side to scale that
+ * frame onto the panel. Roughly 85% of the frame time was this core stalling on
+ * uncached accesses. A frame rate that low is not only a smoothness problem -
+ * the toolkit polls the touch device from the same timer, so slow frames drop
+ * input events and gestures stop working.
+ *
+ * So the framebuffer handed to applications is ordinary cacheable memory, and a
+ * flush copies it across. The copy is sequential and write-combines, which is
+ * the access pattern uncached memory is actually good at.
+ *
+ * The second benefit is smaller but real: the shared buffer is now written in one
+ * short burst instead of being drawn into over hundreds of milliseconds, so the
+ * window in which the host can read a half-drawn frame shrinks by the same
+ * factor. It does not disappear - that needs a second buffer to flip between.
+ */
+
+#define AMP_FB_ALIGN 64
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+static uint8_t g_fbmem[AMP_SHM_BUFSIZE]
+  __attribute__((aligned(AMP_FB_ALIGN)));
+
+/* The other end of the copy. Flat mapping, so a physical address is a pointer. */
+
+static uint8_t * const g_shmem =
+  (uint8_t *)(uintptr_t)(AMP_SHM_BASE +
+                         AMP_SHM_BUF_OFFSET(AMP_SHM_FB_INDEX));
+
+static struct
+{
+  unsigned long flushes;
+  unsigned long rows;
+  unsigned long max_rows;
+  clock_t       copy_ticks;
+  clock_t       reported;
+} g_stats;
 
 /****************************************************************************
  * Private Function Prototypes
@@ -86,8 +140,7 @@ static const struct fb_videoinfo_s g_videoinfo =
 
 static const struct fb_planeinfo_s g_planeinfo =
 {
-  .fbmem        = (void *)(uintptr_t)(AMP_SHM_BASE +
-                                      AMP_SHM_BUF_OFFSET(AMP_SHM_FB_INDEX)),
+  .fbmem        = g_fbmem,
   .fblen        = AMP_SHM_BUFSIZE,
   .stride       = AMP_SHM_STRIDE,
   .display      = 0,
@@ -153,10 +206,91 @@ static int evb7_fb_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
  *
  ****************************************************************************/
 
+/****************************************************************************
+ * Name: evb7_fb_copyrows
+ *
+ * Description:
+ *   Copy a band of rows into the shared area and announce the frame.
+ *
+ *   Rows rather than rectangles: a row is contiguous, so a band of them is a
+ *   single memcpy, while a rectangle would be one short copy per row. Copying
+ *   the few untouched pixels either side of the damaged area is cheaper than
+ *   paying per-row call overhead for the privilege of skipping them.
+ *
+ *   Copying only part of the buffer is safe because the shared buffer keeps its
+ *   previous contents - the rows outside the band still hold what was published
+ *   last time, which is what the host is showing.
+ *
+ ****************************************************************************/
+
+static void evb7_fb_copyrows(unsigned int y, unsigned int h)
+{
+  size_t offset;
+  size_t len;
+  clock_t start;
+
+  if (y >= AMP_SHM_HEIGHT)
+    {
+      return;
+    }
+
+  if (h > AMP_SHM_HEIGHT - y)
+    {
+      h = AMP_SHM_HEIGHT - y;
+    }
+
+  offset = (size_t)y * AMP_SHM_STRIDE;
+  len    = (size_t)h * AMP_SHM_STRIDE;
+
+  start = clock_systime_ticks();
+
+  memcpy(g_shmem + offset, g_fbmem + offset, len);
+
+  /* How much is being redrawn, and what the handover costs.
+   *
+   * The host side can measure its own work and the gap between frames, but it
+   * cannot see how much of the screen each frame actually touched - and that is
+   * the number which separates "the toolkit is redrawing everything" from "the
+   * toolkit is redrawing a little and taking a long time over it". Averaged over
+   * a couple of seconds because the tick here is only a millisecond and a copy
+   * is a few of them.
+   */
+
+  g_stats.flushes++;
+  g_stats.rows += h;
+  g_stats.copy_ticks += clock_systime_ticks() - start;
+
+  if (h > g_stats.max_rows)
+    {
+      g_stats.max_rows = h;
+    }
+
+  if (clock_systime_ticks() - g_stats.reported >= MSEC2TICK(2000))
+    {
+      syslog(LOG_INFO,
+             "[AMP] fb %lu flush(es): %lu rows avg (max %lu of %u), "
+             "copy %lu ms total\n",
+             (unsigned long)g_stats.flushes,
+             (unsigned long)(g_stats.rows / g_stats.flushes),
+             (unsigned long)g_stats.max_rows, AMP_SHM_HEIGHT,
+             (unsigned long)TICK2MSEC(g_stats.copy_ticks));
+
+      g_stats.reported   = clock_systime_ticks();
+      g_stats.flushes    = 0;
+      g_stats.rows       = 0;
+      g_stats.max_rows   = 0;
+      g_stats.copy_ticks = 0;
+    }
+
+  evb7_amp_shm_flush();
+}
+
 static int evb7_fb_pandisplay(struct fb_vtable_s *vtable,
                               struct fb_planeinfo_s *pinfo)
 {
-  evb7_amp_shm_flush();
+  /* No damage information, so the whole frame has to go. */
+
+  evb7_fb_copyrows(0, AMP_SHM_HEIGHT);
   return OK;
 }
 
@@ -164,7 +298,15 @@ static int evb7_fb_pandisplay(struct fb_vtable_s *vtable,
 static int evb7_fb_updatearea(struct fb_vtable_s *vtable,
                               const struct fb_area_s *area)
 {
-  evb7_amp_shm_flush();
+  if (area == NULL)
+    {
+      evb7_fb_copyrows(0, AMP_SHM_HEIGHT);
+    }
+  else
+    {
+      evb7_fb_copyrows(area->y, area->h);
+    }
+
   return OK;
 }
 #endif
@@ -223,10 +365,11 @@ int evb7_amp_fb_init(void)
 {
   int ret = fb_register(0, 0);
 
-  syslog(LOG_INFO, "[AMP] fb %s: %ux%u %ubpp at %p\n",
+  syslog(LOG_INFO,
+         "[AMP] fb %s: %ux%u %ubpp, draw at %p -> share at %p\n",
          ret >= 0 ? "/dev/fb0 registered" : "registration FAILED",
          AMP_SHM_WIDTH, AMP_SHM_HEIGHT, AMP_SHM_BPP * 8,
-         g_planeinfo.fbmem);
+         g_planeinfo.fbmem, g_shmem);
 
   return ret;
 }

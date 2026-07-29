@@ -76,6 +76,7 @@ struct amp_shm_dev_s
   int                      announce_cnt;
   char                     cpuname[RPMSG_NAME_SIZE + 1];
   bool                     bound;
+  bool                     warned_unbound;
 };
 
 /****************************************************************************
@@ -144,30 +145,6 @@ static uint32_t amp_shm_render(unsigned int index, uint32_t seq)
 }
 
 /****************************************************************************
- * Name: amp_shm_checksum
- *
- * Description:
- *   Sum a buffer the way the peer does, so both sides can compare a frame they
- *   never exchanged.
- *
- ****************************************************************************/
-
-static uint32_t amp_shm_checksum(unsigned int index)
-{
-  FAR const uint32_t *buf = amp_shm_buffer(index);
-  uint32_t sum = 0;
-  size_t words = AMP_SHM_BUFSIZE / sizeof(uint32_t);
-  size_t i;
-
-  for (i = 0; i < words; i++)
-    {
-      sum += buf[i];
-    }
-
-  return sum;
-}
-
-/****************************************************************************
  * Name: amp_shm_announce
  *
  * Description:
@@ -195,13 +172,28 @@ static void amp_shm_announce(unsigned int index, uint32_t sum)
 
   UP_DMB();
 
-  /* Nothing to notify before the peer has bound the endpoint. The control block
-   * is still updated above, so a late reader (or the -p mode of the host tool)
+  /* Nothing to notify before the peer's address is known. The control block is
+   * still updated above, so a late reader (or the polling mode of the host tool)
    * sees the frame without needing to have been listening.
+   *
+   * This used to return silently, and that cost a debugging round: an
+   * application drawing into /dev/fb0 published 36 frames that were never
+   * announced, and the only symptom was a black screen. Say it once instead -
+   * dropping notifications is worth a line in the log, and a peer that never
+   * says hello is a real misconfiguration rather than a transient state.
    */
 
   if (dev->ept.dest_addr == RPMSG_ADDR_ANY)
     {
+      if (!dev->warned_unbound)
+        {
+          dev->warned_unbound = true;
+          syslog(LOG_WARNING,
+                 "[AMP] shm frame %lu not announced: peer address unknown. "
+                 "Linux has to send something first (see AMP_SHM_CMD_HELLO)\n",
+                 (unsigned long)seq);
+        }
+
       return;
     }
 
@@ -254,6 +246,17 @@ static int amp_shm_ept_cb(struct rpmsg_endpoint *ept, void *data,
 
   switch (msg->cmd)
     {
+      case AMP_SHM_CMD_HELLO:
+
+        /* Nothing to do with the contents. Receiving anything at all is the
+         * point: the rpmsg layer fills in the peer's address on the first
+         * inbound message, which is what makes it possible to notify frames.
+         */
+
+        syslog(LOG_INFO, "[AMP] shm peer at 0x%08lx, frames can be announced\n",
+               (unsigned long)src);
+        break;
+
       case AMP_SHM_CMD_RENDER:
         amp_shm_publish(dev);
         break;
@@ -284,6 +287,7 @@ static int amp_shm_ept_cb(struct rpmsg_endpoint *ept, void *data,
                "[AMP] shm ack frame %lu buf%lu sum 0x%08lx -> %s\n",
                (unsigned long)msg->seq, (unsigned long)msg->index,
                (unsigned long)msg->sum,
+               g_ctrl->ready_sum == 0 ? "no reference" :
                msg->sum == g_ctrl->ready_sum ? "MATCH" : "MISMATCH");
         break;
 
@@ -381,17 +385,26 @@ static void amp_shm_device_destroy(struct rpmsg_device *rdev, void *priv)
  *   Publish whatever an application has drawn into the framebuffer buffer.
  *   Called from the framebuffer driver's flush hooks.
  *
- *   The checksum is recomputed on every flush, which is more work than a
- *   display path needs - it reads the whole buffer back out of non-cacheable
- *   memory. It is kept because it costs a few milliseconds at this resolution
- *   and it means the host tool can still verify, frame by frame, that what it
- *   displays is what this core drew. Once the path is trusted it can go.
+ *   No checksum: a zero in ready_sum tells the host side not to expect one.
+ *
+ *   It used to compute one on every flush, and that turned out to be the wrong
+ *   trade for a display path. Checksumming means reading the whole 2MB buffer
+ *   back out of non-cacheable memory, and the host side then reads it a second
+ *   time to compute its own - per frame. With an interactive toolkit driving
+ *   this at its refresh rate the readback was a large part of the frame time,
+ *   and a slow frame rate is not only a smoothness problem: the toolkit polls
+ *   the touch device from the same timer, so slow frames drop input events.
+ *
+ *   The verification it provided has been done: three stages of frame-by-frame
+ *   checksum agreement across this boundary. What remains available is the test
+ *   pattern path, which still publishes a sum because it gets one for free while
+ *   writing the pixels, so the transport can still be checked on demand.
  *
  ****************************************************************************/
 
 void evb7_amp_shm_flush(void)
 {
-  amp_shm_announce(AMP_SHM_FB_INDEX, amp_shm_checksum(AMP_SHM_FB_INDEX));
+  amp_shm_announce(AMP_SHM_FB_INDEX, 0);
 }
 
 /****************************************************************************

@@ -69,13 +69,20 @@
 
 #define AMP_TOUCH_MAXPOINT 5
 
-/* Depth of the upper half's sample queue. Events arrive from another core and
- * are consumed by an application thread, so a few slots of slack absorb
- * scheduling jitter without letting a stalled reader hold on to old positions
- * for long.
+/* Depth of the upper half's sample queue.
+ *
+ * Deep enough to hold a whole gesture, and that is not generosity. The upper half
+ * discards the oldest sample when the queue is full, and the oldest sample is the
+ * press - the one event a consumer cannot do without. A swipe on this panel is
+ * one press, thirty to forty position updates and one release, all inside a few
+ * hundred milliseconds; with a queue of eight, a reader that pauses for one
+ * render loses the press and keeps the moves, so it sees a finger that was never
+ * put down. Nothing reports an error, and gestures simply stop working.
+ *
+ * Sixty-four costs 8KB of the fifteen megabytes free here.
  */
 
-#define AMP_TOUCH_NBUFFER  8
+#define AMP_TOUCH_NBUFFER  64
 
 /****************************************************************************
  * Private Data
