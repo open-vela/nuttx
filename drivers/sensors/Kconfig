@@ -1485,6 +1485,32 @@ config SGP30_DEBUG
 
 endif # SENSORS_SGP30
 
+config SENSORS_ENS160
+	bool "ScioSense ENS160 digital metal-oxide multi-gas sensor"
+	default n
+	select I2C
+	---help---
+		Enable Sensor Framework support for the ENS160 indoor air-quality
+		sensor.  The driver exposes equivalent CO2, TVOC and a composite
+		UBA AQI result.  Both selectable I2C addresses are supported.
+
+if SENSORS_ENS160
+
+config ENS160_I2C_FREQUENCY
+	int "ENS160 I2C frequency"
+	default 400000
+	range 1 400000
+
+config ENS160_CACHE_TIME_MS
+	int "ENS160 shared result cache time in milliseconds"
+	default 100
+	range 0 1000
+	---help---
+		CO2, TVOC and composite AQI nodes share one physical register read
+		when accessed within this interval.
+
+endif # SENSORS_ENS160
+
 config SENSORS_AHT10
 	bool "ASAIR AHT10 temperature and humidity sensor"
 	default n
@@ -1499,6 +1525,32 @@ config AHT10_I2C_FREQUENCY
 	range 1 400000
 
 endif # SENSORS_AHT10
+
+config SENSORS_AHT2X
+	bool "ASAIR AHT20/AHT21 temperature and humidity sensor"
+	default n
+	select I2C
+	---help---
+		Enable Sensor Framework support for the protocol-compatible ASAIR
+		AHT20 and AHT21 temperature and humidity sensors, including the
+		measurement CRC check.
+
+if SENSORS_AHT2X
+
+config AHT2X_I2C_FREQUENCY
+	int "AHT20/AHT21 I2C frequency"
+	default 400000
+	range 1 400000
+
+config AHT2X_CACHE_TIME_MS
+	int "AHT20/AHT21 shared result cache time in milliseconds"
+	default 250
+	range 0 1000
+	---help---
+		Temperature and humidity nodes share a single conversion when they
+		are read within this interval.
+
+endif # SENSORS_AHT2X
 
 config SENSORS_SHT21
 	bool "Sensirion SHT21 temperature and humidity sensor"

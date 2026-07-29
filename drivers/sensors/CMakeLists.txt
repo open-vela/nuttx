@@ -276,8 +276,16 @@ if(CONFIG_SENSORS)
       list(APPEND SRCS sgp30.c)
     endif()
 
+    if(CONFIG_SENSORS_ENS160)
+      list(APPEND SRCS ens160_uorb.c)
+    endif()
+
     if(CONFIG_SENSORS_AHT10)
       list(APPEND SRCS aht10.c)
+    endif()
+
+    if(CONFIG_SENSORS_AHT2X)
+      list(APPEND SRCS aht2x_uorb.c)
     endif()
 
     if(CONFIG_SENSORS_SHT21)
