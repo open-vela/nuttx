@@ -1,0 +1,22 @@
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+menu "FRDM-MCXN947 board options"
+
+config N94X_ENS160_AHT21
+	bool "ENS160 + AHT20/AHT21 air-quality module on LPI2C0"
+	default n
+	depends on SENSORS
+	select NXXX_LPI2C0
+	select SENSORS_ENS160
+	select SENSORS_AHT2X
+	---help---
+		Route LPI2C0 to P0_12/P0_13 and register the ENS160 and
+		AHT20/AHT21 sensors on the combined module.  Tie ENS160 ADD low
+		for address 0x52.  The interrupt pin is not required.
+
+endmenu
