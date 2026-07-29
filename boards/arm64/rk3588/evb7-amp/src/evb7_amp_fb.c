@@ -47,6 +47,9 @@
 #include <string.h>
 #include <syslog.h>
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include <nuttx/clock.h>
 #include <nuttx/video/fb.h>
 
@@ -269,11 +272,12 @@ static void evb7_fb_copyrows(unsigned int y, unsigned int h)
     {
       syslog(LOG_INFO,
              "[AMP] fb %lu flush(es): %lu rows avg (max %lu of %u), "
-             "copy %lu ms total\n",
+             "copy %lu ms total, %lu flip(s)\n",
              (unsigned long)g_stats.flushes,
              (unsigned long)(g_stats.rows / g_stats.flushes),
              (unsigned long)g_stats.max_rows, AMP_SHM_HEIGHT,
-             (unsigned long)TICK2MSEC(g_stats.copy_ticks));
+             (unsigned long)TICK2MSEC(g_stats.copy_ticks),
+             evb7_amp_vop_flips());
 
       g_stats.reported   = clock_systime_ticks();
       g_stats.flushes    = 0;
@@ -282,7 +286,39 @@ static void evb7_fb_copyrows(unsigned int y, unsigned int h)
       g_stats.copy_ticks = 0;
     }
 
-  evb7_amp_shm_flush();
+  /* Two ways for the frame to reach the panel, and only one of them is used.
+   *
+   * The original one hands the buffer to Linux, which scales it onto its own
+   * plane. The other points the VOP's Esmart3 window straight at this buffer
+   * and commits it, which is what the dts reserved that window for.
+   *
+   * The takeover is triggered by the first frame rather than at bringup,
+   * because Linux's modeset on vp3 - which happens when the host program opens
+   * the card, long after this core has booted - disables every window in that
+   * port's mask, this one included. Doing it here means the takeover cannot
+   * precede the modeset. It also does not need to: evb7_amp_vop_flip()
+   * reprograms the whole window every frame, so a modeset that happens later
+   * costs one frame rather than the display.
+   *
+   * Once the window is ours, Linux is not told about the frame at all. That
+   * drops the rpmsg round trip and the checksum, and it makes the two outcomes
+   * distinguishable on the panel: if the window works the picture follows this
+   * core, and if it does not the picture freezes on the last frame Linux
+   * published. A takeover that silently changed nothing would be the hard case
+   * to diagnose.
+   *
+   * Touch is unaffected - the host program forwards input on its own poll
+   * wakeups, not off the back of a frame.
+   */
+
+  if (!evb7_amp_vop_active())
+    {
+      evb7_amp_vop_takeover();
+    }
+  else
+    {
+      evb7_amp_vop_flip((uintptr_t)g_shmem);
+    }
 }
 
 static int evb7_fb_pandisplay(struct fb_vtable_s *vtable,

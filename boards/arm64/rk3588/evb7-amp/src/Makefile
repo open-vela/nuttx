@@ -34,6 +34,8 @@ endif
 ifeq ($(CONFIG_RPTUN),y)
 ifeq ($(CONFIG_VIDEO_FB),y)
 CSRCS += evb7_amp_fb.c
+# Driving the VOP's Esmart3 window directly, instead of asking Linux to blit.
+CSRCS += evb7_amp_vop.c
 endif
 
 # Touch events arrive over the same rpmsg endpoint as the frame signalling.

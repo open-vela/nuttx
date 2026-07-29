@@ -28,6 +28,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <stdbool.h>
 #include <stdint.h>
 #ifndef __ASSEMBLY__
 
@@ -70,6 +71,28 @@ int evb7_amp_fb_init(void);
 
 #if defined(CONFIG_RPTUN) && defined(CONFIG_INPUT_TOUCHSCREEN)
 int evb7_amp_touch_init(void);
+#endif
+
+/****************************************************************************
+ * Name: evb7_amp_vop_takeover / evb7_amp_vop_flip / evb7_amp_vop_active
+ *
+ * Description:
+ *   Drive the VOP's Esmart3 window from this core, on the video port Linux
+ *   has already brought up. See evb7_amp_vop.c for why only these few
+ *   registers are needed and why Linux does not fight us for them.
+ *
+ *   takeover() must be called after Linux's modeset on vp3, not during
+ *   bringup - a modeset disables every window in the port's mask, this one
+ *   included. flip() is safe to call repeatedly and reprograms the window
+ *   each time, so a later modeset only costs one frame.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_RPTUN) && defined(CONFIG_VIDEO_FB)
+int  evb7_amp_vop_takeover(void);
+void evb7_amp_vop_flip(uintptr_t phys);
+bool evb7_amp_vop_active(void);
+unsigned long evb7_amp_vop_flips(void);
 #endif
 
 #endif /* __ASSEMBLY__ */
