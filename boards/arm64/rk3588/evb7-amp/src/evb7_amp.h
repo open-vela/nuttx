@@ -89,10 +89,12 @@ int evb7_amp_touch_init(void);
  ****************************************************************************/
 
 #if defined(CONFIG_RPTUN) && defined(CONFIG_VIDEO_FB)
-int  evb7_amp_vop_takeover(void);
+int  evb7_amp_vop_takeover(uintptr_t phys);
 void evb7_amp_vop_flip(uintptr_t phys);
+bool evb7_amp_vop_wait_latch(uintptr_t phys);
 bool evb7_amp_vop_active(void);
 unsigned long evb7_amp_vop_flips(void);
+unsigned long evb7_amp_vop_latch_timeouts(void);
 #endif
 
 #endif /* __ASSEMBLY__ */

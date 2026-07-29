@@ -20,20 +20,62 @@
  *
  ****************************************************************************/
 
-/* A framebuffer whose memory is the shared area, so applications draw with
- * ordinary /dev/fb0 calls and Linux puts the result on the panel.
+/* /dev/fb0 as two buffers in this core's own RAM, scanned out by the VOP.
  *
- * There is no display controller behind this driver. This core cannot drive the
- * panel itself: the VOP's IOMMU is shared across all four of its video ports and
- * its interrupt is shared with that IOMMU's own, so neither can be handed to one
- * core alone while Linux owns the others. What the driver does instead is hand
- * out the shared buffer as framebuffer memory and, when an application says it
- * has finished a frame, ask the shared-frame layer to notify Linux.
+ * How this got here
+ * ----------------------------------------------------------------------------
+ * The first version put the framebuffer in the AMP shared area and asked Linux
+ * to composite it. That area has to be mapped non-cacheable for the other core
+ * to see writes to it, and rendering into non-cacheable memory is ruinous -
+ * blending reads the destination pixel before writing it, and an uncached read
+ * is a full trip to DRAM with no line fill and no prefetch. Measured with LVGL:
+ * about 255ms per full frame against about 43ms for the host to scale it onto
+ * the panel.
  *
- * The consequence worth knowing: a flush here is not "the pixels are on the
- * screen", it is "the pixels are visible to whoever composites them". Nothing in
- * this driver can report vsync, which is why waitforvsync is deliberately absent
- * rather than stubbed out to return success.
+ * The second version drew into ordinary cacheable memory and memcpy'd the dirty
+ * rows across, which brought rendering back to sane numbers at the cost of a
+ * 2MB copy per frame - about 4.7ms for a partial frame and 7.5ms for a large
+ * one, measured on this board.
+ *
+ * That copy existed only because the destination had to be memory Linux could
+ * read. It no longer does: the VOP's Esmart3 window is now programmed from this
+ * core (see evb7_amp_vop.c), and it will read any physical address, including
+ * this core's own RAM. So the framebuffer is here, cacheable, and the copy is
+ * gone. What replaces it is a cache clean of the dirty rows - which writes the
+ * same bytes to DRAM that the memcpy's store half did, without the load half
+ * and without a second pass over the data.
+ *
+ * Why two buffers
+ * ----------------------------------------------------------------------------
+ * With one buffer the VOP is reading the same memory the application is drawing
+ * into, so a frame can reach the panel half-drawn. No amount of care on this
+ * side fixes that; it needs somewhere else to draw. Two buffers were not
+ * affordable while the framebuffer lived in the 4MB shared area - two 540x960
+ * ARGB8888 frames are 4.15MB - and are trivially affordable in the 16MB of RAM
+ * this core has.
+ *
+ * The framework's double-buffer support is driven from yres_virtual: fb.c
+ * computes fbcount as yres_virtual/yres and sizes the pan queue to match, and
+ * LVGL's fbdev driver looks for yres_virtual == 2*yres to decide to allocate a
+ * second draw buffer. Both are satisfied by reporting one contiguous region of
+ * twice the height.
+ *
+ * The division of labour between the two hooks
+ * ----------------------------------------------------------------------------
+ * FBIO_UPDATE means "these rows are drawn". FBIOPAN_DISPLAY means "show this
+ * buffer". With one buffer they collapse into the same thing, which is why the
+ * earlier version treated them identically; with two they genuinely differ, and
+ * conflating them would either publish half-drawn frames or never publish at
+ * all.
+ *
+ * So: update cleans the dirty rows out of the cache, and pan points the window
+ * at a buffer and waits for the hardware to actually switch. The wait is the
+ * part that makes double buffering real rather than nominal - see
+ * evb7_amp_vop_wait_latch().
+ *
+ * Applications that only ever issue FBIO_UPDATE still work. The rows they touch
+ * are in the buffer already on screen, and that is exactly the case update
+ * publishes immediately.
  */
 
 /****************************************************************************
@@ -44,13 +86,15 @@
 
 #include <errno.h>
 #include <debug.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 #include <syslog.h>
 
-#include <stdbool.h>
-#include <stdint.h>
-
+#include <nuttx/arch.h>
+#include <nuttx/cache.h>
 #include <nuttx/clock.h>
+#include <nuttx/kmalloc.h>
 #include <nuttx/video/fb.h>
 
 #include "evb7_amp.h"
@@ -60,54 +104,111 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Applications draw here, not into the shared area.
- *
- * The shared area has to be mapped non-cacheable, or the other core cannot see
- * what is written to it. That is fine for a buffer that gets filled once and
- * handed over, and ruinous for one that a graphics toolkit renders into: drawing
- * blends, which reads the destination pixel before writing it, and an uncached
- * read is a full trip to DRAM with no line fill and no prefetch to amortise it.
- *
- * Measured on this board with LVGL: rendering straight into the shared area took
- * about 255ms per full frame, against about 43ms for the host side to scale that
- * frame onto the panel. Roughly 85% of the frame time was this core stalling on
- * uncached accesses. A frame rate that low is not only a smoothness problem -
- * the toolkit polls the touch device from the same timer, so slow frames drop
- * input events and gestures stop working.
- *
- * So the framebuffer handed to applications is ordinary cacheable memory, and a
- * flush copies it across. The copy is sequential and write-combines, which is
- * the access pattern uncached memory is actually good at.
- *
- * The second benefit is smaller but real: the shared buffer is now written in one
- * short burst instead of being drawn into over hundreds of milliseconds, so the
- * window in which the host can read a half-drawn frame shrinks by the same
- * factor. It does not disappear - that needs a second buffer to flip between.
+/* The geometry still comes from the shared-area header. Nothing is copied
+ * there any more, but the host-side program reads those same fields out of the
+ * control block, so one definition for both sides is still worth having.
  */
 
-#define AMP_FB_ALIGN 64
+#define AMP_FB_WIDTH    AMP_SHM_WIDTH
+#define AMP_FB_HEIGHT   AMP_SHM_HEIGHT
+#define AMP_FB_STRIDE   AMP_SHM_STRIDE
+#define AMP_FB_BUFSIZE  AMP_SHM_BUFSIZE
+#define AMP_FB_NBUFFERS 2
+
+/* A page for the region as a whole. The buffers are read by the VOP's AXI
+ * master, and while a linear-mode window only documents a 4-byte requirement,
+ * the version of this that was verified on hardware ran from a page-aligned
+ * address in the shared area; keeping that property removes a variable from the
+ * comparison and costs nothing.
+ *
+ * The second buffer does not inherit page alignment, because the buffer size is
+ * not a multiple of a page: 540 * 4 * 960 is 2073600, which is 1024 * 2025. It
+ * cannot be padded to one either - LVGL locates the second buffer at exactly
+ * yres * stride, so any gap would point it at the wrong place. 1024 is well
+ * past what the hardware asks for, and being a multiple of the 64-byte cache
+ * line is what matters for the other reason to align: cleaning one buffer can
+ * never write back a line belonging to the other.
+ */
+
+#define AMP_FB_ALIGN    4096
 
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-static uint8_t g_fbmem[AMP_SHM_BUFSIZE]
-  __attribute__((aligned(AMP_FB_ALIGN)));
+/* Both buffers, contiguous, so they can be reported as a single region of twice
+ * the height. Cacheable ordinary RAM - that is the entire point of moving them
+ * here from the shared area.
+ *
+ * From the heap rather than .bss, which is not about where the memory ends up -
+ * both are in the same MT_NORMAL bank and both are flat-mapped, so a pointer is
+ * a physical address either way. It is about the size of nuttx.bin. The linker
+ * script places .initstack after .bss, and objcopy -O binary spans from the
+ * first section with contents to the last, so a 4MB .bss array in between
+ * becomes 4MB of zeroes in the image - the image went from 880KB to 5.15MB when
+ * these were static. Taking them from the heap instead shrinks .bss by the same
+ * amount, which moves g_idle_topstack down and gives the heap back exactly what
+ * it is about to hand out.
+ */
 
-/* The other end of the copy. Flat mapping, so a physical address is a pointer. */
+static uint8_t *g_fbmem;
 
-static uint8_t * const g_shmem =
-  (uint8_t *)(uintptr_t)(AMP_SHM_BASE +
-                         AMP_SHM_BUF_OFFSET(AMP_SHM_FB_INDEX));
+/* Which buffer the VOP is scanning. Only ever changed by pandisplay, and read
+ * by updatearea to decide whether the rows being reported are on screen.
+ */
+
+static unsigned int g_active_buf;
+
+/* Timings are taken with up_perf_gettime() rather than clock_systime_ticks().
+ *
+ * The tick here is a millisecond (CONFIG_USEC_PER_TICK=1000) and a cache clean
+ * of a few dirty rows is a long way under that, so accumulating tick
+ * differences added zero every time and reported a total of zero however long
+ * it really took. That is worse than no measurement: it looks like an answer.
+ *
+ * The totals are 64-bit even though up_perf_gettime() returns clock_t, which is
+ * 32 bits here (CONFIG_SYSTEM_TIME64 is not set). On this target the counter's
+ * unit is a nanosecond - up_perf_getfreq() reports 1000000000 - so a 32-bit
+ * accumulator wraps after 4.29 seconds. That is comfortably more than one frame
+ * and comfortably less than one reporting period: a single stall of a few
+ * seconds inside a period was enough to wrap the frame total and report 11ms
+ * per frame in the middle of a run that was steady at 33ms.
+ *
+ * Individual intervals stay in clock_t on purpose - unsigned 32-bit subtraction
+ * gives the right answer across a counter wrap, as long as the interval itself
+ * is under 4.29 seconds.
+ */
 
 static struct
 {
-  unsigned long flushes;
+  unsigned long updates;
   unsigned long rows;
   unsigned long max_rows;
-  clock_t       copy_ticks;
+  unsigned long pans;
+
+  /* Nanoseconds, converted only when reported. */
+
+  uint64_t      clean;
+  uint64_t      wait;
+  uint64_t      lvgl;    /* pan returned -> next update entered  */
+  uint64_t      frame;   /* pan to pan                           */
+
   clock_t       reported;
 } g_stats;
+
+/* End of the last pan, in performance-counter units. Splits each frame into the
+ * part this driver is responsible for and the part it is not, which is the only
+ * way to tell "the display path is slow" from "the toolkit had nothing to do".
+ */
+
+static clock_t g_last_pan;
+
+/* Previous pan, kept separately because g_last_pan is cleared once consumed -
+ * an application that pans twice without an update in between must not have the
+ * gap counted as toolkit time twice.
+ */
+
+static clock_t g_prev_pan;
 
 /****************************************************************************
  * Private Function Prototypes
@@ -131,25 +232,34 @@ static int evb7_fb_updatearea(struct fb_vtable_s *vtable,
 static const struct fb_videoinfo_s g_videoinfo =
 {
   /* FB_FMT_RGB32 is the framework's name for 32-bit colour with the unused
-   * byte ignored, which is what the shared layout declares and what a Linux
-   * XRGB8888 consumer expects. Alpha is not composited by anything here.
+   * byte ignored, which is what the VOP is programmed for (ARGB8888 with the
+   * alpha taken from the window's global value, so the byte is not read).
    */
 
   .fmt     = FB_FMT_RGB32,
-  .xres    = AMP_SHM_WIDTH,
-  .yres    = AMP_SHM_HEIGHT,
+  .xres    = AMP_FB_WIDTH,
+  .yres    = AMP_FB_HEIGHT,
   .nplanes = 1,
 };
 
-static const struct fb_planeinfo_s g_planeinfo =
+/* Not const: fbmem is filled in by up_fbinitialize(), which the framework calls
+ * before it reads any of this.
+ */
+
+static struct fb_planeinfo_s g_planeinfo =
 {
-  .fbmem        = g_fbmem,
-  .fblen        = AMP_SHM_BUFSIZE,
-  .stride       = AMP_SHM_STRIDE,
+  .fblen        = AMP_FB_NBUFFERS * AMP_FB_BUFSIZE,
+  .stride       = AMP_FB_STRIDE,
   .display      = 0,
-  .bpp          = AMP_SHM_BPP * 8,
-  .xres_virtual = AMP_SHM_WIDTH,
-  .yres_virtual = AMP_SHM_HEIGHT,
+  .bpp          = 32,
+  .xres_virtual = AMP_FB_WIDTH,
+
+  /* Twice the visible height is how both fb.c and LVGL are told there are two
+   * buffers. fb.c divides it by yres to size the pan queue; LVGL compares it
+   * against 2*yres to decide to allocate a second draw buffer.
+   */
+
+  .yres_virtual = AMP_FB_NBUFFERS * AMP_FB_HEIGHT,
 };
 
 static struct fb_vtable_s g_fb_vtable =
@@ -166,6 +276,145 @@ static struct fb_vtable_s g_fb_vtable =
  * Private Functions
  ****************************************************************************/
 
+static inline uintptr_t evb7_fb_bufaddr(unsigned int buf)
+{
+  return (uintptr_t)g_fbmem + (uintptr_t)buf * AMP_FB_BUFSIZE;
+}
+
+/****************************************************************************
+ * Name: evb7_fb_clean_rows
+ *
+ * Description:
+ *   Push a band of rows out of the data cache so the VOP can read them.
+ *
+ *   Rows rather than rectangles because a row is contiguous: a band is one
+ *   range, while a rectangle would be one range per row. Cleaning the few
+ *   untouched pixels either side of the damage is cheaper than the per-row
+ *   overhead of skipping them.
+ *
+ *   Cleaning an already-clean line costs a cache lookup and no bus traffic, so
+ *   over-cleaning is close to free. That is what lets pandisplay clean a whole
+ *   buffer without tracking what updatearea already did.
+ *
+ * Input Parameters:
+ *   y - first row, in the doubled coordinate space the framework uses for a
+ *       two-buffer region, so 0..2*yres-1.
+ *   h - number of rows.
+ *
+ ****************************************************************************/
+
+static void evb7_fb_clean_rows(unsigned int y, unsigned int h)
+{
+  uintptr_t start;
+  uintptr_t end;
+  clock_t   t0;
+
+  if (y >= AMP_FB_NBUFFERS * AMP_FB_HEIGHT || h == 0)
+    {
+      return;
+    }
+
+  if (h > AMP_FB_NBUFFERS * AMP_FB_HEIGHT - y)
+    {
+      h = AMP_FB_NBUFFERS * AMP_FB_HEIGHT - y;
+    }
+
+  start = (uintptr_t)g_fbmem + (uintptr_t)y * AMP_FB_STRIDE;
+  end   = start + (uintptr_t)h * AMP_FB_STRIDE;
+
+  t0 = up_perf_gettime();
+  up_clean_dcache(start, end);
+  g_stats.clean += (clock_t)(up_perf_gettime() - t0);
+}
+
+/****************************************************************************
+ * Name: evb7_fb_us
+ *
+ * Description:
+ *   Performance-counter units to microseconds.
+ *
+ ****************************************************************************/
+
+static unsigned long evb7_fb_us(uint64_t elapsed)
+{
+  unsigned long freq = up_perf_getfreq();
+
+  if (freq == 0)
+    {
+      return 0;
+    }
+
+  return (unsigned long)((elapsed * 1000000ull) / freq);
+}
+
+/****************************************************************************
+ * Name: evb7_fb_report
+ *
+ * Description:
+ *   Four numbers every couple of seconds, chosen so that the two things that
+ *   can go wrong are separable.
+ *
+ *   rows says how much of the screen each frame actually redraws, which is the
+ *   difference between "the toolkit is redrawing everything" and "the toolkit
+ *   is redrawing a little and taking a long time over it" - the host side can
+ *   measure its own work but cannot see this.
+ *
+ *   wait says how long this core spent blocked on the panel. It should be most
+ *   of the frame time once rendering is fast enough to be limited by the
+ *   display, and near zero when it is not, so it tells you which side the
+ *   bottleneck is on without any guessing.
+ *
+ *   timeouts should be zero. Anything else means frames are being committed
+ *   that never reach the screen, so the pipeline is not synchronised and the
+ *   second buffer is not actually preventing tearing.
+ *
+ ****************************************************************************/
+
+static void evb7_fb_report(void)
+{
+  unsigned long n;
+
+  if (clock_systime_ticks() - g_stats.reported < MSEC2TICK(2000))
+    {
+      return;
+    }
+
+  n = g_stats.pans ? g_stats.pans : 1;
+
+  /* Per frame, and split so that frame == lvgl + clean + wait + rounding.
+   *
+   * lvgl is everything between this driver returning from one pan and being
+   * entered for the next update: rendering, the toolkit's own timers, and the
+   * sleep in its main loop. It is not this driver's time, and printing it next
+   * to the parts that are is what makes the two separable - a frame interval of
+   * hundreds of milliseconds with single-digit clean and wait means the display
+   * path is idle and waiting for work, not slow.
+   */
+
+  syslog(LOG_INFO,
+         "[AMP] fb %lu frame(s): %lu us/frame = lvgl %lu + clean %lu + "
+         "wait %lu | %lu rows avg (max %lu of %u), %lu flip(s), "
+         "%lu timeout(s)\n",
+         g_stats.pans,
+         evb7_fb_us(g_stats.frame) / n,
+         evb7_fb_us(g_stats.lvgl) / n,
+         evb7_fb_us(g_stats.clean) / n,
+         evb7_fb_us(g_stats.wait) / n,
+         g_stats.updates ? g_stats.rows / g_stats.updates : 0,
+         g_stats.max_rows, AMP_FB_HEIGHT,
+         evb7_amp_vop_flips(), evb7_amp_vop_latch_timeouts());
+
+  g_stats.reported = clock_systime_ticks();
+  g_stats.updates  = 0;
+  g_stats.pans     = 0;
+  g_stats.rows     = 0;
+  g_stats.max_rows = 0;
+  g_stats.clean    = 0;
+  g_stats.wait     = 0;
+  g_stats.lvgl     = 0;
+  g_stats.frame    = 0;
+}
+
 static int evb7_fb_getvideoinfo(struct fb_vtable_s *vtable,
                                 struct fb_videoinfo_s *vinfo)
 {
@@ -178,174 +427,181 @@ static int evb7_fb_getvideoinfo(struct fb_vtable_s *vtable,
   return OK;
 }
 
+/****************************************************************************
+ * Name: evb7_fb_getplaneinfo
+ *
+ * Description:
+ *   The same region whatever is asked for.
+ *
+ *   pinfo->display is not honoured, deliberately. LVGL locates the second
+ *   buffer by asking for display+1 and comparing the address it gets back with
+ *   the one for display 0: equal addresses mean "one contiguous region", and it
+ *   then mmaps at yres*stride, which is where the second buffer is. Returning a
+ *   different address here would make it treat the two as separate regions and
+ *   mmap at offset zero - the same buffer twice.
+ *
+ ****************************************************************************/
+
 static int evb7_fb_getplaneinfo(struct fb_vtable_s *vtable, int planeno,
                                 struct fb_planeinfo_s *pinfo)
 {
+  uint8_t display;
+
   if (vtable == NULL || pinfo == NULL || planeno != 0)
     {
       return -EINVAL;
     }
 
+  display = pinfo->display;
   memcpy(pinfo, &g_planeinfo, sizeof(*pinfo));
+  pinfo->display = display;
   return OK;
 }
 
 /****************************************************************************
- * Name: evb7_fb_pandisplay / evb7_fb_updatearea
+ * Name: evb7_fb_updatearea
  *
  * Description:
- *   Both mean "the application has finished drawing", and both do the same
- *   thing here.
+ *   "These rows are drawn." Get them out of the cache.
  *
- *   Two hooks rather than one because applications use one or the other and
- *   there is no way to know which: the framebuffer example pans, while the NX
- *   and LVGL paths issue FBIO_UPDATE. Supporting only one of them would leave
- *   the other drawing into memory that is never announced - a display that
- *   quietly never updates, which is a poor failure to debug.
+ *   Publishing happens here only when the rows are in the buffer already on
+ *   screen, which is what a single-buffered application does - it draws into
+ *   the visible frame and expects it to appear. A double-buffered one draws
+ *   into the other buffer and follows up with FBIOPAN_DISPLAY, and publishing
+ *   at this point would put a half-drawn frame on the panel.
  *
- *   The area argument is ignored: the notification carries a whole buffer, so
- *   there is nothing useful to do with a partial rectangle until the protocol
- *   grows a damage region.
+ *   Distinguishing the two by which buffer was touched, rather than by a
+ *   configuration flag, means both work with no knowledge of who is calling.
  *
  ****************************************************************************/
-
-/****************************************************************************
- * Name: evb7_fb_copyrows
- *
- * Description:
- *   Copy a band of rows into the shared area and announce the frame.
- *
- *   Rows rather than rectangles: a row is contiguous, so a band of them is a
- *   single memcpy, while a rectangle would be one short copy per row. Copying
- *   the few untouched pixels either side of the damaged area is cheaper than
- *   paying per-row call overhead for the privilege of skipping them.
- *
- *   Copying only part of the buffer is safe because the shared buffer keeps its
- *   previous contents - the rows outside the band still hold what was published
- *   last time, which is what the host is showing.
- *
- ****************************************************************************/
-
-static void evb7_fb_copyrows(unsigned int y, unsigned int h)
-{
-  size_t offset;
-  size_t len;
-  clock_t start;
-
-  if (y >= AMP_SHM_HEIGHT)
-    {
-      return;
-    }
-
-  if (h > AMP_SHM_HEIGHT - y)
-    {
-      h = AMP_SHM_HEIGHT - y;
-    }
-
-  offset = (size_t)y * AMP_SHM_STRIDE;
-  len    = (size_t)h * AMP_SHM_STRIDE;
-
-  start = clock_systime_ticks();
-
-  memcpy(g_shmem + offset, g_fbmem + offset, len);
-
-  /* How much is being redrawn, and what the handover costs.
-   *
-   * The host side can measure its own work and the gap between frames, but it
-   * cannot see how much of the screen each frame actually touched - and that is
-   * the number which separates "the toolkit is redrawing everything" from "the
-   * toolkit is redrawing a little and taking a long time over it". Averaged over
-   * a couple of seconds because the tick here is only a millisecond and a copy
-   * is a few of them.
-   */
-
-  g_stats.flushes++;
-  g_stats.rows += h;
-  g_stats.copy_ticks += clock_systime_ticks() - start;
-
-  if (h > g_stats.max_rows)
-    {
-      g_stats.max_rows = h;
-    }
-
-  if (clock_systime_ticks() - g_stats.reported >= MSEC2TICK(2000))
-    {
-      syslog(LOG_INFO,
-             "[AMP] fb %lu flush(es): %lu rows avg (max %lu of %u), "
-             "copy %lu ms total, %lu flip(s)\n",
-             (unsigned long)g_stats.flushes,
-             (unsigned long)(g_stats.rows / g_stats.flushes),
-             (unsigned long)g_stats.max_rows, AMP_SHM_HEIGHT,
-             (unsigned long)TICK2MSEC(g_stats.copy_ticks),
-             evb7_amp_vop_flips());
-
-      g_stats.reported   = clock_systime_ticks();
-      g_stats.flushes    = 0;
-      g_stats.rows       = 0;
-      g_stats.max_rows   = 0;
-      g_stats.copy_ticks = 0;
-    }
-
-  /* Two ways for the frame to reach the panel, and only one of them is used.
-   *
-   * The original one hands the buffer to Linux, which scales it onto its own
-   * plane. The other points the VOP's Esmart3 window straight at this buffer
-   * and commits it, which is what the dts reserved that window for.
-   *
-   * The takeover is triggered by the first frame rather than at bringup,
-   * because Linux's modeset on vp3 - which happens when the host program opens
-   * the card, long after this core has booted - disables every window in that
-   * port's mask, this one included. Doing it here means the takeover cannot
-   * precede the modeset. It also does not need to: evb7_amp_vop_flip()
-   * reprograms the whole window every frame, so a modeset that happens later
-   * costs one frame rather than the display.
-   *
-   * Once the window is ours, Linux is not told about the frame at all. That
-   * drops the rpmsg round trip and the checksum, and it makes the two outcomes
-   * distinguishable on the panel: if the window works the picture follows this
-   * core, and if it does not the picture freezes on the last frame Linux
-   * published. A takeover that silently changed nothing would be the hard case
-   * to diagnose.
-   *
-   * Touch is unaffected - the host program forwards input on its own poll
-   * wakeups, not off the back of a frame.
-   */
-
-  if (!evb7_amp_vop_active())
-    {
-      evb7_amp_vop_takeover();
-    }
-  else
-    {
-      evb7_amp_vop_flip((uintptr_t)g_shmem);
-    }
-}
-
-static int evb7_fb_pandisplay(struct fb_vtable_s *vtable,
-                              struct fb_planeinfo_s *pinfo)
-{
-  /* No damage information, so the whole frame has to go. */
-
-  evb7_fb_copyrows(0, AMP_SHM_HEIGHT);
-  return OK;
-}
 
 #ifdef CONFIG_FB_UPDATE
 static int evb7_fb_updatearea(struct fb_vtable_s *vtable,
                               const struct fb_area_s *area)
 {
-  if (area == NULL)
+  unsigned int y = 0;
+  unsigned int h = AMP_FB_NBUFFERS * AMP_FB_HEIGHT;
+  unsigned int buf;
+
+  /* Time spent outside this driver since the last frame was published. */
+
+  if (g_last_pan != 0)
     {
-      evb7_fb_copyrows(0, AMP_SHM_HEIGHT);
-    }
-  else
-    {
-      evb7_fb_copyrows(area->y, area->h);
+      g_stats.lvgl += (clock_t)(up_perf_gettime() - g_last_pan);
+      g_last_pan = 0;
     }
 
+  if (area != NULL)
+    {
+      y = area->y;
+      h = area->h;
+    }
+
+  evb7_fb_clean_rows(y, h);
+
+  g_stats.updates++;
+  g_stats.rows += h;
+  if (h > g_stats.max_rows)
+    {
+      g_stats.max_rows = h;
+    }
+
+  buf = y >= AMP_FB_HEIGHT ? 1 : 0;
+  if (buf == g_active_buf && evb7_amp_vop_active())
+    {
+      evb7_amp_vop_flip(evb7_fb_bufaddr(buf));
+    }
+
+  evb7_fb_report();
   return OK;
 }
 #endif
+
+/****************************************************************************
+ * Name: evb7_fb_pandisplay
+ *
+ * Description:
+ *   "Show this buffer." Point the window at it and wait for the hardware to
+ *   switch, then release one slot of the framework's pan queue.
+ *
+ *   The whole buffer is cleaned rather than just what updatearea reported,
+ *   because an application is entitled to pan without ever calling
+ *   FBIO_UPDATE - the framebuffer example does exactly that. Cleaning lines
+ *   that are already clean costs a lookup and no bus traffic, so the safe
+ *   version is also close to the cheap one.
+ *
+ *   The wait is what makes the second buffer worth having: it returns once the
+ *   VOP is reading this buffer, which is the point at which the other one is
+ *   free to draw into. Without it the caller would immediately start drawing
+ *   over the frame still being scanned.
+ *
+ *   fb_remove_paninfo() releases the queue slot that fb.c is about to fill for
+ *   this pan. Nothing else consumes that queue here - there is no vsync
+ *   interrupt to hang it off - and a queue that fills up stops poll() reporting
+ *   POLLOUT, which is what LVGL waits on before rendering. So skipping this
+ *   would stall the display after two frames.
+ *
+ ****************************************************************************/
+
+static int evb7_fb_pandisplay(struct fb_vtable_s *vtable,
+                              struct fb_planeinfo_s *pinfo)
+{
+  unsigned int buf = 0;
+  uintptr_t    phys;
+  clock_t      t0;
+  clock_t      now;
+
+  if (pinfo != NULL && pinfo->yoffset >= AMP_FB_HEIGHT)
+    {
+      buf = 1;
+    }
+
+  phys = evb7_fb_bufaddr(buf);
+
+  evb7_fb_clean_rows(buf * AMP_FB_HEIGHT, AMP_FB_HEIGHT);
+
+  /* First frame of all: bring the window up rather than just retargeting it.
+   * The takeover cannot happen at bringup, because Linux's modeset on this
+   * video port disables every window in its mask and that happens long after
+   * this core has booted. See evb7_amp_vop_takeover().
+   */
+
+  if (!evb7_amp_vop_active())
+    {
+      evb7_amp_vop_takeover(phys);
+    }
+  else
+    {
+      evb7_amp_vop_flip(phys);
+    }
+
+  t0 = up_perf_gettime();
+  evb7_amp_vop_wait_latch(phys);
+  now = up_perf_gettime();
+  g_stats.wait += (clock_t)(now - t0);
+
+  /* Frame interval, measured pan to pan - the only number here that is a frame
+   * rate rather than a cost.
+   */
+
+  if (g_prev_pan != 0)
+    {
+      g_stats.frame += (clock_t)(now - g_prev_pan);
+    }
+
+  g_prev_pan   = now;
+  g_last_pan   = now;
+  g_active_buf = buf;
+  g_stats.pans++;
+
+  if (vtable != NULL)
+    {
+      fb_remove_paninfo(vtable, FB_NO_OVERLAY);
+    }
+
+  evb7_fb_report();
+  return OK;
+}
 
 /****************************************************************************
  * Public Functions
@@ -355,16 +611,39 @@ static int evb7_fb_updatearea(struct fb_vtable_s *vtable,
  * Name: up_fbinitialize
  *
  * Description:
- *   Initialise the framebuffer video hardware associated with the display.
- *   There is no hardware to initialise here - the memory is already mapped and
- *   the shared-frame layer is brought up before this - so this only has to be
- *   safe to call more than once, which the framework requires.
+ *   Allocate the two framebuffers.
+ *
+ *   No hardware is touched here. The window this core drives cannot be
+ *   programmed yet: Linux has not brought the video port up at this point in
+ *   the boot, and its modeset when it does would undo anything set now. That
+ *   happens on the first frame instead - see evb7_fb_pandisplay().
+ *
+ *   The framework may call this more than once, so it has to be idempotent.
  *
  ****************************************************************************/
 
 int up_fbinitialize(int display)
 {
-  return display == 0 ? OK : -EINVAL;
+  if (display != 0)
+    {
+      return -EINVAL;
+    }
+
+  if (g_fbmem == NULL)
+    {
+      g_fbmem = kmm_memalign(AMP_FB_ALIGN,
+                             AMP_FB_NBUFFERS * AMP_FB_BUFSIZE);
+      if (g_fbmem == NULL)
+        {
+          syslog(LOG_ERR, "[AMP] fb: no memory for %u buffers of %u bytes\n",
+                 AMP_FB_NBUFFERS, AMP_FB_BUFSIZE);
+          return -ENOMEM;
+        }
+
+      g_planeinfo.fbmem = g_fbmem;
+    }
+
+  return OK;
 }
 
 /****************************************************************************
@@ -393,7 +672,7 @@ void up_fbuninitialize(int display)
  * Name: evb7_amp_fb_init
  *
  * Description:
- *   Register /dev/fb0 on top of the shared frame area.
+ *   Register /dev/fb0 on top of this core's two framebuffers.
  *
  ****************************************************************************/
 
@@ -402,10 +681,11 @@ int evb7_amp_fb_init(void)
   int ret = fb_register(0, 0);
 
   syslog(LOG_INFO,
-         "[AMP] fb %s: %ux%u %ubpp, draw at %p -> share at %p\n",
+         "[AMP] fb %s: %ux%u %ubpp x%u at 0x%08lx/0x%08lx, scanned out here\n",
          ret >= 0 ? "/dev/fb0 registered" : "registration FAILED",
-         AMP_SHM_WIDTH, AMP_SHM_HEIGHT, AMP_SHM_BPP * 8,
-         g_planeinfo.fbmem, g_shmem);
+         AMP_FB_WIDTH, AMP_FB_HEIGHT, 32, AMP_FB_NBUFFERS,
+         (unsigned long)evb7_fb_bufaddr(0),
+         (unsigned long)evb7_fb_bufaddr(1));
 
   return ret;
 }

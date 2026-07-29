@@ -93,10 +93,11 @@
  * addresses. This core's mapping is flat, so a pointer into the shared area is
  * already the physical address the VOP needs.
  *
- * The buffer being scanned out is the shared area, which is mapped
- * MT_NORMAL_NC (rk3588_boot.c). Non-cacheable means there is nothing to clean
- * before the VOP reads it; the framebuffer flush that memcpy'd into it has
- * already reached DRAM.
+ * The caller is responsible for the frame having reached DRAM before the
+ * address is committed. The framebuffer this drives lives in ordinary cacheable
+ * RAM (see evb7_amp_fb.c for why), so that means a cache clean; this file does
+ * not do it, because it does not know which rows were touched and cleaning the
+ * whole buffer on every flip would undo the point of tracking damage.
  */
 
 /****************************************************************************
@@ -218,12 +219,18 @@
 #define PANEL_WIDTH             1080
 #define PANEL_HEIGHT            1920
 
+/* Two frames at 60Hz, in 1ms steps. See evb7_amp_vop_wait_latch(). */
+
+#define VOP2_LATCH_POLL_US      1000
+#define VOP2_LATCH_POLLS        40
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
 static bool g_taken_over;
 static unsigned long g_flips;
+static unsigned long g_latch_timeouts;
 
 /****************************************************************************
  * Private Functions
@@ -367,6 +374,58 @@ void evb7_amp_vop_flip(uintptr_t phys)
 }
 
 /****************************************************************************
+ * Name: evb7_amp_vop_wait_latch
+ *
+ * Description:
+ *   Wait until the VOP is actually scanning out the given frame.
+ *
+ *   This is what makes double buffering worth having. Writing the address and
+ *   the commit bit only queues the change; the hardware promotes it at the next
+ *   vertical blank. Until that happens the previous buffer is still being read,
+ *   so an application that starts drawing into it straight away is drawing into
+ *   the frame on screen - the tearing double buffering was supposed to remove.
+ *
+ *   There is no vsync interrupt to wait on: the VOP's interrupt belongs to
+ *   Linux and is shared with the IOMMU's, so it cannot be handed to this core
+ *   while Linux owns the other three video ports. What is available is the
+ *   address register itself. A read returns the live copy, so it reads back as
+ *   the new address only once the promotion has happened - which makes it a
+ *   direct, if polled, vsync.
+ *
+ *   The timeout matters more than the polling interval. If Linux has taken the
+ *   video port down, nothing will ever latch, and a driver that waits forever
+ *   for that turns a blank screen into a hung application. Two frames is long
+ *   enough that a healthy pipeline never reaches it.
+ *
+ * Input Parameters:
+ *   phys - the address passed to the matching evb7_amp_vop_flip().
+ *
+ * Returned Value:
+ *   true if the frame is on screen, false if it timed out - in which case the
+ *   caller should carry on rather than retry, because the likely cause is that
+ *   there is nothing scanning at all.
+ *
+ ****************************************************************************/
+
+bool evb7_amp_vop_wait_latch(uintptr_t phys)
+{
+  int i;
+
+  for (i = 0; i < VOP2_LATCH_POLLS; i++)
+    {
+      if (getreg32(ESMART_R0_YRGB_MST) == (uint32_t)phys)
+        {
+          return true;
+        }
+
+      usleep(VOP2_LATCH_POLL_US);
+    }
+
+  g_latch_timeouts++;
+  return false;
+}
+
+/****************************************************************************
  * Name: evb7_amp_vop_takeover
  *
  * Description:
@@ -379,16 +438,16 @@ void evb7_amp_vop_flip(uintptr_t phys)
  *   one. So the takeover has to be requested after the panel is up, not
  *   before.
  *
+ * Input Parameters:
+ *   phys - physical address of the first frame to show.
+ *
  * Returned Value:
  *   OK, or -EALREADY if the takeover has already happened.
  *
  ****************************************************************************/
 
-int evb7_amp_vop_takeover(void)
+int evb7_amp_vop_takeover(uintptr_t phys)
 {
-  uintptr_t phys = (uintptr_t)AMP_SHM_BASE +
-                   AMP_SHM_BUF_OFFSET(AMP_SHM_FB_INDEX);
-
   if (g_taken_over)
     {
       return -EALREADY;
@@ -452,10 +511,22 @@ bool evb7_amp_vop_active(void)
 }
 
 /****************************************************************************
- * Name: evb7_amp_vop_flips
+ * Name: evb7_amp_vop_flips / evb7_amp_vop_latch_timeouts
+ *
+ * Description:
+ *   Frames committed, and how many of them were never seen to reach the
+ *   screen. The second number is the interesting one: a non-zero count means
+ *   the pipeline is not actually synchronised to the panel, so double buffering
+ *   is not protecting against tearing even though it looks like it should be.
+ *
  ****************************************************************************/
 
 unsigned long evb7_amp_vop_flips(void)
 {
   return g_flips;
+}
+
+unsigned long evb7_amp_vop_latch_timeouts(void)
+{
+  return g_latch_timeouts;
 }
