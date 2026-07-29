@@ -108,6 +108,21 @@ extern void exception_direct(void);
  * Note that the [ ... ] designated initializer is a GCC extension.
  */
 
+/* Some NXP boot ROMs (e.g. LPC55xx, MCX Nxxx) interpret the reserved
+ * Cortex-M vector-table slots at offsets 0x20, 0x24, 0x28 and 0x34 (vector
+ * indices 8, 9, 10 and 13) as an image header (image type, image length,
+ * ...).  When booting a plain (unsigned) image directly from internal flash,
+ * these slots must be zero or the ROM rejects the image and falls back to
+ * ISP mode.  These vectors are never taken by the hardware, so forcing them
+ * to zero has no functional effect on NuttX.
+ */
+
+#ifdef CONFIG_ARMV8M_NXP_BOOTROM_HEADER
+#  define ARMV8M_RESERVED_VECTOR 0
+#else
+#  define ARMV8M_RESERVED_VECTOR &exception_common
+#endif
+
 const void * const _vectors[] locate_data(".vectors")
                               aligned_data(VECTAB_ALIGN) =
 {
@@ -119,9 +134,16 @@ const void * const _vectors[] locate_data(".vectors")
 
   start,
 
-  /* Vectors 2 - n point directly at the generic handler */
+  /* Vectors 2 - n point directly at the generic handler, except for the
+   * architecturally reserved slots (indices 8, 9, 10 and 13) which may be
+   * required to be zero by some NXP boot ROMs (see above).
+   */
 
-  [2 ... NVIC_IRQ_PENDSV] = &exception_common,
+  [2 ... 7]               = &exception_common,
+  [8 ... 10]              = ARMV8M_RESERVED_VECTOR,
+  [11 ... 12]             = &exception_common,
+  [13]                    = ARMV8M_RESERVED_VECTOR,
+  [NVIC_IRQ_PENDSV]       = &exception_common,
   [(NVIC_IRQ_PENDSV + 1) ... (15 + ARM_PERIPHERAL_INTERRUPTS)]
                           = &exception_direct
 };

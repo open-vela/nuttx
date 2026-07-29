@@ -1,0 +1,664 @@
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_MCX_NXXX
+
+menu "MCX NXXx Chip Selection"
+
+config ARCH_CHIP_N947
+	bool "MCXN947 Processor"
+	default y
+	select ARCH_HAVE_RESET
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_NXP_BOOTROM_HEADER
+
+endmenu # "MCX NXXx Chip Selection"
+
+menu "NXXX Peripheral Selection"
+
+config NXXX_GPIO_IRQ
+	bool "GPIO Interrupt Support"
+	default y
+
+config N947_EDMA
+	bool "eDMA support"
+	default n
+	select ARCH_DMA
+	---help---
+		Enable the MCX Nxxx eDMA driver.  This only provides the
+		generic DMA channel allocator/programming layer; peripherals
+		still need to opt in to using DMA.
+
+config N947_EDMA_NTCD
+	int
+	default 1
+	depends on N947_EDMA
+	---help---
+		Number of hardware TCD slots exposed by this initial driver.
+		Scatter/gather TCD pooling is not enabled yet, so this remains
+		at one descriptor.
+
+config N947_EDMA_ELINK
+	bool
+	default n
+	depends on N947_EDMA
+	---help---
+		Channel linking is not enabled in the initial MCX Nxxx eDMA
+		driver.
+
+config N947_EDMA_SELFTEST
+	bool "Run eDMA self-test at board bring-up"
+	default n
+	depends on N947_EDMA
+	---help---
+		Run a short software-triggered memory-to-memory transfer on each
+		MCX Nxxx eDMA controller from board late bring-up.  This is meant
+		for BSP validation only and is disabled by default.
+
+config N947_SAI
+	bool
+	default n
+	select I2S
+
+config N947_SAI_MAXINFLIGHT
+	int "Maximum queued buffers per SAI direction"
+	default 4
+	range 2 16
+	depends on N947_SAI
+	---help---
+		Number of small buffer descriptors preallocated for each SAI
+		direction.  Audio payload memory is owned by the upper half and is
+		not duplicated.  Four descriptors keeps the static SRAM cost low
+		while allowing capture and playback to be pipelined.
+
+config N947_SAI1
+	bool "SAI1 full-duplex I2S support"
+	default n
+	depends on ARCH_CHIP_N947
+	select N947_SAI
+	---help---
+		Enable the MCXN947 SAI1 lower-half driver.  SAI1 TX is the clock
+		controller and RX is synchronous with TX, allowing an I2S speaker
+		and digital microphone to share BCLK and frame sync.  The initial
+		driver uses FIFO interrupts and standard NuttX I2S buffers.
+
+config N947_SAI_TXDMA
+	bool "SAI transmit eDMA support"
+	default n
+	depends on N947_SAI1 && N947_EDMA
+	---help---
+		Use the MCX Nxxx eDMA controller to feed the SAI transmit FIFO.
+		16-bit application PCM is expanded in a small reusable staging
+		buffer to the two 32-bit physical I2S slots used by SAI1.  This
+		removes the high-rate transmit FIFO interrupt load while leaving
+		receive operation and the standard NuttX I2S API unchanged.
+
+config N947_LPADC
+	bool "LPADC support"
+	default n
+	select ANALOG
+	select ADC
+	---help---
+		Enable the MCX Nxxx LPADC lower-half driver.  The initial driver
+		supports software-triggered one-shot conversions through the
+		standard NuttX ADC upper-half.
+
+menu "LPADC Peripherals"
+
+menuconfig N947_LPADC0
+	bool "LPADC0"
+	default n
+	select N947_LPADC
+
+if N947_LPADC0
+
+config N947_LPADC0_CHANNEL
+	int "LPADC0 default board channel"
+	default 0
+	range 0 31
+	---help---
+		Default channel registered by the FRDM-MCXN947 board as /dev/adc0.
+		Change this to match the analog input pin being tested.
+
+endif # N947_LPADC0
+
+menuconfig N947_LPADC1
+	bool "LPADC1"
+	default n
+	select N947_LPADC
+
+if N947_LPADC1
+
+config N947_LPADC1_CHANNEL
+	int "LPADC1 default board channel"
+	default 0
+	range 0 31
+	---help---
+		Default channel for boards that register LPADC1.
+
+endif # N947_LPADC1
+
+endmenu # LPADC Peripherals
+
+config N947_CTIMER_PWM
+	bool "CTIMER PWM support"
+	default n
+	select PWM
+	---help---
+		Enable the MCX Nxxx CTIMER PWM lower-half driver.  The driver
+		uses one match register as the period/reset source and one match
+		output as the PWM signal, then exposes the timer through the
+		standard NuttX PWM upper-half.
+
+menu "CTIMER PWM Peripherals"
+	depends on N947_CTIMER_PWM
+
+config N947_CTIMER_PWM_PERIOD_MATCH
+	int "CTIMER period match channel"
+	default 3
+	range 0 3
+	---help---
+		Match channel used to define the PWM period.  The output match
+		channel selected below must be different from this value.
+
+menuconfig N947_CTIMER0_PWM
+	bool "CTIMER0 PWM"
+	default n
+
+if N947_CTIMER0_PWM
+
+config N947_CTIMER0_PWM_MATCH
+	int "CTIMER0 PWM output match channel"
+	default 0
+	range 0 3
+
+endif # N947_CTIMER0_PWM
+
+menuconfig N947_CTIMER1_PWM
+	bool "CTIMER1 PWM"
+	default n
+
+if N947_CTIMER1_PWM
+
+config N947_CTIMER1_PWM_MATCH
+	int "CTIMER1 PWM output match channel"
+	default 0
+	range 0 3
+
+endif # N947_CTIMER1_PWM
+
+menuconfig N947_CTIMER2_PWM
+	bool "CTIMER2 PWM"
+	default n
+
+if N947_CTIMER2_PWM
+
+config N947_CTIMER2_PWM_MATCH
+	int "CTIMER2 PWM output match channel"
+	default 0
+	range 0 3
+
+endif # N947_CTIMER2_PWM
+
+menuconfig N947_CTIMER3_PWM
+	bool "CTIMER3 PWM"
+	default n
+
+if N947_CTIMER3_PWM
+
+config N947_CTIMER3_PWM_MATCH
+	int "CTIMER3 PWM output match channel"
+	default 0
+	range 0 3
+
+endif # N947_CTIMER3_PWM
+
+menuconfig N947_CTIMER4_PWM
+	bool "CTIMER4 PWM"
+	default n
+
+if N947_CTIMER4_PWM
+
+config N947_CTIMER4_PWM_MATCH
+	int "CTIMER4 PWM output match channel"
+	default 0
+	range 0 3
+
+endif # N947_CTIMER4_PWM
+
+endmenu # CTIMER PWM Peripherals
+
+config NXXX_LPI2C
+	bool "LPI2C support"
+	default n
+
+menu "LPUART"
+
+config NXXX_LPUART
+	bool
+	default n
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config NXXX_LPUART1
+	bool "LPUART1"
+	default n
+	select NXXX_LPUART
+	select LPUART1_SERIALDRIVER
+
+config NXXX_LPUART2
+	bool "LPUART2"
+	default n
+	select NXXX_LPUART
+	select LPUART2_SERIALDRIVER
+
+config NXXX_LPUART3
+	bool "LPUART3"
+	default n
+	select NXXX_LPUART
+	select LPUART3_SERIALDRIVER
+
+config NXXX_LPUART4
+	bool "LPUART4"
+	default n
+	select NXXX_LPUART
+	select LPUART4_SERIALDRIVER
+
+config NXXX_LPUART5
+	bool "LPUART5"
+	default n
+	select NXXX_LPUART
+	select LPUART5_SERIALDRIVER
+
+config NXXX_LPUART6
+	bool "LPUART6"
+	default n
+	select NXXX_LPUART
+	select LPUART6_SERIALDRIVER
+
+config NXXX_LPUART7
+	bool "LPUART7"
+	default n
+	select NXXX_LPUART
+	select LPUART7_SERIALDRIVER
+
+config NXXX_LPUART8
+	bool "LPUART8"
+	default n
+	select NXXX_LPUART
+	select LPUART8_SERIALDRIVER
+
+config NXXX_LPUART9
+	bool "LPUART9"
+	default n
+	select NXXX_LPUART
+	select LPUART9_SERIALDRIVER
+
+menu "LPUART Configuration"
+	depends on NXXX_LPUART
+
+config NXXX_LPUART_INVERT
+	bool "Signal Invert Support"
+	default n
+
+config NXXX_LPUART_SINGLEWIRE
+	bool "Signal Wire Support"
+	default n
+
+config NXXX_SERIAL_RXDMA_BUFFER_SIZE
+	int "RX DMA buffer size"
+	default 32
+	depends on LPUART1_RXDMA || LPUART2_RXDMA || LPUART3_RXDMA || LPUART4_RXDMA || \
+               LPUART5_RXDMA || LPUART6_RXDMA || LPUART7_RXDMA || LPUART8_RXDMA || \
+               LPUART9_RXDMA
+
+	---help---
+		The DMA buffer size when using RX DMA to emulate a FIFO.
+
+		When streaming data, the generic serial layer will be called
+		every time the FIFO receives half this number of bytes.
+
+		Value given here will be rounded up to next multiple of 32 bytes.
+
+endmenu # LPUART Configuration
+
+endmenu # LPUART
+
+menu "LPI2C Peripherals"
+
+menuconfig NXXX_LPI2C0
+	bool "LPI2C0"
+	default n
+	select NXXX_LPI2C
+
+if NXXX_LPI2C0
+
+config NXXX_LPI2C0_BUSYIDLE
+	int "Bus idle timeout period in clock cycles"
+	default 0
+
+config NXXX_LPI2C0_FILTSCL
+	int "I2C master digital glitch filters for SCL input in clock cycles"
+	default 0
+
+config NXXX_LPI2C0_FILTSDA
+	int "I2C master digital glitch filters for SDA input in clock cycles"
+	default 0
+
+endif # NXXX_LPI2C0
+
+menuconfig NXXX_LPI2C1
+	bool "LPI2C1"
+	default n
+	select NXXX_LPI2C
+
+if NXXX_LPI2C1
+
+config NXXX_LPI2C1_BUSYIDLE
+	int "Bus idle timeout period in clock cycles"
+	default 0
+
+config NXXX_LPI2C1_DMA
+	bool "Enable DMA for I2C1"
+	default n
+	depends on NXXX_LPI2C_DMA
+
+config NXXX_LPI2C1_FILTSCL
+	int "I2C master digital glitch filters for SCL input in clock cycles"
+	default 0
+
+config NXXX_LPI2C1_FILTSDA
+	int "I2C master digital glitch filters for SDA input in clock cycles"
+	default 0
+
+endif # NXXX_LPI2C1
+
+menuconfig NXXX_LPI2C2
+	bool "LPI2C2"
+	default n
+	select NXXX_LPI2C
+
+if NXXX_LPI2C2
+
+config NXXX_LPI2C2_BUSYIDLE
+	int "Bus idle timeout period in clock cycles"
+	default 0
+
+config NXXX_LPI2C2_DMA
+	bool "Enable DMA for I2C2"
+	default n
+	depends on NXXX_LPI2C_DMA
+
+config NXXX_LPI2C2_FILTSCL
+	int "I2C master digital glitch filters for SCL input in clock cycles"
+	default 0
+
+config NXXX_LPI2C2_FILTSDA
+	int "I2C master digital glitch filters for SDA input in clock cycles"
+	default 0
+
+endif # NXXX_LPI2C2
+
+menuconfig NXXX_LPI2C3
+	bool "LPI2C3"
+	default n
+	select NXXX_LPI2C
+
+if NXXX_LPI2C3
+
+config NXXX_LPI2C3_BUSYIDLE
+	int "Bus idle timeout period in clock cycles"
+	default 0
+
+config NXXX_LPI2C3_DMA
+	bool "Enable DMA for I2C3"
+	default n
+	depends on NXXX_LPI2C_DMA
+
+config NXXX_LPI2C3_FILTSCL
+	int "I2C master digital glitch filters for SCL input in clock cycles"
+	default 0
+
+config NXXX_LPI2C3_FILTSDA
+	int "I2C master digital glitch filters for SDA input in clock cycles"
+	default 0
+
+endif # NXXX_LPI2C3
+
+menuconfig NXXX_LPI2C4
+	bool "LPI2C4"
+	default n
+	select NXXX_LPI2C
+
+if NXXX_LPI2C4
+
+config NXXX_LPI2C4_BUSYIDLE
+	int "Bus idle timeout period in clock cycles"
+	default 0
+
+config NXXX_LPI2C4_DMA
+	bool "Enable DMA for I2C4"
+	default n
+	depends on NXXX_LPI2C_DMA
+
+config NXXX_LPI2C4_FILTSCL
+	int "I2C master digital glitch filters for SCL input in clock cycles"
+	default 0
+
+config NXXX_LPI2C4_FILTSDA
+	int "I2C master digital glitch filters for SDA input in clock cycles"
+	default 0
+
+endif # NXXX_LPI2C4
+
+menuconfig NXXX_LPI2C5
+	bool "LPI2C5"
+	default n
+	select NXXX_LPI2C
+
+if NXXX_LPI2C5
+
+config NXXX_LPI2C5_BUSYIDLE
+	int "Bus idle timeout period in clock cycles"
+	default 0
+
+config NXXX_LPI2C5_FILTSCL
+	int "I2C master digital glitch filters for SCL input in clock cycles"
+	default 0
+
+config NXXX_LPI2C5_FILTSDA
+	int "I2C master digital glitch filters for SDA input in clock cycles"
+	default 0
+
+endif # NXXX_LPI2C5
+
+menuconfig NXXX_LPI2C6
+	bool "LPI2C6"
+	default n
+	select NXXX_LPI2C
+
+if NXXX_LPI2C6
+
+config NXXX_LPI2C6_BUSYIDLE
+	int "Bus idle timeout period in clock cycles"
+	default 0
+
+config NXXX_LPI2C6_FILTSCL
+	int "I2C master digital glitch filters for SCL input in clock cycles"
+	default 0
+
+config NXXX_LPI2C6_FILTSDA
+	int "I2C master digital glitch filters for SDA input in clock cycles"
+	default 0
+
+endif # NXXX_LPI2C6
+
+menuconfig NXXX_LPI2C7
+	bool "LPI2C7"
+	default n
+	select NXXX_LPI2C
+
+if NXXX_LPI2C7
+
+config NXXX_LPI2C7_BUSYIDLE
+	int "Bus idle timeout period in clock cycles"
+	default 0
+
+config NXXX_LPI2C7_FILTSCL
+	int "I2C master digital glitch filters for SCL input in clock cycles"
+	default 0
+
+config NXXX_LPI2C7_FILTSDA
+	int "I2C master digital glitch filters for SDA input in clock cycles"
+	default 0
+
+endif # NXXX_LPI2C7
+
+endmenu # LPI2C Peripherals
+
+menu "LPI2C Configuration"
+	depends on NXXX_LPI2C
+
+config NXXX_LPI2C_DMA
+	bool "I2C DMA Support"
+	default n
+	depends on NXXX_LPI2C && N947_EDMA && !I2C_POLLED
+	---help---
+		This option enables the DMA for I2C transfers.
+		Note: The user can define CONFIG_I2C_DMAPRIO: a custom priority value
+		for the I2C dma streams, else the default priority level is set to
+		medium.
+
+config NXXX_LPI2C_DMA_MAXMSG
+	int "Maximum number messages that will be DMAed"
+	default 8
+	depends on NXXX_LPI2C_DMA
+	---help---
+		This option sets the number of mesg that can be in a transfer.
+		It is used to allocate space for the 16 bit LPI2C commands
+		that will be DMA-ed to the LPI2C device.
+
+config NXXX_LPI2C_DYNTIMEO
+	bool "Use dynamic timeouts"
+	default n
+	depends on NXXX_LPI2C
+
+config NXXX_LPI2C_DYNTIMEO_USECPERBYTE
+	int "Timeout Microseconds per Byte"
+	default 500
+	depends on NXXX_LPI2C_DYNTIMEO
+
+config NXXX_LPI2C_DYNTIMEO_STARTSTOP
+	int "Timeout for Start/Stop (Milliseconds)"
+	default 1000
+	depends on NXXX_LPI2C_DYNTIMEO
+
+config NXXX_LPI2C_TIMEOSEC
+	int "Timeout seconds"
+	default 0
+	depends on NXXX_LPI2C
+
+config NXXX_LPI2C_TIMEOMS
+	int "Timeout Milliseconds"
+	default 500
+	depends on NXXX_LPI2C && !NXXX_LPI2C_DYNTIMEO
+
+config NXXX_LPI2C_TIMEOTICKS
+	int "Timeout for Done and Stop (ticks)"
+	default 500
+	depends on NXXX_LPI2C && !NXXX_LPI2C_DYNTIMEO
+
+endmenu # LPI2C Configuration
+
+config N947_LPSPI
+	bool "LPSPI support"
+	default n
+	depends on SPI
+	---help---
+		Enable the MCX-Nxxx LP_FLEXCOMM LPSPI master driver.  The
+		current implementation is a polling master driver for normal
+		SPI transfers; DMA support can be added later.
+
+menu "LPSPI Peripherals"
+	depends on SPI
+
+menuconfig N947_LPSPI0
+	bool "LPSPI0"
+	default n
+	select N947_LPSPI
+
+menuconfig N947_LPSPI1
+	bool "LPSPI1"
+	default n
+	select N947_LPSPI
+
+menuconfig N947_LPSPI2
+	bool "LPSPI2"
+	default n
+	select N947_LPSPI
+
+menuconfig N947_LPSPI3
+	bool "LPSPI3"
+	default n
+	select N947_LPSPI
+
+menuconfig N947_LPSPI4
+	bool "LPSPI4"
+	default n
+	select N947_LPSPI
+
+menuconfig N947_LPSPI5
+	bool "LPSPI5"
+	default n
+	select N947_LPSPI
+
+menuconfig N947_LPSPI6
+	bool "LPSPI6"
+	default n
+	select N947_LPSPI
+
+menuconfig N947_LPSPI7
+	bool "LPSPI7"
+	default n
+	select N947_LPSPI
+
+endmenu # LPSPI Peripherals
+
+menuconfig N947_ENET
+	bool "ENET (Ethernet) support"
+	default n
+	depends on NET && ARCH_CHIP_N947
+	select NET_ETHERNET
+	select ARCH_HAVE_PHY
+	select ARCH_HAVE_NETDEV_STATISTICS
+	select NETDEV_TELNET if TELNETD
+	---help---
+		Enable the DWC EMAC Ethernet driver for MCXN947.  The board layer
+		provides the external PHY identity, address and status decoding.
+
+if N947_ENET
+
+config N947_ENET_NETHIFS
+	int "Number of ENET interfaces"
+	default 1
+
+config N947_ENET_NTXBUFFERS
+	int "Number of TX DMA buffers"
+	default 6
+
+config N947_ENET_NRXBUFFERS
+	int "Number of RX DMA buffers"
+	default 10
+
+config N947_ENET_BUFSIZE
+	int "Ethernet buffer size"
+	default 1520
+
+endif # N947_ENET
+
+endmenu # NXXX Peripheral Selection
+
+endif # ARCH_CHIP_MCX_NXXX

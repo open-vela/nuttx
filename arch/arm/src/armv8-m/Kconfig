@@ -155,3 +155,17 @@ config ARMV8M_CMSE
 	bool "ARMv8-M Security Extensions"
 	---help---
 		Enable ARMv8-M Security Extensions.
+
+config ARMV8M_NXP_BOOTROM_HEADER
+	bool
+	default n
+	---help---
+		Some NXP boot ROMs (e.g. LPC55xx, MCX Nxxx) interpret the reserved
+		Cortex-M vector-table slots at offsets 0x20, 0x24, 0x28 and 0x34 as
+		an image header (image type, image length, ...).  When booting a
+		plain (unsigned) image directly from internal flash these slots must
+		be zero, otherwise the ROM rejects the image and drops into ISP mode.
+
+		Select this option to force those reserved vector slots to zero.  The
+		slots are never used as exception vectors by the hardware, so this
+		has no functional effect on NuttX.
