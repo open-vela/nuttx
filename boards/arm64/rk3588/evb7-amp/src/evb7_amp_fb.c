@@ -384,7 +384,20 @@ static void evb7_fb_report(void)
       return;
     }
 
-  n = g_stats.pans ? g_stats.pans : 1;
+  /* Intervals, not frames: n frames have n-1 gaps between them, and the
+   * timestamps are cleared at the end of this function so nothing is carried
+   * across a reporting boundary.
+   *
+   * Getting this wrong made the numbers actively misleading rather than merely
+   * imprecise. Dividing a total that included one cross-boundary gap by the
+   * frame count reported 894ms of toolkit time in a period whose own frame
+   * interval was 20ms - a breakdown three times larger than the total it was
+   * breaking down. Two rounds of diagnosis were spent chasing a rendering cost
+   * that did not exist, until LVGL's own performance monitor put the same frame
+   * at 11ms.
+   */
+
+  n = g_stats.pans > 1 ? g_stats.pans - 1 : 1;
 
   /* Per frame, and split so that frame == lvgl + clean + wait + rounding.
    *
@@ -418,6 +431,15 @@ static void evb7_fb_report(void)
   g_stats.wait     = 0;
   g_stats.lvgl     = 0;
   g_stats.frame    = 0;
+
+  /* Start the next period's intervals from its own first frame. Without this
+   * the first gap measured is the one spanning this report - which includes
+   * however long the application was idle, or stalled, before it - and that one
+   * outlier is enough to dominate an average of a few dozen frames.
+   */
+
+  g_prev_pan = 0;
+  g_last_pan = 0;
 }
 
 static int evb7_fb_getvideoinfo(struct fb_vtable_s *vtable,
