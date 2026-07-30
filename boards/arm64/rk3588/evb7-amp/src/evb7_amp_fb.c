@@ -75,7 +75,14 @@
  *
  * Applications that only ever issue FBIO_UPDATE still work. The rows they touch
  * are in the buffer already on screen, and that is exactly the case update
- * publishes immediately.
+ * publishes immediately - including the very first one, where publishing means
+ * bringing the window up rather than retargeting it.
+ *
+ * That last clause was missing for a while, in the comment and in the code. The
+ * takeover lived only in the pan path, so this paragraph was true of every
+ * caller that had ever existed - all of them double-buffered - and false for the
+ * first single-buffered one, which drew a frame into memory nothing was scanning
+ * and showed a black panel while reporting thirty frames a second.
  */
 
 /****************************************************************************
@@ -534,9 +541,34 @@ static int evb7_fb_updatearea(struct fb_vtable_s *vtable,
     }
 
   buf = y >= AMP_FB_HEIGHT ? 1 : 0;
-  if (buf == g_active_buf && evb7_amp_vop_active())
+  if (buf == g_active_buf)
     {
-      evb7_amp_vop_flip(evb7_fb_bufaddr(buf));
+      if (evb7_amp_vop_active())
+        {
+          evb7_amp_vop_flip(evb7_fb_bufaddr(buf));
+        }
+      else
+        {
+          /* First update of all, from a caller that never pans.
+           *
+           * This branch is the difference between the paragraph above being
+           * true and being aspirational. Until it existed the takeover lived
+           * only in the pan path, so an application that drew into the visible
+           * buffer and asked for it to be shown - exactly the case that comment
+           * describes - got its rows cleaned out of the cache and nothing else:
+           * the window had never been programmed, so there was nothing scanning
+           * the memory it had just written. On screen that is indistinguishable
+           * from a dead framebuffer, and it stayed hidden because everything
+           * that had ever drawn here double-buffered and panned.
+           *
+           * Safe to do from here for the reason it is safe from the pan path:
+           * the takeover has to happen after Linux's modeset disables every
+           * window in its mask, and an application drawing is necessarily long
+           * after that.
+           */
+
+          evb7_amp_vop_takeover(evb7_fb_bufaddr(buf));
+        }
     }
 
   evb7_fb_report();

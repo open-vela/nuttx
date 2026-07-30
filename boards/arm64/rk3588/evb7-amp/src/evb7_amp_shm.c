@@ -139,6 +139,29 @@ static int amp_shm_ept_cb(struct rpmsg_endpoint *ept, void *data,
         break;
 #endif
 
+      case AMP_SHM_CMD_DETECT:
+
+        /* Counted, not read. Same reasoning as the camera notification and more
+         * so: a set of boxes is read by whoever is drawing, at the moment it
+         * draws, and doing it here would put a copy on the rpmsg receive path
+         * for a consumer that may not exist.
+         */
+
+        evb7_amp_det_notify((const struct amp_det_msg_s *)data);
+        break;
+
+      case AMP_SHM_CMD_CAMERA:
+
+        /* Only a wakeup. The frame is not read here: this runs on the rpmsg
+         * receive path, and copying half a megabyte on it would hold up every
+         * other message on the channel - touch included - for as long as the copy
+         * takes. The consumer reads the descriptor itself, which also means a
+         * notification arriving with no consumer running costs nothing.
+         */
+
+        evb7_amp_cam_notify((const struct amp_cam_msg_s *)data);
+        break;
+
       default:
 
         /* Includes the retired frame commands - 1, 2 and 3 - which is the point
@@ -258,6 +281,18 @@ int evb7_amp_shm_init(const char *cpuname)
   g_ctrl->magic = AMP_SHM_MAGIC;
 
   UP_DMB();
+
+  /* Arm the camera consumer before the channel exists, so a notification
+   * arriving the instant Linux starts streaming has somewhere to go. Failure is
+   * not fatal: touch is the older and more important half of this channel, and a
+   * camera that will not start should not take it down too.
+   */
+
+  ret = evb7_amp_cam_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "[AMP] cam init failed %d - camera disabled\n", ret);
+    }
 
   strlcpy(dev->cpuname, cpuname, sizeof(dev->cpuname));
 

@@ -25,7 +25,7 @@ include $(TOPDIR)/Make.defs
 CSRCS = evb7_amp_boardinit.c evb7_amp_bringup.c
 
 ifeq ($(CONFIG_RPTUN),y)
-CSRCS += evb7_amp_shm.c
+CSRCS += evb7_amp_shm.c evb7_amp_cam.c
 endif
 
 # The framebuffer sits on top of the shared area, so it needs both the fb
