@@ -104,15 +104,20 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* The geometry still comes from the shared-area header. Nothing is copied
- * there any more, but the host-side program reads those same fields out of the
- * control block, so one definition for both sides is still worth having.
+/* The geometry comes from the shared-area header even though no pixels go
+ * through there any more, because Linux reads the same numbers out of the
+ * control block to convert touch coordinates into this framebuffer's space. One
+ * definition keeps the forward and inverse scaling from drifting apart.
+ *
+ * The buffer size is derived here rather than taken from that header: how many
+ * buffers there are and how they are laid out is this driver's business now that
+ * nothing else looks at them.
  */
 
 #define AMP_FB_WIDTH    AMP_SHM_WIDTH
 #define AMP_FB_HEIGHT   AMP_SHM_HEIGHT
 #define AMP_FB_STRIDE   AMP_SHM_STRIDE
-#define AMP_FB_BUFSIZE  AMP_SHM_BUFSIZE
+#define AMP_FB_BUFSIZE  (AMP_FB_STRIDE * AMP_FB_HEIGHT)
 #define AMP_FB_NBUFFERS 2
 
 /* A page for the region as a whole. The buffers are read by the VOP's AXI

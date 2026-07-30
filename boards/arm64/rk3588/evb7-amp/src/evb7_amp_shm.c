@@ -20,16 +20,23 @@
  *
  ****************************************************************************/
 
-/* Shared-frame ground work: draw into memory Linux can read, and say so over
- * rpmsg.
+/* The rpmsg endpoint that carries touch, and the control block that tells Linux
+ * what coordinate system to send it in.
  *
- * This is the foundation under three separate things that all want the same
- * plumbing - putting a NuttX-drawn image on the panel, receiving camera frames
- * captured by Linux, and handing tensors to Linux for NPU inference. All three
- * are the same problem: bulk data through shared memory, with rpmsg carrying
- * only the notice. Building and proving that layer on its own keeps the
- * unverified parts down to one at a time, which is the opposite of how the
- * mailbox1 attempt went.
+ * This started out as the shared-frame layer: bulk pixels through the carveout
+ * with rpmsg carrying only the notice that a buffer was finished. That was the
+ * right shape while Linux composited what this core drew, and it is not what
+ * happens now - the VOP window is programmed from here and scans out of this
+ * core's own RAM, so no part of the display path comes through this file.
+ *
+ * What is left is the one direction that still needs a channel. This core cannot
+ * read the touch controller itself: it is on i2c5 with its interrupt in GPIO
+ * bank 3, and that bank's single interrupt line is shared with the Type-C power
+ * delivery controller's, so claiming it would break charging. Linux decodes the
+ * contacts and forwards them here.
+ *
+ * The frame protocol was deleted rather than left dormant. Two plausible-looking
+ * display paths with only one of them real is a worse state than one path.
  */
 
 /****************************************************************************
@@ -76,7 +83,6 @@ struct amp_shm_dev_s
   int                      announce_cnt;
   char                     cpuname[RPMSG_NAME_SIZE + 1];
   bool                     bound;
-  bool                     warned_unbound;
 };
 
 /****************************************************************************
@@ -85,8 +91,8 @@ struct amp_shm_dev_s
 
 static struct amp_shm_dev_s g_amp_shm;
 
-/* The control block and the buffers are just fixed addresses in the carveout.
- * The mapping is flat, so a physical address is also this core's pointer.
+/* The control block is just a fixed address in the carveout. The mapping is
+ * flat, so a physical address is also this core's pointer.
  */
 
 static struct amp_shm_ctrl_s * const g_ctrl =
@@ -97,203 +103,51 @@ static struct amp_shm_ctrl_s * const g_ctrl =
  ****************************************************************************/
 
 /****************************************************************************
- * Name: amp_shm_buffer
- ****************************************************************************/
-
-static uint32_t *amp_shm_buffer(unsigned int index)
-{
-  return (uint32_t *)(uintptr_t)(AMP_SHM_BASE + AMP_SHM_BUF_OFFSET(index));
-}
-
-/****************************************************************************
- * Name: amp_shm_render
- *
- * Description:
- *   Fill a buffer with a pattern derived from the frame number and return its
- *   checksum.
- *
- *   The pattern deliberately depends on x, y and the sequence number, so that a
- *   stale buffer, a buffer written at the wrong offset and a buffer read through
- *   the wrong mapping all produce a different sum rather than accidentally
- *   agreeing. Linux never needs to know the formula - it sums the same bytes
- *   through its own mapping, and the two sums either match or they do not.
- *
- ****************************************************************************/
-
-static uint32_t amp_shm_render(unsigned int index, uint32_t seq)
-{
-  uint32_t *buf = amp_shm_buffer(index);
-  uint32_t sum = 0;
-  unsigned int x;
-  unsigned int y;
-
-  for (y = 0; y < AMP_SHM_HEIGHT; y++)
-    {
-      for (x = 0; x < AMP_SHM_WIDTH; x++)
-        {
-          uint32_t pix = 0xff000000u |
-                         ((x + seq) & 0xff) << 16 |
-                         ((y + seq) & 0xff) << 8 |
-                         ((x ^ y) & 0xff);
-
-          *buf++ = pix;
-          sum += pix;
-        }
-    }
-
-  return sum;
-}
-
-/****************************************************************************
- * Name: amp_shm_announce
- *
- * Description:
- *   Describe a finished buffer in the control block and tell Linux about it.
- *
- ****************************************************************************/
-
-static void amp_shm_announce(unsigned int index, uint32_t sum)
-{
-  struct amp_shm_dev_s *dev = &g_amp_shm;
-  struct amp_shm_msg_s msg;
-  uint32_t seq = g_ctrl->frame_seq + 1;
-
-  /* Order matters here. The pixels have to be visible to the other core before
-   * anything advertises them, otherwise Linux can be told about a frame it has
-   * not fully received. The area is non-cacheable, so no flushing is needed,
-   * but the stores still have to be ordered against the ones below.
-   */
-
-  UP_DMB();
-
-  g_ctrl->ready_index = index;
-  g_ctrl->ready_sum   = sum;
-  g_ctrl->frame_seq   = seq;
-
-  UP_DMB();
-
-  /* Nothing to notify before the peer's address is known. The control block is
-   * still updated above, so a late reader (or the polling mode of the host tool)
-   * sees the frame without needing to have been listening.
-   *
-   * This used to return silently, and that cost a debugging round: an
-   * application drawing into /dev/fb0 published 36 frames that were never
-   * announced, and the only symptom was a black screen. Say it once instead -
-   * dropping notifications is worth a line in the log, and a peer that never
-   * says hello is a real misconfiguration rather than a transient state.
-   */
-
-  if (dev->ept.dest_addr == RPMSG_ADDR_ANY)
-    {
-      if (!dev->warned_unbound)
-        {
-          dev->warned_unbound = true;
-          syslog(LOG_WARNING,
-                 "[AMP] shm frame %lu not announced: peer address unknown. "
-                 "Linux has to send something first (see AMP_SHM_CMD_HELLO)\n",
-                 (unsigned long)seq);
-        }
-
-      return;
-    }
-
-  msg.cmd   = AMP_SHM_CMD_READY;
-  msg.seq   = seq;
-  msg.index = index;
-  msg.sum   = sum;
-
-  rpmsg_send(&dev->ept, &msg, sizeof(msg));
-}
-
-/****************************************************************************
- * Name: amp_shm_publish
- *
- * Description:
- *   Draw the next test frame, describe it, and tell Linux. This is the
- *   self-contained path used to verify the transport; the framebuffer path
- *   below publishes what an application drew instead.
- *
- ****************************************************************************/
-
-static void amp_shm_publish(struct amp_shm_dev_s *dev)
-{
-  uint32_t seq = g_ctrl->frame_seq + 1;
-  unsigned int index = seq % AMP_SHM_NBUFFERS;
-  uint32_t sum;
-
-  sum = amp_shm_render(index, seq);
-  amp_shm_announce(index, sum);
-
-  syslog(LOG_INFO, "[AMP] shm frame %lu -> buf%u sum 0x%08lx\n",
-         (unsigned long)seq, index, (unsigned long)sum);
-}
-
-/****************************************************************************
  * Name: amp_shm_ept_cb
  ****************************************************************************/
 
 static int amp_shm_ept_cb(struct rpmsg_endpoint *ept, void *data,
                           size_t len, uint32_t src, void *priv)
 {
-  struct amp_shm_dev_s *dev = ept->priv;
-  struct amp_shm_msg_s *msg = data;
+  struct amp_shm_hdr_s *hdr = data;
 
-  if (len < sizeof(*msg))
+  if (len < sizeof(*hdr))
     {
       syslog(LOG_WARNING, "[AMP] shm short message (%zu bytes)\n", len);
       return 0;
     }
 
-  switch (msg->cmd)
+  switch (hdr->cmd)
     {
       case AMP_SHM_CMD_HELLO:
 
-        /* Nothing to do with the contents. Receiving anything at all is the
-         * point: the rpmsg layer fills in the peer's address on the first
-         * inbound message, which is what makes it possible to notify frames.
+        /* Only a trace that the channel came up. It used to matter for its side
+         * effect - the rpmsg layer learns the peer's address from the first
+         * inbound message, and without one this core could not send frame
+         * notifications - but nothing is sent from here any more.
          */
 
-        syslog(LOG_INFO, "[AMP] shm peer at 0x%08lx, frames can be announced\n",
-               (unsigned long)src);
-        break;
-
-      case AMP_SHM_CMD_RENDER:
-        amp_shm_publish(dev);
+        syslog(LOG_INFO, "[AMP] shm peer at 0x%08lx\n", (unsigned long)src);
         break;
 
 #ifdef CONFIG_INPUT_TOUCHSCREEN
       case AMP_SHM_CMD_TOUCH:
 
-        /* Same endpoint, same 16-byte message, different view of it. Touch
-         * shares the channel with the frame signalling rather than getting its
-         * own because Linux's rpmsg_char binds one channel per announced name
-         * and lets one process open it, so a second channel would need a way to
-         * tell the two apart that is no more robust than a cmd field.
-         */
+        /* The same 16 bytes, seen in full rather than as just a header. */
 
         evb7_amp_touch_event((const struct amp_touch_msg_s *)data);
         break;
 #endif
 
-      case AMP_SHM_CMD_ACK:
+      default:
 
-        /* What Linux read back, checked against what was written. A mismatch
-         * here is the interesting outcome: it means the two cores disagree
-         * about the contents of the same physical memory, which points at the
-         * mapping or at ordering rather than at anything above.
+        /* Includes the retired frame commands - 1, 2 and 3 - which is the point
+         * of not reusing those numbers: a stale binary on the other side says so
+         * instead of being misread as touch.
          */
 
-        syslog(LOG_INFO,
-               "[AMP] shm ack frame %lu buf%lu sum 0x%08lx -> %s\n",
-               (unsigned long)msg->seq, (unsigned long)msg->index,
-               (unsigned long)msg->sum,
-               g_ctrl->ready_sum == 0 ? "no reference" :
-               msg->sum == g_ctrl->ready_sum ? "MATCH" : "MISMATCH");
-        break;
-
-      default:
         syslog(LOG_WARNING, "[AMP] shm unknown cmd %lu\n",
-               (unsigned long)msg->cmd);
+               (unsigned long)hdr->cmd);
         break;
     }
 
@@ -379,74 +233,25 @@ static void amp_shm_device_destroy(struct rpmsg_device *rdev, void *priv)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: evb7_amp_shm_flush
- *
- * Description:
- *   Publish whatever an application has drawn into the framebuffer buffer.
- *   Called from the framebuffer driver's flush hooks.
- *
- *   No checksum: a zero in ready_sum tells the host side not to expect one.
- *
- *   It used to compute one on every flush, and that turned out to be the wrong
- *   trade for a display path. Checksumming means reading the whole 2MB buffer
- *   back out of non-cacheable memory, and the host side then reads it a second
- *   time to compute its own - per frame. With an interactive toolkit driving
- *   this at its refresh rate the readback was a large part of the frame time,
- *   and a slow frame rate is not only a smoothness problem: the toolkit polls
- *   the touch device from the same timer, so slow frames drop input events.
- *
- *   The verification it provided has been done: three stages of frame-by-frame
- *   checksum agreement across this boundary. What remains available is the test
- *   pattern path, which still publishes a sum because it gets one for free while
- *   writing the pixels, so the transport can still be checked on demand.
- *
- ****************************************************************************/
-
-void evb7_amp_shm_flush(void)
-{
-  amp_shm_announce(AMP_SHM_FB_INDEX, 0);
-}
-
-/****************************************************************************
  * Name: evb7_amp_shm_init
  ****************************************************************************/
 
 int evb7_amp_shm_init(const char *cpuname)
 {
   struct amp_shm_dev_s *dev = &g_amp_shm;
-  unsigned int i;
   int ret;
 
-  /* Refuse to run if the geometry would not fit, rather than quietly writing
-   * past the carveout into whatever follows it.
-   */
-
-  if (AMP_SHM_BUF_OFFSET(AMP_SHM_NBUFFERS) > AMP_SHM_SIZE)
-    {
-      syslog(LOG_ERR, "[AMP] shm geometry needs %u bytes, area is %u\n",
-             (unsigned int)AMP_SHM_BUF_OFFSET(AMP_SHM_NBUFFERS),
-             (unsigned int)AMP_SHM_SIZE);
-      return -ENOSPC;
-    }
-
-  /* Publish the layout before the magic, so Linux cannot find the magic and
-   * read geometry that has not been written yet.
+  /* Publish the geometry before the magic, so Linux cannot find the magic and
+   * read fields that have not been written yet.
    */
 
   memset(g_ctrl, 0, sizeof(*g_ctrl));
 
-  g_ctrl->version  = AMP_SHM_VERSION;
-  g_ctrl->width    = AMP_SHM_WIDTH;
-  g_ctrl->height   = AMP_SHM_HEIGHT;
-  g_ctrl->stride   = AMP_SHM_STRIDE;
-  g_ctrl->bpp      = AMP_SHM_BPP;
-  g_ctrl->nbuffers = AMP_SHM_NBUFFERS;
-  g_ctrl->bufsize  = AMP_SHM_BUFSIZE;
-
-  for (i = 0; i < AMP_SHM_NBUFFERS; i++)
-    {
-      g_ctrl->bufoffset[i] = AMP_SHM_BUF_OFFSET(i);
-    }
+  g_ctrl->version = AMP_SHM_VERSION;
+  g_ctrl->width   = AMP_SHM_WIDTH;
+  g_ctrl->height  = AMP_SHM_HEIGHT;
+  g_ctrl->stride  = AMP_SHM_STRIDE;
+  g_ctrl->bpp     = AMP_SHM_BPP;
 
   UP_DMB();
 
@@ -468,11 +273,10 @@ int evb7_amp_shm_init(const char *cpuname)
     }
 
   syslog(LOG_INFO,
-         "[AMP] shm ready: %ux%u x%u bpp, %u buffers, ctrl at 0x%08x "
-         "(%u KB used)\n",
-         AMP_SHM_WIDTH, AMP_SHM_HEIGHT, AMP_SHM_BPP, AMP_SHM_NBUFFERS,
-         (unsigned int)(AMP_SHM_BASE + AMP_SHM_HDR_OFFSET),
-         (unsigned int)(AMP_SHM_BUF_OFFSET(AMP_SHM_NBUFFERS) / 1024));
+         "[AMP] shm ready: touch channel, geometry %ux%u x%u bpp, "
+         "ctrl at 0x%08x\n",
+         AMP_SHM_WIDTH, AMP_SHM_HEIGHT, AMP_SHM_BPP,
+         (unsigned int)(AMP_SHM_BASE + AMP_SHM_HDR_OFFSET));
 
   /* Read the geometry back through the same mapping. The first attempt at this
    * had the control block at offset 0, where three of its words were being
