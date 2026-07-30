@@ -34,6 +34,11 @@
  * ordinary applications, LVGL and NX included, work unmodified against
  * /dev/input0.
  *
+ * "The shape the framework expects" turned out to include a size invariant that
+ * is nowhere stated: maxpoint must equal the npoints every sample carries, or
+ * readers silently lose events. See the comment on AMP_TOUCH_MAXPOINT - having no
+ * hardware here does not exempt this driver from behaving like the ones that do.
+ *
  * The consequence worth knowing: touch depends on Linux being alive. If Linux
  * stops forwarding, this device simply goes quiet, and there is nothing here
  * that can tell the difference between "nobody is touching the screen" and
@@ -62,24 +67,46 @@
 
 #define AMP_TOUCH_PATH     "/dev/input0"
 
-/* Contacts the panel reports. The device tree gives max-touch-number = 5 for
- * this board's controller; the forwarder drops anything above this, so the
- * value only has to be no smaller than what Linux sends.
+/* One contact, and this has to equal what every sample actually carries.
+ *
+ * There is an unwritten contract in this framework: a reader may assume every
+ * sample is SIZEOF_TOUCH_SAMPLE_S(maxpoint) bytes. The upper half queues
+ * SIZEOF_TOUCH_SAMPLE_S(sample->npoints) bytes (touchscreen_upper.c:374), read()
+ * returns whatever is available (:237), and LVGL's backend compares the byte
+ * count against the maxpoint size for equality - discarding the data it has just
+ * consumed when they differ (lv_nuttx_touchscreen.c:281).
+ *
+ * Declaring 5 while reporting 1 therefore lost events rather than merely wasting
+ * space. A single-point sample is 32 bytes and maxpoint 5 asks for 128, so one,
+ * two or three queued contacts all read short and were thrown away; only when a
+ * fourth arrived did read() return 128 bytes, and then just the first sample in
+ * that buffer was parsed and the other 96 bytes dropped. Three of every four
+ * contacts never reached the toolkit. A tap survived because the press is first
+ * in the buffer; a swipe of thirty-odd moves arrived as eight or nine widely
+ * spaced points, which is not a swipe.
+ *
+ * Both in-tree drivers that set maxpoint keep the invariant: mouse_touch.c uses 1
+ * for both, and goldfish_events.c assigns touchsample->npoints =
+ * touchlower.maxpoint outright. Supporting more than one contact here means
+ * raising this number *and* aggregating the per-contact messages Linux sends into
+ * one multi-point sample - one without the other is what this comment exists to
+ * prevent.
  */
 
-#define AMP_TOUCH_MAXPOINT 5
+#define AMP_TOUCH_MAXPOINT 1
 
 /* Depth of the upper half's sample queue.
  *
  * Deep enough to hold a whole gesture, and that is not generosity. The upper half
- * discards the oldest sample when the queue is full, and the oldest sample is the
- * press - the one event a consumer cannot do without. A swipe on this panel is
- * one press, thirty to forty position updates and one release, all inside a few
- * hundred milliseconds; with a queue of eight, a reader that pauses for one
- * render loses the press and keeps the moves, so it sees a finger that was never
- * put down. Nothing reports an error, and gestures simply stop working.
+ * discards the oldest sample when the queue is full (circbuf_overwrite,
+ * touchscreen_upper.c:374), and the oldest sample is the press - the one event a
+ * consumer cannot do without. A swipe on this panel is one press, thirty to forty
+ * position updates and one release, all inside a few hundred milliseconds; with a
+ * queue of eight, a reader that pauses for one render loses the press and keeps
+ * the moves, so it sees a finger that was never put down. Nothing reports an
+ * error, and gestures simply stop working.
  *
- * Sixty-four costs 8KB of the fifteen megabytes free here.
+ * At one contact per sample this is 2KB of the fifteen megabytes free here.
  */
 
 #define AMP_TOUCH_NBUFFER  64
