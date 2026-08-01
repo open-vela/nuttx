@@ -206,13 +206,18 @@ static mipi_dsi_hal_context_t g_dsi_hal;
  * the buffer the display DMA is currently reading, and therefore also
  * the buffer the single-buffer users (fb0, demo thread) draw into.
  *
- * The two buffers are separate allocations, so they are NOT contiguous
- * and must never be treated as one region.
+ * When g_fb_contiguous is true both buffers come from one single
+ * allocation, g_framebuffer[1] == g_framebuffer[0] + ESP_DSI_FB_SIZE, and
+ * userspace can therefore cover both with a single mmap of 2 *
+ * ESP_DSI_FB_SIZE. g_fb_base keeps the allocation base so the region can
+ * be released as one block later on.
  */
 
 static uint8_t *g_framebuffer[2];
+static uint8_t *g_fb_base;
 static int g_fb_count;
 static int g_fb_front;
+static bool g_fb_contiguous;
 
 /* DW-GDMA handles for DSI DMA refresh (high-level driver) */
 
@@ -777,8 +782,15 @@ static void dsi_configure_dpi(void)
  * Name: dsi_alloc_framebuffer
  *
  * Description:
- *   Allocate framebuffer from heap (ideally PSRAM).
- *   For now use kmm_memalign for cache-line aligned allocation.
+ *   Allocate the display buffers from the heap (PSRAM).
+ *
+ *   Both buffers are taken from ONE 2 * ESP_DSI_FB_SIZE allocation so that
+ *   they form a single contiguous region. That is what lets /dev/fb0
+ *   publish them as one mmap area, which in turn lets a producer such as
+ *   the camera DMA fill them directly with no copy at all.
+ *
+ *   Fallbacks, in order: one contiguous double-size block, a single
+ *   ESP_DSI_FB_SIZE block (single buffered), a 4KB test block.
  *
  ****************************************************************************/
 
@@ -788,60 +800,75 @@ static int dsi_alloc_framebuffer(void)
   int i;
   int n;
 
-  g_fb_count = 0;
-  g_fb_front = 0;
+  g_fb_count      = 0;
+  g_fb_front      = 0;
+  g_fb_contiguous = false;
+  g_fb_base       = NULL;
 
-  /* Allocate the first framebuffer aligned to 64 bytes (cache line) */
+  /* Preferred layout: one 64-byte aligned allocation holding both buffers
+   * back to back. ESP_DSI_FB_SIZE is HRES * VRES * 2 = 1228800, a multiple
+   * of 64, so g_framebuffer[1] = base + ESP_DSI_FB_SIZE is guaranteed to
+   * land on a cache-line boundary as well.
+   */
 
-  g_framebuffer[0] = (uint8_t *)kmm_memalign(64, ESP_DSI_FB_SIZE);
+  DEBUGASSERT((ESP_DSI_FB_SIZE % 64) == 0);
+
+  g_fb_base = (uint8_t *)kmm_memalign(64, ESP_DSI_FB_SIZE * 2);
+  if (g_fb_base != NULL)
+    {
+      g_framebuffer[0] = g_fb_base;
+      g_framebuffer[1] = g_fb_base + ESP_DSI_FB_SIZE;
+      g_fb_count       = 2;
+      g_fb_contiguous  = true;
+      goto fill;
+    }
+
+  syslog(LOG_WARNING,
+         "[DSI] Contiguous double FB alloc failed (%d bytes), "
+         "falling back to single buffer\n",
+         ESP_DSI_FB_SIZE * 2);
+
+  /* Fallback: a single full-size framebuffer, no page flipping. */
+
+  g_fb_base = (uint8_t *)kmm_memalign(64, ESP_DSI_FB_SIZE);
+  if (g_fb_base != NULL)
+    {
+      g_framebuffer[0] = g_fb_base;
+      g_framebuffer[1] = NULL;
+      g_fb_count       = 1;
+      goto fill;
+    }
+
+  /* Last resort: a 4KB test buffer, enough to prove the pipeline runs. */
+
+  syslog(LOG_WARNING,
+         "Full FB alloc failed (%d bytes), using small test buffer\n",
+         ESP_DSI_FB_SIZE);
+
+  g_fb_base        = (uint8_t *)kmm_memalign(64, 4096);
+  g_framebuffer[0] = g_fb_base;
   if (g_framebuffer[0] == NULL)
     {
-      /* Full framebuffer allocation failed, try minimal test buffer */
+      lcderr("ERROR: Even small FB alloc failed\n");
+      return -ENOMEM;
+    }
 
-      syslog(LOG_WARNING,
-             "Full FB alloc failed (%d bytes), using small test buffer\n",
-             ESP_DSI_FB_SIZE);
-      g_framebuffer[0] = (uint8_t *)kmm_memalign(64, 4096);
-      if (g_framebuffer[0] == NULL)
-        {
-          lcderr("ERROR: Even small FB alloc failed\n");
-          return -ENOMEM;
-        }
+  /* Fill with test pattern (red in RGB565 = 0xF800) */
 
-      /* Fill with test pattern (red in RGB565 = 0xF800) */
-
-      fb16 = (uint16_t *)g_framebuffer[0];
-      for (i = 0; i < 2048; i++)
-        {
-          fb16[i] = 0xf800;  /* Red */
-        }
-
-      g_fb_count = 1;
-      syslog(LOG_INFO, "Small test framebuffer allocated: %p (4096 bytes)\n",
-             g_framebuffer[0]);
-      return OK;
+  fb16 = (uint16_t *)g_framebuffer[0];
+  for (i = 0; i < 2048; i++)
+    {
+      fb16[i] = 0xf800;  /* Red */
     }
 
   g_fb_count = 1;
+  syslog(LOG_INFO, "Small test framebuffer allocated: %p (4096 bytes)\n",
+         g_framebuffer[0]);
+  return OK;
 
-  /* Second display buffer, used for double buffering. It is optional: if
-   * it cannot be allocated the driver keeps the exact single-buffer
-   * behaviour instead of failing initialization.
-   */
+fill:
 
-  g_framebuffer[1] = (uint8_t *)kmm_memalign(64, ESP_DSI_FB_SIZE);
-  if (g_framebuffer[1] != NULL)
-    {
-      g_fb_count = 2;
-    }
-  else
-    {
-      syslog(LOG_WARNING,
-             "[DSI] Second FB alloc failed (%d bytes), single buffered\n",
-             ESP_DSI_FB_SIZE);
-    }
-
-  /* Fill every buffer with RED (RGB565: 0xF800) so that switching the
+  /* Fill every live buffer with RED (RGB565: 0xF800) so that switching the
    * display to the back buffer before the first camera frame arrives can
    * never show uninitialised memory.
    */
@@ -855,9 +882,14 @@ static int dsi_alloc_framebuffer(void)
         }
     }
 
+  DEBUGASSERT(g_fb_count < 2 ||
+              ((uintptr_t)g_framebuffer[1] % 64) == 0);
+
   syslog(LOG_INFO,
-         "Framebuffers: count=%d [0]=%p [1]=%p size=%d (filled RED)\n",
-         g_fb_count, g_framebuffer[0], g_framebuffer[1], ESP_DSI_FB_SIZE);
+         "Framebuffers: count=%d contiguous=%d [0]=%p [1]=%p size=%d "
+         "(filled RED)\n",
+         g_fb_count, (int)g_fb_contiguous, g_framebuffer[0],
+         g_framebuffer[1], ESP_DSI_FB_SIZE);
   return OK;
 }
 
@@ -968,7 +1000,7 @@ int esp_mipi_dsi_initialize(void)
   syslog(LOG_INFO, "[DSI] === MIPI-DSI init COMPLETE ===\n");
 
   /* Note: Continuous refresh not started here.
-   * The fb0 pandisplay ioctl will call esp_mipi_dsi_flush_fb()
+   * The fb0 pandisplay ioctl will call esp_mipi_dsi_flush_fb_n()
    * when nxcamera/apps write to the framebuffer.
    */
 
@@ -1010,6 +1042,20 @@ uint8_t *esp_mipi_dsi_get_fb_n(int index)
     }
 
   return g_framebuffer[index];
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_fb_is_contiguous
+ *
+ * Description:
+ *   True when the display buffers form one contiguous region, so they can
+ *   be mapped as a single mmap area.
+ *
+ ****************************************************************************/
+
+bool esp_mipi_dsi_fb_is_contiguous(void)
+{
+  return g_fb_contiguous;
 }
 
 /****************************************************************************
@@ -1069,12 +1115,29 @@ void esp_mipi_dsi_flush_fb(void)
    * two stay consistent for the single-buffer users.
    */
 
-  if (g_framebuffer[g_fb_front] == NULL)
+  esp_mipi_dsi_flush_fb_n(g_fb_front);
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_flush_fb_n
+ *
+ * Description:
+ *   Same as esp_mipi_dsi_flush_fb() but for an explicitly named buffer.
+ *
+ *   A page-flipping producer draws into the BACK buffer and then makes it
+ *   front, so it has to write back the buffer it is about to publish, not
+ *   the one currently on screen. Out-of-range indices are ignored.
+ *
+ ****************************************************************************/
+
+void esp_mipi_dsi_flush_fb_n(int index)
+{
+  if (index < 0 || index >= g_fb_count || g_framebuffer[index] == NULL)
     {
       return;
     }
 
-  esp_cache_msync(g_framebuffer[g_fb_front], ESP_DSI_FB_SIZE,
+  esp_cache_msync(g_framebuffer[index], ESP_DSI_FB_SIZE,
                   ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 }
 

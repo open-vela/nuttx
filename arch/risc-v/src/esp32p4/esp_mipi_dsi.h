@@ -9,6 +9,7 @@
 
 #include <nuttx/config.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /* Panel parameters (EK79007) */
 
@@ -87,6 +88,19 @@ uint8_t *esp_mipi_dsi_get_fb(void);
 void esp_mipi_dsi_flush_fb(void);
 
 /****************************************************************************
+ * Name: esp_mipi_dsi_flush_fb_n
+ *
+ * Description:
+ *   Write buffer 'index' back from the CPU data cache to physical memory.
+ *   A page-flipping producer draws into the back buffer and then makes it
+ *   front, so it must write back the buffer it is about to publish rather
+ *   than the one currently being scanned out. Out-of-range indices are
+ *   ignored. esp_mipi_dsi_flush_fb() is this call on the front buffer.
+ ****************************************************************************/
+
+void esp_mipi_dsi_flush_fb_n(int index);
+
+/****************************************************************************
  * Name: esp_mipi_dsi_get_fb_count
  *
  * Description:
@@ -102,10 +116,21 @@ int esp_mipi_dsi_get_fb_count(void);
  *
  * Description:
  *   Pointer to display buffer 'index' (0-based), NULL if out of range.
- *   The buffers are separate allocations and are therefore NOT contiguous.
+ *   When esp_mipi_dsi_fb_is_contiguous() is true the buffers are laid out
+ *   back to back, buffer i being base + i * ESP_DSI_FB_SIZE.
  ****************************************************************************/
 
 uint8_t *esp_mipi_dsi_get_fb_n(int index);
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_fb_is_contiguous
+ *
+ * Description:
+ *   True when the display buffers form one contiguous region, so they can
+ *   be mapped as a single mmap area.
+ ****************************************************************************/
+
+bool esp_mipi_dsi_fb_is_contiguous(void);
 
 /****************************************************************************
  * Name: esp_mipi_dsi_set_front_fb
