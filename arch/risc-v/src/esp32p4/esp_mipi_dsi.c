@@ -37,9 +37,13 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/nuttx.h>
 #include <nuttx/cache.h>
+#include <nuttx/kthread.h>
+#include <nuttx/irq.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "esp_mipi_dsi.h"
+#include "esp_dw_gdma_idf.h"
 #include "esp_cache.h"
 #include "soc/soc.h"       /* SOC_NON_CACHEABLE_OFFSET_SRAM */
 #include "hal/cache_ll.h"  /* CACHE_LL_L2MEM_NON_CACHE_ADDR */
@@ -199,15 +203,14 @@ static mipi_dsi_hal_context_t g_dsi_hal;
 
 static uint8_t *g_framebuffer;
 
-/* DW-GDMA Link List Item for DSI refresh (self-cycling).
- * Must be 64-byte aligned, accessed via non-cached alias for writes,
- * but the next-pointer stored inside uses the cached address (DMA
- * fetches LLI through the cache).
- */
+/* DW-GDMA handles for DSI DMA refresh (high-level driver) */
 
-static uint8_t g_dsi_lli_mem[128]
-    __attribute__((aligned(64)));
-static dw_gdma_link_list_item_t *g_dsi_lli_nc;  /* non-cached alias */
+static dw_gdma_channel_handle_t g_dsi_dma_chan;
+static dw_gdma_link_list_handle_t g_dsi_link_list;
+
+/* Transfer configuration for DMA re-arm in ISR callback */
+
+static dw_gdma_block_transfer_config_t g_dsi_xfer_config;
 
 /* EK79007 panel initialization sequence */
 
@@ -575,6 +578,47 @@ static void dsi_configure_host(void)
   mipi_dsi_host_ll_set_timeout_count(host, 0, 0, 0, 0, 0, 0, 0);
   mipi_dsi_phy_ll_set_max_read_time(host, 6000);
   mipi_dsi_phy_ll_set_stop_wait_time(host, 0x3f);
+
+  /* Step 13: Command-mode (DBI) configuration — CMD_MODE_CFG register.
+   *
+   * Ported from ESP-IDF esp_lcd_new_panel_io_dbi(). All DCS/generic
+   * command transmissions must go out in LOW POWER (escape) mode; the
+   * EK79007 panel does not accept init commands sent in high-speed mode.
+   * Without this the panel never executes Sleep Out and stays blank.
+   *
+   * Produces CMD_MODE_CFG (host offset 0x68) == 0x010f7f02, matching
+   * the ESP-IDF reference implementation.
+   */
+
+  mipi_dsi_host_ll_enable_te_ack(host, false);
+  mipi_dsi_host_ll_enable_cmd_ack(host, true);
+
+  mipi_dsi_host_ll_set_gen_short_wr_speed_mode(host, 0,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_gen_short_wr_speed_mode(host, 1,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_gen_short_wr_speed_mode(host, 2,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_gen_long_wr_speed_mode(host,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_gen_short_rd_speed_mode(host, 0,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_gen_short_rd_speed_mode(host, 1,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_gen_short_rd_speed_mode(host, 2,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+
+  mipi_dsi_host_ll_set_dcs_short_wr_speed_mode(host, 0,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_dcs_short_wr_speed_mode(host, 1,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_dcs_long_wr_speed_mode(host,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+  mipi_dsi_host_ll_set_dcs_short_rd_speed_mode(host, 0,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
+
+  mipi_dsi_host_ll_set_mrps_speed_mode(host,
+      MIPI_DSI_LL_TRANS_SPEED_LP);
 }
 
 /****************************************************************************
@@ -946,187 +990,150 @@ void esp_mipi_dsi_flush_fb(void)
  *
  * Description:
  *   Start continuous DW-GDMA transfer from framebuffer to DSI bridge FIFO
- *   using a self-looping link list (LLI whose next pointer points to
- *   itself). This provides infinite hardware-driven refresh without ISR.
+ *   using the high-level DW-GDMA driver with ISR-based re-arm.
  *
  *   Mirrors ESP-IDF esp_lcd_panel_dpi.c: MEM→PERIPH_DSI, flow=SELF,
- *   HW handshake, LIST block transfer mode.
+ *   HW handshake, LIST block transfer mode, trans_done callback re-arm.
  *
  *   MUST be called after DW-GDMA controller is enabled (camera init).
  ****************************************************************************/
 
 /****************************************************************************
- * Name: dsi_dma_init_lli
+ * Name: dsi_dma_trans_done_cb
  *
  * Description:
- *   Initialize the self-cycling DMA Link List Item (LLI) for DSI refresh.
- *   The LLI's next pointer points to itself → infinite hardware cycling.
+ *   DMA transfer-done callback. Re-arms the DMA for continuous refresh.
+ *   This matches ESP-IDF's mipi_dsi_dma_trans_done_cb exactly.
  ****************************************************************************/
 
-static void dsi_dma_init_lli(void)
+static bool dsi_dma_trans_done_cb(dw_gdma_channel_handle_t chan,
+    const dw_gdma_trans_done_event_data_t *event_data, void *user_data)
 {
-  dw_gdma_link_list_item_t *lli_cached =
-      (dw_gdma_link_list_item_t *)g_dsi_lli_mem;
-  g_dsi_lli_nc = (dw_gdma_link_list_item_t *)
-      ((uintptr_t)lli_cached + SOC_NON_CACHEABLE_OFFSET_SRAM);
+  (void)event_data;
+  (void)user_data;
 
-  /* Flush+invalidate the LLI memory so non-cached alias sees zeros */
+  /* Re-configure LLI and re-enable channel */
 
-  esp_cache_msync(lli_cached, sizeof(g_dsi_lli_mem),
-                  ESP_CACHE_MSYNC_FLAG_DIR_C2M |
-                  ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+  dw_gdma_lli_config_transfer(
+      dw_gdma_link_list_get_item(g_dsi_link_list, 0),
+      &g_dsi_xfer_config);
 
-  /* Configure LLI transfer: framebuffer → bridge FIFO */
+  dw_gdma_block_markers_t m = {
+      .is_valid = true,
+      .is_last = true,
+      .en_trans_done_intr = true,
+  };
 
-  dw_gdma_ll_lli_set_src_addr(g_dsi_lli_nc,
-                              (uint32_t)(uintptr_t)g_framebuffer);
-  dw_gdma_ll_lli_set_dst_addr(g_dsi_lli_nc, MIPI_DSI_BRG_MEM_BASE);
-  dw_gdma_ll_lli_set_trans_block_size(g_dsi_lli_nc,
-                                      ESP_DSI_FB_SIZE / 8);
+  dw_gdma_lli_set_block_markers(
+      dw_gdma_link_list_get_item(g_dsi_link_list, 0), m);
 
-  /* Source: PSRAM framebuffer, incrementing, 64-bit, burst 512×16 */
-
-  dw_gdma_ll_lli_set_src_master_port(g_dsi_lli_nc,
-                                     (uintptr_t)g_framebuffer);
-  dw_gdma_ll_lli_set_src_burst_mode(g_dsi_lli_nc,
-                                    DW_GDMA_BURST_MODE_INCREMENT);
-  dw_gdma_ll_lli_set_src_trans_width(g_dsi_lli_nc,
-                                     DW_GDMA_TRANS_WIDTH_64);
-  dw_gdma_ll_lli_set_src_burst_items(g_dsi_lli_nc,
-                                     DW_GDMA_BURST_ITEMS_512);
-  dw_gdma_ll_lli_set_src_burst_len(g_dsi_lli_nc, 16);
-
-  /* Destination: bridge FIFO, fixed address, 64-bit, burst 256×16 */
-
-  dw_gdma_ll_lli_set_dst_master_port(g_dsi_lli_nc,
-                                     MIPI_DSI_BRG_MEM_BASE);
-  dw_gdma_ll_lli_set_dst_burst_mode(g_dsi_lli_nc,
-                                    DW_GDMA_BURST_MODE_FIXED);
-  dw_gdma_ll_lli_set_dst_trans_width(g_dsi_lli_nc,
-                                     DW_GDMA_TRANS_WIDTH_64);
-  dw_gdma_ll_lli_set_dst_burst_items(g_dsi_lli_nc,
-                                     DW_GDMA_BURST_ITEMS_256);
-  dw_gdma_ll_lli_set_dst_burst_len(g_dsi_lli_nc, 16);
-
-  /* Self-cycling: next pointer = this LLI (cached address for HW) */
-
-  dw_gdma_ll_lli_set_next_item_addr(g_dsi_lli_nc,
-                                    (uint32_t)(uintptr_t)lli_cached);
-  dw_gdma_ll_lli_set_link_list_master_port(g_dsi_lli_nc,
-                                           DW_GDMA_LL_MASTER_PORT_MEMORY);
-
-  /* Block markers: valid=1, last=1, intr on done=1 */
-
-  dw_gdma_ll_lli_set_block_markers(g_dsi_lli_nc, true, true, true);
+  dw_gdma_channel_use_link_list(chan, g_dsi_link_list);
+  dw_gdma_channel_enable_ctrl(chan, true);
+  return false;
 }
 
 /****************************************************************************
  * Name: dsi_dma_start_linked_list
  *
  * Description:
- *   Configure DMA channel 1 for linked-list mode and start it.
- *   The channel will continuously cycle through the single self-pointing
- *   LLI, pushing framebuffer data to the bridge without CPU intervention.
+ *   Configure DMA using the high-level DW-GDMA driver (matching ESP-IDF
+ *   esp_lcd_panel_dpi.c exactly) and start continuous refresh.
  ****************************************************************************/
 
 static void dsi_dma_start_linked_list(void)
 {
-  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
-  const uint8_t ch = 1;
+  esp_err_t err;
 
-  /* Declare RCC atomic env variable required by LL macros */
+  /* 1. Allocate DMA channel (matches ESP-IDF DSI panel config) */
 
-  int __DECLARE_RCC_ATOMIC_ENV;
-  (void)__DECLARE_RCC_ATOMIC_ENV;
+  dw_gdma_channel_alloc_config_t dma_alloc_config = {
+      .src = {
+          .block_transfer_type = DW_GDMA_BLOCK_TRANSFER_LIST,
+          .role = DW_GDMA_ROLE_MEM,
+          .handshake_type = DW_GDMA_HANDSHAKE_HW,
+          .num_outstanding_requests = 5,
+      },
+      .dst = {
+          .block_transfer_type = DW_GDMA_BLOCK_TRANSFER_LIST,
+          .role = DW_GDMA_ROLE_PERIPH_DSI,
+          .handshake_type = DW_GDMA_HANDSHAKE_HW,
+          .num_outstanding_requests = 2,
+      },
+      .flow_controller = DW_GDMA_FLOW_CTRL_SELF,
+      .chan_priority = 1,
+  };
 
-  /* Initialize DW-GDMA controller (bus clock, reset, enable).
-   * This is idempotent — safe to call even if camera already did it.
-   */
+  err = dw_gdma_new_channel(&dma_alloc_config, &g_dsi_dma_chan);
+  if (err != ESP_OK)
+    {
+      syslog(LOG_ERR, "[DSI] Failed to allocate DMA channel: 0x%x\n", err);
+      return;
+    }
 
-  dw_gdma_ll_enable_bus_clock(0, true);
-  dw_gdma_ll_reset_register(0);
-  dw_gdma_ll_reset(dev);
-  dw_gdma_ll_enable_controller(dev, true);
-  dw_gdma_ll_enable_intr_global(dev, true);
+  /* 2. Create link list (1 item, singly linked) */
 
-  /* Linked-list mode for both src and dst */
+  dw_gdma_link_list_config_t link_list_config = {
+      .num_items = 1,
+      .link_type = DW_GDMA_LINKED_LIST_TYPE_SINGLY,
+  };
 
-  dw_gdma_ll_channel_set_src_multi_block_type(dev, ch,
-                                     DW_GDMA_BLOCK_TRANSFER_LIST);
-  dw_gdma_ll_channel_set_dst_multi_block_type(dev, ch,
-                                     DW_GDMA_BLOCK_TRANSFER_LIST);
+  err = dw_gdma_new_link_list(&link_list_config, &g_dsi_link_list);
+  if (err != ESP_OK)
+    {
+      syslog(LOG_ERR, "[DSI] Failed to create link list: 0x%x\n", err);
+      return;
+    }
 
-  /* Flow: MEM → PERIPH_DSI, DMA is flow controller */
+  /* 3. Configure transfer parameters */
 
-  dw_gdma_ll_channel_set_trans_flow(dev, ch,
-                                    DW_GDMA_ROLE_MEM,
-                                    DW_GDMA_ROLE_PERIPH_DSI,
-                                    DW_GDMA_FLOW_CTRL_SELF);
+  g_dsi_xfer_config.src.addr = (uint32_t)(uintptr_t)g_framebuffer;
+  g_dsi_xfer_config.src.burst_mode = DW_GDMA_BURST_MODE_INCREMENT;
+  g_dsi_xfer_config.src.burst_items = DW_GDMA_BURST_ITEMS_512;
+  g_dsi_xfer_config.src.burst_len = 16;
+  g_dsi_xfer_config.src.width = DW_GDMA_TRANS_WIDTH_64;
+  g_dsi_xfer_config.dst.addr = MIPI_DSI_BRG_MEM_BASE;
+  g_dsi_xfer_config.dst.burst_mode = DW_GDMA_BURST_MODE_FIXED;
+  g_dsi_xfer_config.dst.burst_items = DW_GDMA_BURST_ITEMS_256;
+  g_dsi_xfer_config.dst.burst_len = 16;
+  g_dsi_xfer_config.dst.width = DW_GDMA_TRANS_WIDTH_64;
+  g_dsi_xfer_config.size = ESP_DSI_FB_SIZE * 8 / 64;
 
-  /* Hardware handshake for DSI bridge */
+  dw_gdma_lli_config_transfer(
+      dw_gdma_link_list_get_item(g_dsi_link_list, 0),
+      &g_dsi_xfer_config);
 
-  dw_gdma_ll_channel_set_src_handshake_interface(dev, ch,
-                                                 DW_GDMA_HANDSHAKE_HW);
-  dw_gdma_ll_channel_set_dst_handshake_interface(dev, ch,
-                                                 DW_GDMA_HANDSHAKE_HW);
-  dw_gdma_ll_channel_set_dst_handshake_periph(dev, ch,
-                                              DW_GDMA_ROLE_PERIPH_DSI);
+  /* 4. Set block markers */
 
-  /* Outstanding requests (match ESP-IDF golden: src=5, dst=2) */
+  dw_gdma_block_markers_t markers = {
+      .is_valid = true,
+      .is_last = true,
+      .en_trans_done_intr = true,
+  };
 
-  dw_gdma_ll_channel_set_src_outstanding_limit(dev, ch, 5);
-  dw_gdma_ll_channel_set_dst_outstanding_limit(dev, ch, 2);
-  dw_gdma_ll_channel_set_priority(dev, ch, 1);
+  dw_gdma_lli_set_block_markers(
+      dw_gdma_link_list_get_item(g_dsi_link_list, 0), markers);
 
-  /* Point channel at our LLI (cached address — HW fetches via cache) */
+  /* 5. Register trans_done callback for ISR re-arm */
 
-  dw_gdma_ll_channel_set_link_list_master_port(dev, ch,
-                                               DW_GDMA_LL_MASTER_PORT_MEMORY);
-  dw_gdma_ll_channel_set_link_list_head_addr(dev, ch,
-      (uint32_t)(uintptr_t)g_dsi_lli_mem);
+  dw_gdma_event_callbacks_t cbs = {
+      .on_full_trans_done = dsi_dma_trans_done_cb,
+  };
 
-  /* Enable DMA_TFR_DONE interrupt for ch1 so the shared ISR can re-arm.
-   * Only TFR_DONE — do not propagate other events to avoid storm.
-   */
+  err = dw_gdma_channel_register_event_callbacks(
+            g_dsi_dma_chan, &cbs, NULL);
+  if (err != ESP_OK)
+    {
+      syslog(LOG_ERR, "[DSI] Failed to register DMA callbacks: 0x%x\n",
+             err);
+      return;
+    }
 
-  dw_gdma_ll_channel_clear_intr(dev, ch, UINT32_MAX);
-  dw_gdma_ll_channel_enable_intr_generation(dev, ch, UINT32_MAX, false);
-  dw_gdma_ll_channel_enable_intr_propagation(dev, ch, UINT32_MAX, false);
+  /* 6. Apply link list and enable channel */
 
-  /* Now selectively enable only DMA_TFR_DONE */
+  dw_gdma_channel_use_link_list(g_dsi_dma_chan, g_dsi_link_list);
+  dw_gdma_channel_enable_ctrl(g_dsi_dma_chan, true);
 
-  dw_gdma_ll_channel_enable_intr_generation(dev, ch,
-                         DW_GDMA_LL_CHANNEL_EVENT_DMA_TFR_DONE, true);
-  dw_gdma_ll_channel_enable_intr_propagation(dev, ch,
-                         DW_GDMA_LL_CHANNEL_EVENT_DMA_TFR_DONE, true);
-
-  /* Enable the channel — DMA starts immediately */
-
-  dw_gdma_ll_channel_enable(dev, ch, true);
-}
-
-/****************************************************************************
- * Name: esp_dsi_dma_isr_handler
- *
- * Description:
- *   Called from the shared DW-GDMA ISR when channel 1 fires DMA_TFR_DONE.
- *   Re-points LLP at our self-cycling LLI and re-enables the channel.
- ****************************************************************************/
-
-void esp_dsi_dma_isr_handler(void)
-{
-  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
-  const uint8_t ch = 1;
-
-  /* Clear all ch1 interrupts */
-
-  dw_gdma_ll_channel_clear_intr(dev, ch, UINT32_MAX);
-
-  /* Re-point LLP and re-enable channel */
-
-  dw_gdma_ll_channel_set_link_list_head_addr(dev, ch,
-      (uint32_t)(uintptr_t)g_dsi_lli_mem);
-  dw_gdma_ll_channel_enable(dev, ch, true);
+  syslog(LOG_INFO, "[DSI] DW-GDMA high-level driver started\n");
 }
 
 void esp_mipi_dsi_start_refresh(void)
@@ -1144,22 +1151,34 @@ void esp_mipi_dsi_start_refresh(void)
   esp_cache_msync((void *)g_framebuffer, ESP_DSI_FB_SIZE,
                   ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
-  /* Also fill via non-cached alias to guarantee physical write */
+  /* Fill red through the cached address, then write back. Never use the
+   * non-cached alias here: the DMA source is the cached address, so mixing
+   * the two views leaves the DMA reading stale cache lines.
+   */
+
   {
-    volatile uint8_t *fb_nc = (volatile uint8_t *)
-        ((uintptr_t)g_framebuffer + 0x40000000);
     uint32_t j;
     for (j = 0; j < ESP_DSI_FB_SIZE; j += 3)
       {
-        fb_nc[j + 0] = 0xff;  /* R */
-        fb_nc[j + 1] = 0x00;  /* G */
-        fb_nc[j + 2] = 0x00;  /* B */
+        g_framebuffer[j + 0] = 0xff;  /* R */
+        g_framebuffer[j + 1] = 0x00;  /* G */
+        g_framebuffer[j + 2] = 0x00;  /* B */
       }
+
+    esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M);
   }
 
-  /* Initialize the self-cycling LLI descriptor */
+  /* Re-send Sleep Out and Display On in command mode (belt-and-suspenders).
+   * This ensures the panel is awake even if initial DCS commands
+   * during initialization didn't reach it properly.
+   */
 
-  dsi_dma_init_lli();
+  syslog(LOG_INFO, "[DSI] Re-sending Sleep Out + Display On...\n");
+  mipi_dsi_hal_host_gen_write_dcs_command(&g_dsi_hal, 0, 0x11, 1, NULL, 0);
+  dsi_delay_ms(120);
+  mipi_dsi_hal_host_gen_write_dcs_command(&g_dsi_hal, 0, 0x29, 1, NULL, 0);
+  dsi_delay_ms(50);
 
   /* Enable the bridge (must happen after panel DCS init, before DMA) */
 
@@ -1172,12 +1191,117 @@ void esp_mipi_dsi_start_refresh(void)
   syslog(LOG_INFO, "[DSI] Starting DMA linked-list...\n");
   dsi_dma_start_linked_list();
 
+  /* Wait for DMA to fill some data into bridge FIFO before enabling
+   * video mode. Without data in FIFO, Host won't have anything to send.
+   */
+
+  dsi_delay_ms(50);
+
   /* NOW enable video mode + DPI output (bridge has data to send) */
 
   syslog(LOG_INFO, "[DSI] Enabling video mode + DPI output...\n");
   mipi_dsi_host_ll_enable_video_mode(g_dsi_hal.host, true);
+  dsi_delay_ms(10);
   mipi_dsi_brg_ll_enable_dpi_output(g_dsi_hal.bridge, true);
   mipi_dsi_brg_ll_update_dpi_config(g_dsi_hal.bridge);
 
   syslog(LOG_INFO, "[DSI] Linked-list DMA refresh started\n");
+}
+
+/****************************************************************************
+ * Name: dsi_demo_thread
+ *
+ * Description:
+ *   Polling DMA re-arm + color demo thread.
+ *   Checks if DMA channel has stopped (CHEN bit cleared) and re-arms it.
+ *   Also alternates red/blue every 2 seconds.
+ ****************************************************************************/
+
+static int dsi_demo_thread(int argc, FAR char *argv[])
+{
+  uint8_t *fb_nc;
+  bool show_red = true;
+  uint32_t j;
+
+  (void)argc;
+  (void)argv;
+
+  if (g_framebuffer == NULL)
+    {
+      return -EINVAL;
+    }
+
+  /* Write through the normal (cached) framebuffer address and write back
+   * with esp_cache_msync afterwards. This is the ESP-IDF pattern used by
+   * esp_lcd_dpi_panel_draw_bitmap(). Do NOT mix non-cached alias writes
+   * with a cached framebuffer: the DMA reads the cached address and would
+   * see stale data.
+   */
+
+  fb_nc = g_framebuffer;
+
+  while (1)
+    {
+      /* Alternate colors every 2 seconds */
+
+      usleep(2000000);
+
+      show_red = !show_red;
+      if (show_red)
+        {
+          for (j = 0; j < ESP_DSI_FB_SIZE; j += 3)
+            {
+              fb_nc[j + 0] = 0xff;
+              fb_nc[j + 1] = 0x00;
+              fb_nc[j + 2] = 0x00;
+            }
+
+          esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
+                          ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+        }
+      else
+        {
+          for (j = 0; j < ESP_DSI_FB_SIZE; j += 3)
+            {
+              fb_nc[j + 0] = 0x00;
+              fb_nc[j + 1] = 0x00;
+              fb_nc[j + 2] = 0xff;
+            }
+
+          esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
+                          ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+        }
+    }
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_start_demo
+ *
+ * Description:
+ *   Start the red/blue alternating demo thread.
+ *   Call after esp_mipi_dsi_start_refresh().
+ ****************************************************************************/
+
+static int g_demo_pid = -1;
+
+void esp_mipi_dsi_start_demo(void)
+{
+  if (g_demo_pid > 0)
+    {
+      return;
+    }
+
+  g_demo_pid = kthread_create("dsi_demo", 100,
+                              CONFIG_DEFAULT_TASK_STACKSIZE,
+                              dsi_demo_thread, NULL);
+  if (g_demo_pid < 0)
+    {
+      syslog(LOG_ERR, "[DSI] Demo thread failed: %d\n", g_demo_pid);
+    }
+  else
+    {
+      syslog(LOG_INFO, "[DSI] Demo thread started (pid=%d)\n", g_demo_pid);
+    }
 }

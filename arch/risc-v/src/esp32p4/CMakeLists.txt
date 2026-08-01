@@ -27,10 +27,8 @@ set(SRCS esp_chip_rev.c)
 
 if(CONFIG_ESP32P4_MIPI_DSI)
   list(APPEND SRCS
-    esp_dw_gdma_nuttx.c
-    esp_lcd_dsi_bus_nuttx.c
-    esp_lcd_panel_dpi_nuttx.c
-    esp_dsi_fb.c)
+    esp_mipi_dsi.c
+    esp_dw_gdma_idf.c)
 endif()
 
 if(CONFIG_ESP32P4_CAMERA)

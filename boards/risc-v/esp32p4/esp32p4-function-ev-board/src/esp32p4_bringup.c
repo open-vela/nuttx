@@ -139,7 +139,7 @@
 #  include "esp_board_fb.h"
 #endif
 #ifdef CONFIG_ESP32P4_MIPI_DSI
-#  include "esp_dsi_fb.h"
+#  include "esp_mipi_dsi.h"
 #endif
 
 #include "esp32p4-function-ev-board.h"
@@ -548,10 +548,10 @@ int esp_bringup(void)
 #endif
 
 #ifdef CONFIG_ESP32P4_MIPI_DSI
-  ret = esp_dsi_fb_initialize();
+  ret = esp_mipi_dsi_initialize();
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ERROR: esp_dsi_fb_initialize failed: %d\n", ret);
+      syslog(LOG_ERR, "ERROR: esp_mipi_dsi_initialize failed: %d\n", ret);
     }
 #endif
 
@@ -574,11 +574,8 @@ int esp_bringup(void)
 #ifdef CONFIG_ESP32P4_MIPI_DSI
   /* Start DSI DMA refresh AFTER camera init (camera resets GDMA) */
 
-  ret = esp_dsi_fb_start_refresh();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: esp_dsi_fb_start_refresh failed: %d\n", ret);
-    }
+  esp_mipi_dsi_start_refresh();
+  esp_mipi_dsi_start_demo();
 #endif
 
 
