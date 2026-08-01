@@ -1,0 +1,82 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+comment "BK7258 Configuration Options"
+
+# Chip family identifier (active when ARCH_CHIP_BK7258 is selected by the
+# choice in arch/arm/Kconfig).
+
+if ARCH_CHIP_BK7258
+
+menu "BK7258 Peripheral Selection"
+
+config BK7258_UART0
+	bool "UART0 (console, on-board CH340)"
+	default y
+	---help---
+		Enable UART0 (base 0x44820000).  When NuttX runs as the CPU0 main
+		core, UART0 is directly attached to the on-board CH340 and serves
+		as both the bootROM download port and the NSH console.
+
+config BK7258_UART1
+	bool "UART1"
+	default n
+	---help---
+		Enable UART1 (base 0x45830000).
+
+config BK7258_UART2
+	bool "UART2"
+	default n
+
+endmenu # BK7258 Peripheral Selection
+
+# UART base address used for low-level console output (bk7258_lowputc.c).
+
+config BK7258_CONSOLE_UART_BASE
+	hex
+	default 0x44820000 if BK7258_UART0
+	default 0x45830000 if BK7258_UART1
+	default 0x44820000
+
+config BK7258_CONSOLE_BAUD
+	int "Console baud rate"
+	default 115200
+
+menu "BK7258 Debug (SWD bring-up)"
+
+config BK7258_DEBUG_FAULT_SPIN
+	bool "Spin (while(1)) in fault handlers for SWD inspection"
+	default n
+	---help---
+		Bare-metal SWD debug aid: replace the HardFault/MemManage/BusFault/
+		UsageFault handlers with "emit a marker then spin in while(1)",
+		instead of the default NuttX _alert/PANIC (which may fault again or
+		produce no output before the OS is up).
+
+		The core then stops at the fault site, and the exception frame
+		stacked by hardware (r0-r3, r12, LR, PC, xPSR) is preserved on the
+		MSP, so a DAP-Link + OpenOCD halt can read PC/CFSR to locate the
+		crash.  This mirrors the Beken jlink example of adding while(1) in
+		the fault handler and inspecting the stack after suspend.
+
+		It also enables the configurable Mem/Bus/Usage faults individually
+		so they do not escalate to HardFault, letting OpenOCD tell which
+		class of fault occurred.
+
+		Turn this off once SWD bring-up is done to restore the default
+		NuttX fault handling.
+
+config BK7258_DEBUG_FAULT_SPIN_MARK
+	bool "Emit a marker string before spinning"
+	default y
+	depends on BK7258_DEBUG_FAULT_SPIN
+	---help---
+		Print a "!!BKFAULT!!" marker to the console UART before spinning
+		(directly via arm_lowputc, independent of the OS).  If the serial
+		port works, the marker alone tells you a fault spin was entered.
+
+endmenu # BK7258 Debug
+
+endif # ARCH_CHIP_BK7258
