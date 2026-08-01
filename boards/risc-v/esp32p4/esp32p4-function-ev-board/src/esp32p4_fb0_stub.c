@@ -130,6 +130,19 @@ int board_fb_initialize(void)
       return -ENOMEM;
     }
 
+  /* fb0 deliberately stays a single-buffer device.
+   *
+   * The DSI driver may own two display buffers (see
+   * esp_mipi_dsi_get_fb_count()), but they come from two independent
+   * kmm_memalign() calls and are therefore not contiguous. Reporting
+   * fblen = FB_SIZE * count and yres_virtual = FB_YRES * count would
+   * promise userspace one mmap region covering both, which cannot be
+   * honoured. So only the buffer the display is currently reading is
+   * exposed here, which keeps the existing fb0 contract and the
+   * pandisplay writeback working unchanged. A zero-copy producer has to
+   * reach the second buffer through the DSI driver instead of fb0.
+   */
+
   g_planeinfo.fbmem        = (void *)fb;
   g_planeinfo.fblen        = FB_SIZE;
   g_planeinfo.stride       = FB_STRIDE;

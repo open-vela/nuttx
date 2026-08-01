@@ -87,6 +87,39 @@ uint8_t *esp_mipi_dsi_get_fb(void);
 void esp_mipi_dsi_flush_fb(void);
 
 /****************************************************************************
+ * Name: esp_mipi_dsi_get_fb_count
+ *
+ * Description:
+ *   Number of display buffers actually available (1 or 2). Two means the
+ *   second allocation succeeded and the display DMA can be switched
+ *   between buffers with esp_mipi_dsi_set_front_fb().
+ ****************************************************************************/
+
+int esp_mipi_dsi_get_fb_count(void);
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_get_fb_n
+ *
+ * Description:
+ *   Pointer to display buffer 'index' (0-based), NULL if out of range.
+ *   The buffers are separate allocations and are therefore NOT contiguous.
+ ****************************************************************************/
+
+uint8_t *esp_mipi_dsi_get_fb_n(int index);
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_set_front_fb
+ *
+ * Description:
+ *   Point the display DMA at buffer 'index' after its contents have been
+ *   written back to memory. The switch takes effect on the next frame
+ *   boundary. Returns 0 on success, -EINVAL on a bad index.
+ *   Safe to call from task context.
+ ****************************************************************************/
+
+int esp_mipi_dsi_set_front_fb(int index);
+
+/****************************************************************************
  * Name: esp_mipi_dsi_start_demo
  *
  * Description:

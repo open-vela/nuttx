@@ -199,9 +199,20 @@ struct panel_cmd_s
 
 static mipi_dsi_hal_context_t g_dsi_hal;
 
-/* Framebuffer pointer (allocated from PSRAM) */
+/* Display buffers (allocated from PSRAM).
+ *
+ * g_fb_count is the number of buffers actually available: 2 when the
+ * second allocation succeeded, 1 otherwise. g_fb_front is the index of
+ * the buffer the display DMA is currently reading, and therefore also
+ * the buffer the single-buffer users (fb0, demo thread) draw into.
+ *
+ * The two buffers are separate allocations, so they are NOT contiguous
+ * and must never be treated as one region.
+ */
 
-static uint8_t *g_framebuffer;
+static uint8_t *g_framebuffer[2];
+static int g_fb_count;
+static int g_fb_front;
 
 /* DW-GDMA handles for DSI DMA refresh (high-level driver) */
 
@@ -773,18 +784,25 @@ static void dsi_configure_dpi(void)
 
 static int dsi_alloc_framebuffer(void)
 {
-  /* Allocate framebuffer aligned to 64 bytes (cache line) */
+  uint16_t *fb16;
+  int i;
+  int n;
 
-  g_framebuffer = (uint8_t *)kmm_memalign(64, ESP_DSI_FB_SIZE);
-  if (g_framebuffer == NULL)
+  g_fb_count = 0;
+  g_fb_front = 0;
+
+  /* Allocate the first framebuffer aligned to 64 bytes (cache line) */
+
+  g_framebuffer[0] = (uint8_t *)kmm_memalign(64, ESP_DSI_FB_SIZE);
+  if (g_framebuffer[0] == NULL)
     {
       /* Full framebuffer allocation failed, try minimal test buffer */
 
       syslog(LOG_WARNING,
              "Full FB alloc failed (%d bytes), using small test buffer\n",
              ESP_DSI_FB_SIZE);
-      g_framebuffer = (uint8_t *)kmm_memalign(64, 4096);
-      if (g_framebuffer == NULL)
+      g_framebuffer[0] = (uint8_t *)kmm_memalign(64, 4096);
+      if (g_framebuffer[0] == NULL)
         {
           lcderr("ERROR: Even small FB alloc failed\n");
           return -ENOMEM;
@@ -792,29 +810,54 @@ static int dsi_alloc_framebuffer(void)
 
       /* Fill with test pattern (red in RGB565 = 0xF800) */
 
-      uint16_t *fb16 = (uint16_t *)g_framebuffer;
-      int i;
+      fb16 = (uint16_t *)g_framebuffer[0];
       for (i = 0; i < 2048; i++)
         {
           fb16[i] = 0xf800;  /* Red */
         }
 
+      g_fb_count = 1;
       syslog(LOG_INFO, "Small test framebuffer allocated: %p (4096 bytes)\n",
-             g_framebuffer);
+             g_framebuffer[0]);
       return OK;
     }
 
-  /* Fill full framebuffer with RED (RGB565: 0xF800) */
+  g_fb_count = 1;
 
-  uint16_t *fb16_full = (uint16_t *)g_framebuffer;
-  int i;
-  for (i = 0; i < ESP_DSI_HRES * ESP_DSI_VRES; i++)
+  /* Second display buffer, used for double buffering. It is optional: if
+   * it cannot be allocated the driver keeps the exact single-buffer
+   * behaviour instead of failing initialization.
+   */
+
+  g_framebuffer[1] = (uint8_t *)kmm_memalign(64, ESP_DSI_FB_SIZE);
+  if (g_framebuffer[1] != NULL)
     {
-      fb16_full[i] = 0xf800;
+      g_fb_count = 2;
+    }
+  else
+    {
+      syslog(LOG_WARNING,
+             "[DSI] Second FB alloc failed (%d bytes), single buffered\n",
+             ESP_DSI_FB_SIZE);
     }
 
-  syslog(LOG_INFO, "Framebuffer allocated: %p, size=%d bytes (filled RED)\n",
-         g_framebuffer, ESP_DSI_FB_SIZE);
+  /* Fill every buffer with RED (RGB565: 0xF800) so that switching the
+   * display to the back buffer before the first camera frame arrives can
+   * never show uninitialised memory.
+   */
+
+  for (n = 0; n < g_fb_count; n++)
+    {
+      fb16 = (uint16_t *)g_framebuffer[n];
+      for (i = 0; i < ESP_DSI_HRES * ESP_DSI_VRES; i++)
+        {
+          fb16[i] = 0xf800;
+        }
+    }
+
+  syslog(LOG_INFO,
+         "Framebuffers: count=%d [0]=%p [1]=%p size=%d (filled RED)\n",
+         g_fb_count, g_framebuffer[0], g_framebuffer[1], ESP_DSI_FB_SIZE);
   return OK;
 }
 
@@ -938,7 +981,72 @@ int esp_mipi_dsi_initialize(void)
 
 uint8_t *esp_mipi_dsi_get_fb(void)
 {
-  return g_framebuffer;
+  /* Return the buffer the display DMA is reading right now. With no
+   * buffer switching going on this is always g_framebuffer[0], i.e. the
+   * behaviour the single-buffer users (fb0, demo thread) already rely on.
+   */
+
+  return g_framebuffer[g_fb_front];
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_get_fb_count
+ ****************************************************************************/
+
+int esp_mipi_dsi_get_fb_count(void)
+{
+  return g_fb_count;
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_get_fb_n
+ ****************************************************************************/
+
+uint8_t *esp_mipi_dsi_get_fb_n(int index)
+{
+  if (index < 0 || index >= g_fb_count)
+    {
+      return NULL;
+    }
+
+  return g_framebuffer[index];
+}
+
+/****************************************************************************
+ * Name: esp_mipi_dsi_set_front_fb
+ *
+ * Description:
+ *   Point the display DMA at buffer 'index'. The caller is responsible for
+ *   having written that buffer back to memory first.
+ *
+ *   The transfer-done callback reprograms the link list item from
+ *   g_dsi_xfer_config after every completed frame, so updating the source
+ *   address here is enough: the switch takes effect on the next frame
+ *   boundary. The running channel and the link list item are deliberately
+ *   left untouched, they belong to the ISR.
+ *
+ ****************************************************************************/
+
+int esp_mipi_dsi_set_front_fb(int index)
+{
+  irqstate_t flags;
+
+  if (index < 0 || index >= g_fb_count || g_framebuffer[index] == NULL)
+    {
+      return -EINVAL;
+    }
+
+  /* g_dsi_xfer_config is read by the DMA ISR. Keep the critical section
+   * down to the two field updates so a torn 32-bit source address can
+   * never be observed.
+   */
+
+  flags = enter_critical_section();
+  g_dsi_xfer_config.src.addr = (uint32_t)(uintptr_t)g_framebuffer[index];
+  g_fb_front = index;
+  leave_critical_section(flags);
+
+  return OK;
 }
 
 /****************************************************************************
@@ -957,12 +1065,16 @@ uint8_t *esp_mipi_dsi_get_fb(void)
 
 void esp_mipi_dsi_flush_fb(void)
 {
-  if (g_framebuffer == NULL)
+  /* Write back the very buffer esp_mipi_dsi_get_fb() handed out, so the
+   * two stay consistent for the single-buffer users.
+   */
+
+  if (g_framebuffer[g_fb_front] == NULL)
     {
       return;
     }
 
-  esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
+  esp_cache_msync(g_framebuffer[g_fb_front], ESP_DSI_FB_SIZE,
                   ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 }
 
@@ -1067,7 +1179,8 @@ static void dsi_dma_start_linked_list(void)
 
   /* 3. Configure transfer parameters */
 
-  g_dsi_xfer_config.src.addr = (uint32_t)(uintptr_t)g_framebuffer;
+  g_dsi_xfer_config.src.addr =
+      (uint32_t)(uintptr_t)g_framebuffer[g_fb_front];
   g_dsi_xfer_config.src.burst_mode = DW_GDMA_BURST_MODE_INCREMENT;
   g_dsi_xfer_config.src.burst_items = DW_GDMA_BURST_ITEMS_512;
   g_dsi_xfer_config.src.burst_len = 16;
@@ -1119,7 +1232,9 @@ static void dsi_dma_start_linked_list(void)
 
 void esp_mipi_dsi_start_refresh(void)
 {
-  if (g_framebuffer == NULL)
+  uint8_t *fb = g_framebuffer[g_fb_front];
+
+  if (fb == NULL)
     {
       return;
     }
@@ -1129,7 +1244,7 @@ void esp_mipi_dsi_start_refresh(void)
    * Belt-and-suspenders: do cache writeback AND write through non-cached.
    */
 
-  esp_cache_msync((void *)g_framebuffer, ESP_DSI_FB_SIZE,
+  esp_cache_msync((void *)fb, ESP_DSI_FB_SIZE,
                   ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
   /* Fill red through the cached address, then write back. Never use the
@@ -1138,7 +1253,7 @@ void esp_mipi_dsi_start_refresh(void)
    */
 
   {
-    uint16_t *fb16 = (uint16_t *)g_framebuffer;
+    uint16_t *fb16 = (uint16_t *)fb;
     uint32_t j;
 
     for (j = 0; j < ESP_DSI_HRES * ESP_DSI_VRES; j++)
@@ -1146,7 +1261,7 @@ void esp_mipi_dsi_start_refresh(void)
         fb16[j] = 0xf800;  /* Red */
       }
 
-    esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
+    esp_cache_msync(fb, ESP_DSI_FB_SIZE,
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M);
   }
 
@@ -1207,7 +1322,7 @@ static int dsi_demo_thread(int argc, FAR char *argv[])
   (void)argc;
   (void)argv;
 
-  if (g_framebuffer == NULL)
+  if (g_framebuffer[0] == NULL)
     {
       return -EINVAL;
     }
@@ -1219,13 +1334,17 @@ static int dsi_demo_thread(int argc, FAR char *argv[])
    * see stale data.
    */
 
-  fb16 = (uint16_t *)g_framebuffer;
-
   while (1)
     {
       /* Alternate colors every 2 seconds */
 
       usleep(2000000);
+
+      /* Always draw into the buffer the display is reading, re-read every
+       * iteration in case something switched the front buffer.
+       */
+
+      fb16 = (uint16_t *)esp_mipi_dsi_get_fb();
 
       show_red = !show_red;
       if (show_red)
@@ -1243,7 +1362,7 @@ static int dsi_demo_thread(int argc, FAR char *argv[])
             }
         }
 
-      esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
+      esp_cache_msync((uint8_t *)fb16, ESP_DSI_FB_SIZE,
                       ESP_CACHE_MSYNC_FLAG_DIR_C2M);
     }
 
