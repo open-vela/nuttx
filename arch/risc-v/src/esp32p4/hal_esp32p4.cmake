@@ -547,7 +547,13 @@ endif()
 if(CONFIG_ESP32P4_MIPI_DSI)
   list(APPEND HAL_SRCS
        ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_lcd/mipi_dsi_hal.c
-       ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_lcd/${CHIP_SERIES}/mipi_dsi_periph.c
+       ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_lcd/${CHIP_SERIES}/mipi_dsi_periph.c)
+endif()
+
+# DW-GDMA HAL is required by the ported high-level DW-GDMA driver, which is
+# shared by the MIPI-DSI display and the MIPI-CSI camera.
+if(CONFIG_ESP32P4_MIPI_DSI OR CONFIG_ESP32P4_CAMERA)
+  list(APPEND HAL_SRCS
        ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_dma/dw_gdma_hal.c)
 endif()
 

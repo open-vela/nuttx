@@ -37,7 +37,6 @@
 #include <nuttx/irq.h>
 #include <nuttx/cache.h>
 
-#include "esp_irq.h"
 #include "riscv_internal.h"
 
 #include "hal/dw_gdma_ll.h"
@@ -46,8 +45,8 @@
 #include "hal/mipi_csi_phy_ll.h"
 #include "hal/mipi_csi_host_ll.h"
 #include "hal/mipi_csi_brg_ll.h"
-#include "soc/interrupts.h"
 
+#include "esp_dw_gdma_idf.h"
 #include "esp_mipi_csi.h"
 
 /****************************************************************************
@@ -154,6 +153,17 @@
  ****************************************************************************/
 
 static struct esp_csi_dev_s g_csi_dev;
+
+/* DW-GDMA channel used to move frames out of the CSI bridge FIFO.
+ * The channel is owned by the ported ESP-IDF high-level DW-GDMA driver,
+ * which also arbitrates the controller with the MIPI-DSI driver.
+ */
+
+static dw_gdma_channel_handle_t g_csi_dma_chan;
+
+/* Channel index reported by the DW-GDMA driver (diagnostics only) */
+
+static int g_csi_dma_chan_id = -1;
 
 /****************************************************************************
  * Private Functions
@@ -502,105 +512,71 @@ static void esp_csi_bridge_init(void)
 
 static void esp_csi_dma_arm(FAR uint8_t *dst)
 {
-  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
-  const uint8_t ch = ESP_CSI_DMA_CHANNEL;
+  dw_gdma_block_transfer_config_t xfer =
+  {
+    .src =
+    {
+      .addr        = ESP_CSI_BRG_MEM_BASE,
+      .burst_mode  = DW_GDMA_BURST_MODE_FIXED,
+      .burst_items = DW_GDMA_BURST_ITEMS_512,
+      .burst_len   = 16,
+      .width       = DW_GDMA_TRANS_WIDTH_64,
+    },
+    .dst =
+    {
+      .addr        = (uint32_t)(uintptr_t)dst,
+      .burst_mode  = DW_GDMA_BURST_MODE_INCREMENT,
+      .burst_items = DW_GDMA_BURST_ITEMS_512,
+      .burst_len   = 16,
+      .width       = DW_GDMA_TRANS_WIDTH_64,
+    },
+    .size = ESP_CSI_DMA_XFER_ITEMS,
+  };
 
-  /* Source: CSI bridge FIFO, fixed address, 64-bit, burst 512/16 */
+  dw_gdma_block_markers_t markers =
+  {
+    .is_valid           = true,
+    .is_last            = true,
+    .en_trans_done_intr = true,
+  };
 
-  dw_gdma_ll_channel_set_src_addr(dev, ch, ESP_CSI_BRG_MEM_BASE);
-  dw_gdma_ll_channel_set_src_burst_mode(dev, ch, DW_GDMA_BURST_MODE_FIXED);
-  dw_gdma_ll_channel_set_src_trans_width(dev, ch, DW_GDMA_TRANS_WIDTH_64);
-  dw_gdma_ll_channel_set_src_burst_items(dev, ch, DW_GDMA_BURST_ITEMS_512);
-  dw_gdma_ll_channel_set_src_burst_len(dev, ch, 16);
-  dw_gdma_ll_channel_set_src_master_port(dev, ch, ESP_CSI_BRG_MEM_BASE);
+  if (g_csi_dma_chan == NULL)
+    {
+      return;
+    }
 
-  /* Destination: frame buffer, incrementing address, 64-bit */
+  /* Source is the CSI bridge FIFO (fixed address), destination is the
+   * frame buffer (incrementing). One contiguous single-block transfer.
+   */
 
-  dw_gdma_ll_channel_set_dst_addr(dev, ch, (uint32_t)(uintptr_t)dst);
-  dw_gdma_ll_channel_set_dst_burst_mode(dev, ch, DW_GDMA_BURST_MODE_INCREMENT);
-  dw_gdma_ll_channel_set_dst_trans_width(dev, ch, DW_GDMA_TRANS_WIDTH_64);
-  dw_gdma_ll_channel_set_dst_burst_items(dev, ch, DW_GDMA_BURST_ITEMS_512);
-  dw_gdma_ll_channel_set_dst_burst_len(dev, ch, 16);
-  dw_gdma_ll_channel_set_dst_master_port(dev, ch, (uintptr_t)dst);
-
-  /* One RAW8 frame worth of 64-bit items */
-
-  dw_gdma_ll_channel_set_trans_block_size(dev, ch, ESP_CSI_DMA_XFER_ITEMS);
-
-  /* Contiguous single-block transfer, source is flow controller (CSI) */
-
-  dw_gdma_ll_channel_set_src_multi_block_type(dev, ch,
-                                     DW_GDMA_BLOCK_TRANSFER_CONTIGUOUS);
-  dw_gdma_ll_channel_set_dst_multi_block_type(dev, ch,
-                                     DW_GDMA_BLOCK_TRANSFER_CONTIGUOUS);
-  dw_gdma_ll_channel_set_trans_flow(dev, ch, DW_GDMA_ROLE_PERIPH_CSI,
-                                    DW_GDMA_ROLE_MEM, DW_GDMA_FLOW_CTRL_SRC);
-
-  /* Hardware handshake, CSI as source peripheral */
-
-  dw_gdma_ll_channel_set_src_handshake_interface(dev, ch,
-                                                 DW_GDMA_HANDSHAKE_HW);
-  dw_gdma_ll_channel_set_dst_handshake_interface(dev, ch,
-                                                 DW_GDMA_HANDSHAKE_HW);
-  dw_gdma_ll_channel_set_src_handshake_periph(dev, ch,
-                                              DW_GDMA_ROLE_PERIPH_CSI);
-  dw_gdma_ll_channel_set_src_outstanding_limit(dev, ch, 5);
-  dw_gdma_ll_channel_set_dst_outstanding_limit(dev, ch, 5);
-  dw_gdma_ll_channel_set_priority(dev, ch, 1);
-
-  /* Enable block-transfer-done interrupt for this single block */
-
-  dw_gdma_ll_channel_set_block_markers(dev, ch, true, true, true);
-  dw_gdma_ll_channel_clear_intr(dev, ch, UINT32_MAX);
-  dw_gdma_ll_channel_enable_intr_generation(dev, ch,
-                             DW_GDMA_LL_CHANNEL_EVENT_BLOCK_TFR_DONE, true);
-  dw_gdma_ll_channel_enable_intr_propagation(dev, ch,
-                             DW_GDMA_LL_CHANNEL_EVENT_BLOCK_TFR_DONE, true);
+  dw_gdma_channel_config_transfer(g_csi_dma_chan, &xfer);
+  dw_gdma_channel_set_block_markers(g_csi_dma_chan, markers);
 
   /* Enable the channel */
 
-  dw_gdma_ll_channel_enable(dev, ch, true);
+  dw_gdma_channel_enable_ctrl(g_csi_dma_chan, true);
 }
 
 /****************************************************************************
- * Name: esp_csi_dma_isr
+ * Name: csi_dma_block_done_cb
  *
  * Description:
- *   DW-GDMA interrupt handler. On block-transfer-done for the CSI channel,
- *   invalidate the completed buffer's cache, notify the upper layer, and
- *   re-arm the DMA with the next buffer.
+ *   Block-transfer-done callback invoked from the DW-GDMA driver ISR for
+ *   the CSI channel. The driver has already read and cleared the channel
+ *   interrupt status. Invalidate the completed buffer's cache, notify the
+ *   upper layer, and re-arm the DMA with the next buffer.
+ *
+ *   Runs in interrupt context: no syslog here (USB CDC syslog blocks when
+ *   the host has not asserted DTR and would hang the system).
  ****************************************************************************/
 
-static int esp_csi_dma_isr(int irq, void *context, void *arg)
+static bool csi_dma_block_done_cb(dw_gdma_channel_handle_t chan,
+                    const dw_gdma_trans_done_event_data_t *event_data,
+                    FAR void *user_data)
 {
-  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
-  const uint8_t ch = ESP_CSI_DMA_CHANNEL;
-  uint32_t status;
-
-  /* --- Handle DSI channel 1 first (if it fired) --- */
-
-  {
-    uint32_t dsi_st = dev->ch[1].int_st0.val;
-    if (dsi_st)
-      {
-        extern void esp_dsi_dma_isr_handler(void);
-        esp_dsi_dma_isr_handler();
-      }
-  }
-
-  /* --- Handle CSI channel 0 --- */
-
-  status = dev->ch[ch].int_st0.val;
-
-  if ((status & DW_GDMA_LL_CHANNEL_EVENT_BLOCK_TFR_DONE) == 0)
-    {
-      /* Not our event - clear whatever fired and return */
-
-      dw_gdma_ll_channel_clear_intr(dev, ch, status);
-      return OK;
-    }
-
-  dw_gdma_ll_channel_clear_intr(dev, ch, status);
+  UNUSED(chan);
+  UNUSED(event_data);
+  UNUSED(user_data);
 
   g_csi_dev.frame_count++;
 
@@ -636,22 +612,48 @@ static int esp_csi_dma_isr(int irq, void *context, void *arg)
         }
     }
 
-  return OK;
+  return false;
 }
 
 /****************************************************************************
  * Name: esp_csi_dma_init
  *
  * Description:
- *   Initialize the DW-GDMA controller and allocate the CSI DMA channel
- *   interrupt. Also allocates internal backup frame buffers.
+ *   Allocate a DW-GDMA channel through the high-level DW-GDMA driver and
+ *   register the block-transfer-done callback. The high-level driver owns
+ *   the controller (bus clock, reset, global interrupt) and the shared
+ *   DW-GDMA interrupt, so the camera and the MIPI-DSI display can share
+ *   the same controller. Also allocates internal backup frame buffers.
  ****************************************************************************/
 
 static int esp_csi_dma_init(void)
 {
-  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
-  int __DECLARE_RCC_ATOMIC_ENV;
-  (void)__DECLARE_RCC_ATOMIC_ENV;
+  dw_gdma_channel_alloc_config_t alloc_cfg =
+  {
+    .src =
+    {
+      .block_transfer_type      = DW_GDMA_BLOCK_TRANSFER_CONTIGUOUS,
+      .role                     = DW_GDMA_ROLE_PERIPH_CSI,
+      .handshake_type           = DW_GDMA_HANDSHAKE_HW,
+      .num_outstanding_requests = 5,
+    },
+    .dst =
+    {
+      .block_transfer_type      = DW_GDMA_BLOCK_TRANSFER_CONTIGUOUS,
+      .role                     = DW_GDMA_ROLE_MEM,
+      .handshake_type           = DW_GDMA_HANDSHAKE_HW,
+      .num_outstanding_requests = 5,
+    },
+    .flow_controller = DW_GDMA_FLOW_CTRL_SRC,
+    .chan_priority   = 1,
+  };
+
+  dw_gdma_event_callbacks_t cbs =
+  {
+    .on_block_trans_done = csi_dma_block_done_cb,
+  };
+
+  esp_err_t err;
 
   /* Allocate internal backup frame buffers (used when no v4l2 buffer is
    * queued). RAW8 sized, 64-byte (cache line) aligned.
@@ -671,34 +673,38 @@ static int esp_csi_dma_init(void)
   memset(g_csi_dev.frame_buffer[1], 0, ESP_CSI_FRAME_SIZE);
   g_csi_dev.active_buf = 0;
 
-  /* Enable DW-GDMA bus clock and release reset */
+  /* Ask the high-level DW-GDMA driver for a channel matching the camera's
+   * transfer shape (peripheral -> memory, contiguous, CSI is the flow
+   * controller). The driver picks the first free channel in the group.
+   */
 
-  dw_gdma_ll_enable_bus_clock(0, true);
-  dw_gdma_ll_reset_register(0);
-
-  /* Reset and enable the controller, enable global interrupt */
-
-  dw_gdma_ll_reset(dev);
-  dw_gdma_ll_enable_controller(dev, true);
-  dw_gdma_ll_enable_intr_global(dev, true);
-
-  /* Hook the DW-GDMA interrupt */
-
-  g_csi_dev.cpuint = esp_setup_irq(ETS_DW_GDMA_INTR_SOURCE,
-                                   ESP_IRQ_PRIORITY_DEFAULT,
-                                   ESP_IRQ_TRIGGER_LEVEL,
-                                   esp_csi_dma_isr, NULL);
-  if (g_csi_dev.cpuint < 0)
+  err = dw_gdma_new_channel(&alloc_cfg, &g_csi_dma_chan);
+  if (err != ESP_OK)
     {
-      syslog(LOG_ERR, "CSI: Failed to setup DW-GDMA IRQ: %d\n",
-             g_csi_dev.cpuint);
-      return g_csi_dev.cpuint;
+      syslog(LOG_ERR, "CSI: Failed to allocate DW-GDMA channel: %d\n",
+             (int)err);
+      return -ENODEV;
     }
 
-  up_enable_irq(ESP_SOURCE2IRQ(ETS_DW_GDMA_INTR_SOURCE));
+  dw_gdma_channel_get_id(g_csi_dma_chan, &g_csi_dma_chan_id);
 
-  syslog(LOG_INFO, "CSI: DW-GDMA initialized (xfer_items=%d, frame=%d bytes)\n",
-         ESP_CSI_DMA_XFER_ITEMS, ESP_CSI_FRAME_SIZE);
+  /* Register the per-frame (block transfer done) callback. This also
+   * installs the shared DW-GDMA interrupt inside the driver.
+   */
+
+  err = dw_gdma_channel_register_event_callbacks(g_csi_dma_chan, &cbs, NULL);
+  if (err != ESP_OK)
+    {
+      syslog(LOG_ERR, "CSI: Failed to register DW-GDMA callbacks: %d\n",
+             (int)err);
+      dw_gdma_del_channel(g_csi_dma_chan);
+      g_csi_dma_chan = NULL;
+      return -EIO;
+    }
+
+  syslog(LOG_INFO, "CSI: DW-GDMA channel %d ready "
+         "(xfer_items=%d, frame=%d bytes)\n",
+         g_csi_dma_chan_id, ESP_CSI_DMA_XFER_ITEMS, ESP_CSI_FRAME_SIZE);
   return OK;
 }
 
@@ -836,7 +842,10 @@ int esp_csi_stop(void)
 
   /* Disable the DMA channel */
 
-  dw_gdma_ll_channel_enable(DW_GDMA_LL_GET_HW(0), ESP_CSI_DMA_CHANNEL, false);
+  if (g_csi_dma_chan != NULL)
+    {
+      dw_gdma_channel_enable_ctrl(g_csi_dma_chan, false);
+    }
 
   g_csi_dev.streaming = false;
   syslog(LOG_INFO, "CSI: Streaming stopped (%lu frames)\n",
@@ -883,7 +892,7 @@ int esp_csi_set_buffer(FAR uint8_t *buf, uint32_t size)
 void esp_csi_dump_status(void)
 {
   dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(0);
-  const uint8_t ch = ESP_CSI_DMA_CHANNEL;
+  const int ch = (g_csi_dma_chan_id >= 0) ? g_csi_dma_chan_id : 0;
   csi_brg_dev_t *brg = MIPI_CSI_BRG_LL_GET_HW(0);
   csi_host_dev_t *host = MIPI_CSI_HOST_LL_GET_HW(0);
   int i;

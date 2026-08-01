@@ -71,10 +71,14 @@
 
 #define ESP_CSI_BRG_MEM_BASE      0x50104000
 
-/* DW-GDMA controller */
+/* DW-GDMA controller.
+ *
+ * The DMA channel is allocated dynamically by the high-level DW-GDMA
+ * driver (esp_dw_gdma_idf.c) so the camera and the MIPI-DSI display can
+ * share the controller.
+ */
 
 #define ESP_DW_GDMA_BASE          0x50081000
-#define ESP_CSI_DMA_CHANNEL       0
 
 /* PHY LDO Configuration */
 
@@ -123,7 +127,6 @@ struct esp_csi_dev_s
   uint8_t  *frame_buffer[2];  /* Double frame buffers in PSRAM */
   uint8_t  active_buf;        /* Currently active DMA buffer index */
 
-  int      cpuint;            /* Allocated CPU interrupt for DW-GDMA */
   FAR uint8_t *dma_dst;       /* Current DMA destination buffer */
   uint32_t dma_dst_size;      /* Size of current DMA destination buffer */
   esp_csi_frame_cb_t frame_cb;/* Frame-done callback */

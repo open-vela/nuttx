@@ -26,13 +26,17 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common/espressif espressif)
 set(SRCS esp_chip_rev.c)
 
 if(CONFIG_ESP32P4_MIPI_DSI)
-  list(APPEND SRCS
-    esp_mipi_dsi.c
-    esp_dw_gdma_idf.c)
+  list(APPEND SRCS esp_mipi_dsi.c)
 endif()
 
 if(CONFIG_ESP32P4_CAMERA)
   list(APPEND SRCS esp_camera.c esp_cam_sensor.c esp_mipi_csi.c)
+endif()
+
+# The ported high-level DW-GDMA driver is shared by the MIPI-DSI display and
+# the MIPI-CSI camera. Add it once when either of them is enabled.
+if(CONFIG_ESP32P4_MIPI_DSI OR CONFIG_ESP32P4_CAMERA)
+  list(APPEND SRCS esp_dw_gdma_idf.c)
 endif()
 
 target_compile_definitions(arch PRIVATE _RETARGETABLE_LOCKING)

@@ -95,6 +95,7 @@ struct dw_gdma_group_t {
     int group_id;
     dw_gdma_hal_context_t hal;
     int intr_priority;
+    int cpuint;              /* NuttX: shared CPU interrupt of the group */
     portMUX_TYPE spinlock;
     dw_gdma_channel_t *channels[DW_GDMA_LL_CHANNELS_PER_GROUP];
 };
@@ -162,6 +163,7 @@ static dw_gdma_group_t *dw_gdma_acquire_group_handle(int group_id)
       portMUX_INITIALIZE(&group->spinlock);
       group->group_id = group_id;
       group->intr_priority = -1;
+      group->cpuint = -1;
       ESP_LOGD(TAG, "new group (%d) at %p", group_id, group);
     }
 
@@ -191,6 +193,17 @@ static void dw_gdma_release_group_handle(dw_gdma_group_t *group)
 
   if (del_group)
     {
+      /* The interrupt line is shared by all channels of the group, so it is
+       * released only when the last channel is gone.
+       */
+
+      if (group->cpuint >= 0)
+        {
+          up_disable_irq(ESP_SOURCE2IRQ(ETS_DW_GDMA_INTR_SOURCE));
+          esp_teardown_irq(ETS_DW_GDMA_INTR_SOURCE, group->cpuint);
+          group->cpuint = -1;
+        }
+
       free(group);
       ESP_LOGD(TAG, "delete group (%d)", group_id);
     }
@@ -255,10 +268,10 @@ static esp_err_t channel_destroy(dw_gdma_channel_t *chan)
       channel_unregister_from_group(chan);
     }
 
-  if (chan->cpuint >= 0)
-    {
-      esp_teardown_irq(ETS_DW_GDMA_INTR_SOURCE, chan->cpuint);
-    }
+  /* The DW-GDMA interrupt is owned by the group (all channels share the
+   * same interrupt source), so it is torn down in
+   * dw_gdma_release_group_handle() and not here.
+   */
 
   free(chan);
   return ESP_OK;
@@ -317,12 +330,32 @@ static void dw_gdma_channel_default_isr(dw_gdma_channel_t *chan)
     }
 }
 
+/* All DW-GDMA channels share a single interrupt source. NuttX allocates
+ * interrupts per source (not shared like esp_intr_alloc with
+ * ESP_INTR_FLAG_SHARED), so the group installs one handler and dispatches
+ * to every channel that has a pending event.
+ */
+
 static int dw_gdma_isr_wrapper(int irq, void *context, void *arg)
 {
-  dw_gdma_channel_t *chan = (dw_gdma_channel_t *)arg;
+  dw_gdma_group_t *group = (dw_gdma_group_t *)arg;
+  dw_gdma_hal_context_t *hal = &group->hal;
+  dw_gdma_channel_t *chan;
+  int i;
+
   (void)irq;
   (void)context;
-  dw_gdma_channel_default_isr(chan);
+
+  for (i = 0; i < DW_GDMA_LL_CHANNELS_PER_GROUP; i++)
+    {
+      chan = group->channels[i];
+      if (chan != NULL &&
+          dw_gdma_ll_channel_get_intr_status(hal->dev, i) != 0)
+        {
+          dw_gdma_channel_default_isr(chan);
+        }
+    }
+
   return 0;
 }
 
@@ -339,23 +372,28 @@ static esp_err_t dw_gdma_install_channel_interrupt(dw_gdma_channel_t *chan)
                                              UINT32_MAX, false);
   dw_gdma_ll_channel_clear_intr(hal->dev, chan_id, UINT32_MAX);
 
-  /* Allocate and attach interrupt */
+  /* Allocate and attach the group interrupt once */
 
-  cpuint = esp_setup_irq(ETS_DW_GDMA_INTR_SOURCE,
-                         ESP_IRQ_PRIORITY_DEFAULT,
-                         ESP_IRQ_TRIGGER_LEVEL,
-                         dw_gdma_isr_wrapper,
-                         chan);
-  if (cpuint < 0)
+  if (group->cpuint < 0)
     {
-      ESP_LOGE(TAG, "alloc interrupt failed");
-      return ESP_FAIL;
+      cpuint = esp_setup_irq(ETS_DW_GDMA_INTR_SOURCE,
+                             ESP_IRQ_PRIORITY_DEFAULT,
+                             ESP_IRQ_TRIGGER_LEVEL,
+                             dw_gdma_isr_wrapper,
+                             group);
+      if (cpuint < 0)
+        {
+          ESP_LOGE(TAG, "alloc interrupt failed");
+          return ESP_FAIL;
+        }
+
+      group->cpuint = cpuint;
+      up_enable_irq(ESP_SOURCE2IRQ(ETS_DW_GDMA_INTR_SOURCE));
     }
 
-  up_enable_irq(ESP_SOURCE2IRQ(ETS_DW_GDMA_INTR_SOURCE));
   ESP_LOGD(TAG, "install interrupt for channel (%d,%d)",
            group->group_id, chan_id);
-  chan->cpuint = cpuint;
+  chan->cpuint = group->cpuint;
   return ESP_OK;
 }
 
