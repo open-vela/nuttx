@@ -3,7 +3,8 @@
  *
  * Implements board_fb_initialize() for the ESP32-P4 Function EV Board.
  * Uses the DSI driver's framebuffer and registers a proper fb device.
- * FBIOPAN_DISPLAY triggers a flush of fb content to the DSI bridge.
+ * FBIOPAN_DISPLAY writes the framebuffer back to memory so that the DSI
+ * DMA, which re-reads it continuously, picks up the new pixels.
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -91,9 +92,21 @@ static int esp_fb_getplaneinfo(struct fb_vtable_s *vtable,
 static int esp_fb_pandisplay(struct fb_vtable_s *vtable,
                              struct fb_planeinfo_s *pinfo)
 {
-  /* Flush the framebuffer to DSI bridge on every pan_display call */
+  /* There is a single framebuffer that the DSI DMA re-reads continuously,
+   * so there is nothing to flip. All a pan needs to do is write the
+   * framebuffer back from the CPU cache to memory so the DMA picks up the
+   * pixels the caller just drew.
+   */
 
   esp_mipi_dsi_flush_fb();
+
+  /* The upper half queues one pan-info entry per FBIOPAN_DISPLAY and
+   * expects the driver to consume it on vsync. This driver has no vsync
+   * interrupt, so drop the previous entry here; otherwise the queue fills
+   * up after the first pan and every later ioctl returns -ENOSPC.
+   */
+
+  fb_remove_paninfo(vtable, FB_NO_OVERLAY);
   return OK;
 }
 
@@ -123,7 +136,7 @@ int board_fb_initialize(void)
   g_planeinfo.bpp          = FB_BPP;
   g_planeinfo.display      = 0;
   g_planeinfo.xres_virtual = FB_XRES;
-  g_planeinfo.yres_virtual = FB_YRES * 2;  /* Double buffer for pan */
+  g_planeinfo.yres_virtual = FB_YRES;
   g_planeinfo.xoffset      = 0;
   g_planeinfo.yoffset      = 0;
 

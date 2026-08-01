@@ -840,23 +840,6 @@ static void dsi_start_video(void)
 }
 
 /****************************************************************************
- * Name: dsi_write_fb_to_bridge
- *
- * Description:
- *   CPU-based framebuffer write to Bridge FIFO.
- *   This is a simplified approach for initial bring-up.
- *   In production, DW-GDMA would handle this continuously.
- *
- ****************************************************************************/
-
-static void dsi_write_fb_to_bridge(void)
-{
-  /* No-op: framebuffer refresh is handled by DW-GDMA in
-   * esp_mipi_dsi_start_refresh() called from bringup.
-   */
-}
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -959,30 +942,25 @@ uint8_t *esp_mipi_dsi_get_fb(void)
  * Name: esp_mipi_dsi_flush_fb
  *
  * Description:
- *   Flush the framebuffer content to the DSI bridge FIFO. Must be called
- *   after the framebuffer is updated (e.g., after each camera frame is
- *   rendered). In video mode, the bridge continuously reads from its FIFO
- *   and sends to the panel via DPI. This CPU copy feeds the FIFO.
+ *   Write the framebuffer back from the CPU data cache to physical memory
+ *   so that the DW-GDMA engine feeding the DSI bridge sees fresh pixels.
+ *
+ *   The bridge is fed continuously by DMA, which re-reads the framebuffer
+ *   through its normal (cached) address. Producers therefore write the
+ *   framebuffer through that same cached address and call this function
+ *   afterwards; without the writeback the DMA keeps sending stale lines.
  *
  ****************************************************************************/
 
 void esp_mipi_dsi_flush_fb(void)
 {
-  volatile uint32_t *brg_mem = (volatile uint32_t *)MIPI_DSI_BRG_MEM_BASE;
-  uint32_t *fb32 = (uint32_t *)g_framebuffer;
-  uint32_t words;
-  uint32_t i;
-
   if (g_framebuffer == NULL)
     {
       return;
     }
 
-  words = ESP_DSI_FB_SIZE / 4;
-  for (i = 0; i < words; i++)
-    {
-      brg_mem[0] = fb32[i];
-    }
+  esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
+                  ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 }
 
 /****************************************************************************

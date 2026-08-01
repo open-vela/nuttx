@@ -572,10 +572,22 @@ int esp_bringup(void)
 #endif
 
 #ifdef CONFIG_ESP32P4_MIPI_DSI
-  /* Start DSI DMA refresh AFTER camera init (camera resets GDMA) */
+  /* Start the DSI DMA refresh after camera init. The camera no longer
+   * resets the DW-GDMA controller (both go through the shared high-level
+   * driver), so the order here only determines channel assignment: the
+   * camera claims channel 0 and the display gets channel 1.
+   */
 
   esp_mipi_dsi_start_refresh();
+
+  /* The demo thread repaints the whole framebuffer every 2 seconds, which
+   * would stomp on camera frames. Only run it as a standalone display
+   * self-test, i.e. when there is no camera preview to interfere with.
+   */
+
+#ifndef CONFIG_ESP32P4_CAMERA
   esp_mipi_dsi_start_demo();
+#endif
 #endif
 
 

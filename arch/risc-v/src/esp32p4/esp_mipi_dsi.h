@@ -79,7 +79,9 @@ uint8_t *esp_mipi_dsi_get_fb(void);
  * Name: esp_mipi_dsi_flush_fb
  *
  * Description:
- *   Flush framebuffer cache to physical memory (call after updating FB).
+ *   Write the framebuffer back from the CPU data cache to physical memory
+ *   so the DMA feeding the DSI bridge sees fresh pixels. Call after every
+ *   framebuffer update, which must be done via the normal cached address.
  ****************************************************************************/
 
 void esp_mipi_dsi_flush_fb(void);
