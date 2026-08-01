@@ -699,8 +699,13 @@ static void dsi_configure_dpi(void)
   /* Step 15: Configure Host DPI interface */
 
   mipi_dsi_host_ll_dpi_set_vcid(host, 0);
+  /* RGB565 with sub_config 0 selects 16-bit configuration 1, which is
+   * what ESP-IDF's esp_lcd_new_panel_dpi() passes. This programs
+   * DPI_COLOR_CODING (host offset 0x10) to 0.
+   */
+
   mipi_dsi_host_ll_dpi_set_color_coding(host,
-      LCD_COLOR_FMT_RGB888, 0);
+      LCD_COLOR_FMT_RGB565, 0);
 
   /* All signals active high */
 
@@ -735,12 +740,12 @@ static void dsi_configure_dpi(void)
    */
 
   mipi_dsi_brg_ll_set_num_pixel_bits(bridge,
-      PANEL_HRES * PANEL_VRES * 24);  /* RGB888 = 24 bits per pixel */
+      PANEL_HRES * PANEL_VRES * 16);  /* RGB565 = 16 bits per pixel */
   mipi_dsi_brg_ll_set_underrun_discard_count(bridge, PANEL_HRES);
   mipi_dsi_brg_ll_set_input_color_format(bridge,
-      LCD_COLOR_FMT_RGB888);  /* Input: RGB888 from framebuffer */
+      LCD_COLOR_FMT_RGB565);  /* Input: RGB565 from framebuffer */
   mipi_dsi_brg_ll_set_output_color_format(bridge,
-      LCD_COLOR_FMT_RGB888, 0);  /* Output: RGB888 (no conversion) */
+      LCD_COLOR_FMT_RGB565, 0);  /* Output: RGB565 (no conversion) */
   mipi_dsi_brg_ll_set_flow_controller(bridge,
       MIPI_DSI_LL_FLOW_CONTROLLER_DMA);
   mipi_dsi_brg_ll_set_multi_block_number(bridge, 1);
@@ -799,15 +804,13 @@ static int dsi_alloc_framebuffer(void)
       return OK;
     }
 
-  /* Fill full framebuffer with RED (RGB888: R=0xFF, G=0, B=0) */
+  /* Fill full framebuffer with RED (RGB565: 0xF800) */
 
-  uint8_t *fb8 = (uint8_t *)g_framebuffer;
+  uint16_t *fb16_full = (uint16_t *)g_framebuffer;
   int i;
-  for (i = 0; i < ESP_DSI_FB_SIZE; i += 3)
+  for (i = 0; i < ESP_DSI_HRES * ESP_DSI_VRES; i++)
     {
-      fb8[i + 0] = 0xff;  /* R */
-      fb8[i + 1] = 0x00;  /* G */
-      fb8[i + 2] = 0x00;  /* B */
+      fb16_full[i] = 0xf800;
     }
 
   syslog(LOG_INFO, "Framebuffer allocated: %p, size=%d bytes (filled RED)\n",
@@ -1135,12 +1138,12 @@ void esp_mipi_dsi_start_refresh(void)
    */
 
   {
+    uint16_t *fb16 = (uint16_t *)g_framebuffer;
     uint32_t j;
-    for (j = 0; j < ESP_DSI_FB_SIZE; j += 3)
+
+    for (j = 0; j < ESP_DSI_HRES * ESP_DSI_VRES; j++)
       {
-        g_framebuffer[j + 0] = 0xff;  /* R */
-        g_framebuffer[j + 1] = 0x00;  /* G */
-        g_framebuffer[j + 2] = 0x00;  /* B */
+        fb16[j] = 0xf800;  /* Red */
       }
 
     esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
@@ -1197,7 +1200,7 @@ void esp_mipi_dsi_start_refresh(void)
 
 static int dsi_demo_thread(int argc, FAR char *argv[])
 {
-  uint8_t *fb_nc;
+  uint16_t *fb16;
   bool show_red = true;
   uint32_t j;
 
@@ -1216,7 +1219,7 @@ static int dsi_demo_thread(int argc, FAR char *argv[])
    * see stale data.
    */
 
-  fb_nc = g_framebuffer;
+  fb16 = (uint16_t *)g_framebuffer;
 
   while (1)
     {
@@ -1227,28 +1230,21 @@ static int dsi_demo_thread(int argc, FAR char *argv[])
       show_red = !show_red;
       if (show_red)
         {
-          for (j = 0; j < ESP_DSI_FB_SIZE; j += 3)
+          for (j = 0; j < ESP_DSI_HRES * ESP_DSI_VRES; j++)
             {
-              fb_nc[j + 0] = 0xff;
-              fb_nc[j + 1] = 0x00;
-              fb_nc[j + 2] = 0x00;
+              fb16[j] = 0xf800;  /* Red */
             }
-
-          esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
-                          ESP_CACHE_MSYNC_FLAG_DIR_C2M);
         }
       else
         {
-          for (j = 0; j < ESP_DSI_FB_SIZE; j += 3)
+          for (j = 0; j < ESP_DSI_HRES * ESP_DSI_VRES; j++)
             {
-              fb_nc[j + 0] = 0x00;
-              fb_nc[j + 1] = 0x00;
-              fb_nc[j + 2] = 0xff;
+              fb16[j] = 0x001f;  /* Blue */
             }
-
-          esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
-                          ESP_CACHE_MSYNC_FLAG_DIR_C2M);
         }
+
+      esp_cache_msync(g_framebuffer, ESP_DSI_FB_SIZE,
+                      ESP_CACHE_MSYNC_FLAG_DIR_C2M);
     }
 
   return 0;

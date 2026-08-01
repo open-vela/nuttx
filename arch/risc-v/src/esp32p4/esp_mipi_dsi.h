@@ -14,8 +14,8 @@
 
 #define ESP_DSI_HRES              1024
 #define ESP_DSI_VRES              600
-#define ESP_DSI_FB_BPP            24   /* RGB888 */
-#define ESP_DSI_FB_SIZE           (ESP_DSI_HRES * ESP_DSI_VRES * 3)
+#define ESP_DSI_FB_BPP            16   /* RGB565 */
+#define ESP_DSI_FB_SIZE           (ESP_DSI_HRES * ESP_DSI_VRES * 2)
 
 /* Panel timing (EK79007) */
 
@@ -70,7 +70,7 @@ void esp_mipi_dsi_start_refresh(void);
  * Name: esp_mipi_dsi_get_fb
  *
  * Description:
- *   Get pointer to the RGB888 framebuffer.
+ *   Get pointer to the RGB565 framebuffer.
  ****************************************************************************/
 
 uint8_t *esp_mipi_dsi_get_fb(void);

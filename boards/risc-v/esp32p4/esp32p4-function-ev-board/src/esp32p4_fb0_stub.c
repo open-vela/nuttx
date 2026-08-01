@@ -45,7 +45,7 @@ static int esp_fb_pandisplay(struct fb_vtable_s *vtable,
 
 static struct fb_videoinfo_s g_videoinfo =
 {
-  .fmt      = FB_FMT_RGB24,
+  .fmt      = FB_FMT_RGB16_565,
   .xres     = FB_XRES,
   .yres     = FB_YRES,
   .nplanes  = 1,
