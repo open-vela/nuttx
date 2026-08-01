@@ -66,7 +66,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* The shared area is amp-shmem@31000000 from the Linux device tree: 4MB,
+/* The shared area is amp-shmem@31000000 from the Linux device tree: 8MB,
  * declared no-map so the kernel never treats it as ordinary memory, and
  * already mapped MT_NORMAL_NC by rk3588_boot.c.
  *
@@ -75,15 +75,34 @@
  * cross-core writes look frozen because they sat in this core's cache - see the
  * comment on the AMP_SHMEM entry in rk3588_boot.c.
  *
- * Only two pages of the 4MB are used now that the frame buffers are gone: the
- * first is skipped (see AMP_SHM_RESERVED_HEAD) and the second holds the control
- * block. The carveout is left at its declared size because shrinking it means
- * changing the device tree and reflashing boot.img, which is not worth doing for
- * memory nothing else is asking for.
+ * AMP_SHM_SIZE below is stated three times in three places that cannot include
+ * each other, and all three have to agree:
+ *
+ *   - here, which is what both sides of the frame protocol compute offsets from
+ *   - the AMP_SHMEM MMU entry in arch/arm64/src/rk3588/rk3588_boot.c, which is
+ *     what makes those offsets addressable on this core
+ *   - amp-shmem@31000000 in the Linux device tree, which is what keeps the
+ *     kernel out of the region, and which lives in a separate repository and
+ *     needs boot.img reflashed to take effect
+ *
+ * Only the device tree one fails loudly when it disagrees. A short MMU entry is
+ * silent until something reaches past it; see the note on that entry.
  */
 
 #define AMP_SHM_BASE       0x31000000
-#define AMP_SHM_SIZE       (4 * 1024 * 1024)
+#define AMP_SHM_SIZE       (8 * 1024 * 1024)
+
+/* Grown from 4MB, which is a device tree change and a boot.img reflash, and was
+ * not worth doing until there was something to spend it on.
+ *
+ * There is now. A camera frame that fills this panel is 540x960 at four bytes a
+ * pixel, and two of those do not fit alongside the descriptors in 4MB. The frame
+ * used to be 512x288 centred with a black border, covering 28 percent of the
+ * screen, because that was what a 1MB slot held.
+ *
+ * The address space above is clear: amp-core ends at 0x31000000 and nothing else
+ * in this device tree sits below 0x31800000, so the region simply extends.
+ */
 
 /* The magic changes with the layout, and that is the only thing that protects
  * against an old program reading a new control block.
@@ -168,9 +187,10 @@
  *   0x000000  skipped, 4KB          - something outside this project writes here
  *   0x001000  fb control block      - written here, read by Linux
  *   0x002000  camera descriptor     - written by Linux, read here
- *   0x100000  camera buffer 0       - 1MB slot
- *   0x200000  camera buffer 1       - 1MB slot
- *   0x300000  spare to end of 4MB   - room for a third buffer
+ *   0x003000  detection descriptor  - written by Linux, read here
+ *   0x100000  camera buffer 0       - 2MB slot
+ *   0x300000  camera buffer 1       - 2MB slot
+ *   0x500000  spare to end of 8MB   - 3MB, room for a third buffer
  *
  * Two blocks rather than camera fields appended to the control block, because the
  * control block's contract is "written here, read by Linux" and the camera's
@@ -181,24 +201,33 @@
  * amp_shm_ctrl_s byte-for-byte unchanged, so an older host binary still reads the
  * geometry correctly instead of half-correctly.
  *
- * The buffer slots are 1MB and 1MB-aligned rather than sized to the frame. The
+ * The buffer slots are 2MB and 2MB-aligned rather than sized to the frame. The
  * alignment makes the offsets checkable at a glance, and the slack means changing
- * capture resolution does not move anything. There is no cost: the 4MB carveout
- * already exists and nothing else is asking for it.
+ * capture resolution does not move anything.
  *
- * A slot holds any frame up to 1MB, so 640x360x4 (921600) fits with room to
- * spare. This core validates stride * height against the slot size rather than
- * trusting the descriptor, since a bad descriptor would otherwise read - or worse,
- * be copied - past the end of the area.
+ * They were 1MB, which held the 512x288 frame that was centred in the panel with
+ * a black border around it. A frame that fills the panel is 540x960 at four bytes
+ * a pixel - 2073600 - so 1MB stopped being enough the moment the picture was
+ * asked to fill the screen, and the carveout grew from 4MB to 8MB to make room.
+ *
+ * 2MB rather than the 1.98MB actually needed, and XRGB8888 rather than the RGB565
+ * that would have squeezed into the old 1MB slot at 98.9 percent of it. A design
+ * sitting eleven thousand bytes below its ceiling is a trap for whoever next
+ * changes the resolution, and the carveout costs nothing: 3MB of the 8 is still
+ * unused.
+ *
+ * This core validates stride * height against the slot size rather than trusting
+ * the descriptor, since a bad descriptor would otherwise read - or worse, be
+ * copied - past the end of the area.
  */
 
 #define AMP_CAM_DESC_OFFSET  (AMP_SHM_HDR_OFFSET + AMP_SHM_HDR_SIZE)
 #define AMP_CAM_DESC_SIZE    4096
 
 #define AMP_CAM_NBUFFERS     2
-#define AMP_CAM_SLOT_SIZE    0x100000
+#define AMP_CAM_SLOT_SIZE    0x200000
 #define AMP_CAM_BUF0_OFFSET  0x100000
-#define AMP_CAM_BUF1_OFFSET  0x200000
+#define AMP_CAM_BUF1_OFFSET  0x300000
 
 /* Default capture geometry. 16:9 to match the sensor, both dimensions a multiple
  * of 16 because the ISP's scaler wants aligned output, and small enough that the
@@ -214,7 +243,28 @@
 #define AMP_CAM_BPP          4          /* XRGB8888, as the framebuffer is */
 
 #define AMP_CAM_MAGIC        0x314d4143 /* "CAM1" as a little-endian word */
-#define AMP_CAM_VERSION      1
+
+/* Version 2 moved the second slot and doubled both, for the full-screen frame.
+ *
+ * The descriptor's own layout did not change, so the magic did not have to: the
+ * doctrine above bumps the magic because a version field only protects against
+ * programs that check it, and both sides of this block do - cam_geometry() tests
+ * version before touching anything else.
+ *
+ * A mismatched pair is in fact already safe without either bump, because that
+ * function requires bufoffset to be exactly one of the two known constants and
+ * returns -EINVAL otherwise. That is a per-frame rejection with no message,
+ * though, so the version bump exists to turn a silently blank screen into one
+ * line naming the reason.
+ *
+ * What is NOT protected either way is a new firmware on an old device tree. This
+ * core maps AMP_SHM_SIZE from its own build and never consults the device tree,
+ * so 8MB of firmware against a 4MB reservation maps four megabytes that Linux
+ * believes it owns. boot.img has to be reflashed with this change, not merely
+ * amp.img.
+ */
+
+#define AMP_CAM_VERSION      2
 
 /* Detection results. Written by Linux, read here.
  *

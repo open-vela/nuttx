@@ -59,9 +59,19 @@ static const struct arm_mmu_region g_mmu_regions[] =
                         CONFIG_RAMBANK1_ADDR, CONFIG_RAMBANK1_SIZE,
                         MT_NORMAL | MT_RW | MT_SECURE),
 
-  /* AMP shared memory (amp-shmem@31000000, 4MB): outside NuttX RAM and
+  /* AMP shared memory (amp-shmem@31000000, 8MB): outside NuttX RAM and
    * Linux no-map. Used for the cross-core heartbeat/rpmsg. Mapped here so
    * the AMP core can read/write it; Linux reads it via /dev/mem.
+   *
+   * The size below duplicates AMP_SHM_SIZE in
+   * boards/arm64/rk3588/evb7-amp/src/evb7_amp_shm.h, which arch code cannot
+   * include. Keep the two in sync, and note how this fails when they drift:
+   * a too-small mapping here produces no startup error at all. Everything
+   * works until something touches the first byte past the end, which then
+   * takes a level-2 translation fault (ESR EC=0x25 DFSC=0b000110) inside
+   * whichever task got there first. Growing the camera slots from 1MB to 2MB
+   * cost one board cycle exactly this way: the fault address was the last
+   * word below 0x31400000, three layers away from this line.
    */
 
   /* Non-cacheable so cpu_l3 writes land in DRAM immediately and Linux (reading
@@ -71,7 +81,7 @@ static const struct arm_mmu_region g_mmu_regions[] =
    */
 
   MMU_REGION_FLAT_ENTRY("AMP_SHMEM",
-                        0x31000000, MB(4),
+                        0x31000000, MB(8),
                         MT_NORMAL_NC | MT_RW | MT_SECURE),
 
   /* rpmsg region: vrings@0x07c00000 (rpmsg_reserved) + buffer pool@0x08000000
