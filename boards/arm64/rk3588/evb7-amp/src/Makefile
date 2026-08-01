@@ -52,4 +52,15 @@ CSRCS += evb7_amp_reset.c
 endif
 endif
 
+# Startup scripts, built into a ROMFS image mounted at /etc by nx_bringup()
+# before the init task runs. This is how the UI is started at boot: nsh executes
+# rc.sysinit and then rcS, and rcS launches it in the background.
+#
+# Both files are listed because nsh looks for both, and both are run through the
+# C preprocessor on the way in - which is what lets rcS guard the launch on the
+# application actually being configured.
+ifeq ($(CONFIG_ETC_ROMFS),y)
+RCSRCS = etc/init.d/rc.sysinit etc/init.d/rcS
+endif
+
 include $(TOPDIR)/boards/Board.mk
