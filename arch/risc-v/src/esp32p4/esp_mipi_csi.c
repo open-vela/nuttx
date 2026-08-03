@@ -72,21 +72,64 @@
 #define ISP_MIPI_DATA_EN      (1 << 0)   /* MIPI data input enable (gate) */
 #define ISP_EN                (1 << 1)   /* ISP global enable */
 #define ISP_DEMOSAIC_EN       (1 << 6)   /* Demosaic enable */
+#define ISP_CCM_EN            (1 << 8)   /* Colour correction matrix */
 #define ISP_RGB2YUV_EN        (1 << 10)  /* RGB2YUV enable */
 #define ISP_YUV2RGB_EN        (1 << 13)  /* YUV2RGB enable */
 
 /* ISP_CNTL_REG field positions */
 
 #define ISP_DATA_TYPE_SHIFT   25   /* 2 bits: 0=RAW8, 1=RAW10, 2=RAW12 */
-#define ISP_IN_SRC_SHIFT      27   /* 2 bits: 0=CSI, 1=CAM/DVP, 2=DMA */
-#define ISP_OUT_TYPE_SHIFT    29   /* 3 bits: 0=RAW8, 1=YUV422, 2=RGB888 */
+#define ISP_OUT_TYPE_SHIFT    29   /* 3 bits: 0=RAW8, 1=YUV422, 4=RGB565 */
 
-/* ISP_FRAME_CFG_REG field positions */
+/* ISP_FRAME_CFG_REG field positions.
+ *
+ * Note bayer_mode lives HERE, at bit 27 of ISP_FRAME_CFG, not in
+ * ISP_CNTL. Encoding is 00=BG/GR, 01=GB/RG, 10=GR/BG, 11=RG/GB, so a
+ * BGGR sensor (first line BG, second GR) is mode 0.
+ */
 
 #define ISP_VADR_NUM_SHIFT    0    /* 12 bits: vertical rows - 1 */
 #define ISP_HADR_NUM_SHIFT    12   /* 12 bits: horizontal pixels - 1 */
+#define ISP_BAYER_MODE_SHIFT  27   /* 2 bits, see above */
+#define ISP_BAYER_MODE_BGGR   0    /* SC2336 emits BGGR in every mode */
 #define ISP_HSYNC_START_BIT   (1 << 29)
 #define ISP_HSYNC_END_BIT     (1 << 30)
+
+/* Colour correction matrix (ISP_CCM_COEF*).
+ *
+ * On ESP32-P4 rev >= 3 each coefficient is 13 bits: 1 sign, 4 integer and
+ * 8 fractional, so 1.0 == 256, matching the reset value of the diagonal.
+ * Registers pack two coefficients each, low at bit 0 and high at bit 13,
+ * except COEF5 which holds only the last one.
+ */
+
+#define ISP_CCM_COEF0_REG     (ISP_BASE + 0x14)  /* RR | RG */
+#define ISP_CCM_COEF1_REG     (ISP_BASE + 0x18)  /* RB | GR */
+#define ISP_CCM_COEF3_REG     (ISP_BASE + 0x1c)  /* GG | GB */
+#define ISP_CCM_COEF4_REG     (ISP_BASE + 0x20)  /* BR | BG */
+#define ISP_CCM_COEF5_REG     (ISP_BASE + 0x24)  /* BB */
+
+#define ISP_CCM_ONE           256    /* 1.0 in S4.8 */
+#define ISP_CCM_MASK          0x1fff
+#define ISP_CCM_HI_SHIFT      13
+
+#define ISP_CCM_PACK(lo, hi) \
+  ((((uint32_t)(lo)) & ISP_CCM_MASK) | \
+   ((((uint32_t)(hi)) & ISP_CCM_MASK) << ISP_CCM_HI_SHIFT))
+
+/* Static white balance gains applied through the CCM diagonal.
+ *
+ * A raw Bayer frame with no white balance is green dominant: green owns
+ * half the pixels and silicon is most sensitive there. Lifting red and
+ * blue relative to green removes the cast. These are fixed daylight-ish
+ * gains, not a measurement - the ISP can do real AWB (ISP_AWB_* plus the
+ * statistics registers) and that is the proper fix, but it needs a
+ * control loop. Tune here if the cast is still visible.
+ */
+
+#define ISP_WB_GAIN_R         (ISP_CCM_ONE * 185 / 100)  /* 1.85x */
+#define ISP_WB_GAIN_G         (ISP_CCM_ONE)              /* 1.00x */
+#define ISP_WB_GAIN_B         (ISP_CCM_ONE * 175 / 100)  /* 1.75x */
 
 /* PMU LDO register for MIPI PHY power */
 
@@ -333,9 +376,21 @@ static void esp_csi_isp_init(void)
    */
 
   reg = ISP_MIPI_DATA_EN | ISP_EN |
-        ISP_DEMOSAIC_EN | ISP_RGB2YUV_EN | ISP_YUV2RGB_EN |
+        ISP_DEMOSAIC_EN | ISP_CCM_EN |
+        ISP_RGB2YUV_EN | ISP_YUV2RGB_EN |
         (4u << ISP_OUT_TYPE_SHIFT);  /* isp_out_type = 4 = RGB565 */
   REG_WRITE(ISP_CNTL_REG, reg);
+
+  /* Programme the colour correction matrix as a diagonal white balance.
+   * Off-diagonal terms stay zero, so no channel mixing happens; only the
+   * per-channel gains above are applied.
+   */
+
+  REG_WRITE(ISP_CCM_COEF0_REG, ISP_CCM_PACK(ISP_WB_GAIN_R, 0));
+  REG_WRITE(ISP_CCM_COEF1_REG, ISP_CCM_PACK(0, 0));
+  REG_WRITE(ISP_CCM_COEF3_REG, ISP_CCM_PACK(ISP_WB_GAIN_G, 0));
+  REG_WRITE(ISP_CCM_COEF4_REG, ISP_CCM_PACK(0, 0));
+  REG_WRITE(ISP_CCM_COEF5_REG, ISP_WB_GAIN_B & ISP_CCM_MASK);
 
   /* Step 4: Configure frame dimensions
    *
@@ -348,6 +403,7 @@ static void esp_csi_isp_init(void)
 
   reg = ((ESP_CSI_VRES - 1) << ISP_VADR_NUM_SHIFT) |
         ((ESP_CSI_HRES - 1) << ISP_HADR_NUM_SHIFT) |
+        (ISP_BAYER_MODE_BGGR << ISP_BAYER_MODE_SHIFT) |
         ISP_HSYNC_START_BIT |
         ISP_HSYNC_END_BIT;
   REG_WRITE(ISP_FRAME_CFG_REG, reg);
