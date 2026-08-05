@@ -29,6 +29,12 @@
 
 #include <stdint.h>
 
+/* Include the ESP-HAL esp_timer.h for esp_timer_handle_t etc.
+ * Note: This header shadows the ESP-HAL version in the same directory,
+ * so we include the ESP-HAL version explicitly via its -I path.
+ */
+#include <esp_timer.h>
+
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
