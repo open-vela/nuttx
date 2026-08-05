@@ -132,5 +132,23 @@ int esp_gpio_init(void);
 int board_emac_init(void);
 #endif
 
+/****************************************************************************
+ * Name: board_gt911_initialize
+ *
+ * Description:
+ *   Initialize the Goodix GT911 touch controller on the specified I2C bus.
+ *
+ * Input Parameters:
+ *   busno - I2C bus number
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_INPUT_GT9XX
+int board_gt911_initialize(int busno);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_RISCV_ESP32P4_ESP32P4_FUNCTION_EV_BOARD_SRC_ESP32P4_FUNCTION_EV_BOARD_H */

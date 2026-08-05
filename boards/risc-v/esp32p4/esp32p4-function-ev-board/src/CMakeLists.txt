@@ -45,6 +45,10 @@ if(CONFIG_VIDEO_FB)
   list(APPEND SRCS esp32p4_fb0_stub.c)
 endif()
 
+if(CONFIG_INPUT_GT9XX)
+  list(APPEND SRCS esp32p4_touch.c)
+endif()
+
 target_sources(board PRIVATE ${SRCS})
 
 # ##############################################################################

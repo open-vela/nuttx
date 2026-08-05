@@ -67,6 +67,10 @@
 #  include <nuttx/input/buttons.h>
 #endif
 
+#ifdef CONFIG_INPUT_GT9XX
+#  include <nuttx/input/gt9xx.h>
+#endif
+
 #ifdef CONFIG_ESPRESSIF_EFUSE
 #  include "espressif/esp_efuse.h"
 #endif
@@ -591,6 +595,16 @@ int esp_bringup(void)
 #endif
 
 
+
+  /* Initialize Goodix GT911 touch controller (polling mode, no IRQ pin) */
+
+#ifdef CONFIG_INPUT_GT9XX
+  ret = board_gt911_initialize(0);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: board_gt911_initialize failed: %d\n", ret);
+    }
+#endif /* CONFIG_INPUT_GT9XX */
 
   /* If we got here then perhaps not all initialization was successful, but
    * at least enough succeeded to bring-up NSH with perhaps reduced
