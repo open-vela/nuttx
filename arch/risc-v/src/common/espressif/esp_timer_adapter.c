@@ -479,10 +479,10 @@ int esp_hr_timer_init(void)
       return OK;
     }
 
-  /* esp_timer_init() from ESP-HAL calls ROM functions that are not
-   * compatible with the NuttX PMP configuration. Skip it for now.
-   * The HR timer functionality is not needed for Ethernet bringup.
-   */
+  /* esp_timer_init() and its callers traverse multiple ROM functions
+   * (0x4fc05ebc, 0x4fc05d1c, etc.) that cause PMP Load access faults
+   * in NuttX. Skip entire ESP-HAL timer init until PMP is fixed.
+   * EMAC driver will fail (ESP_ERR_INVALID_STATE) without timers. */
 
   g_hr_timer_initialized = true;
   return OK;
