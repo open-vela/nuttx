@@ -474,21 +474,16 @@ void esp_hr_timer_unlock(void)
 
 int esp_hr_timer_init(void)
 {
-  esp_err_t ret;
-
   if (g_hr_timer_initialized)
     {
       return OK;
     }
 
-  /* Initialize the timer subsystem */
+  /* esp_timer_init() from ESP-HAL calls ROM functions that are not
+   * compatible with the NuttX PMP configuration. Skip it for now.
+   * The HR timer functionality is not needed for Ethernet bringup.
+   */
 
-  ret = esp_timer_init();
-  if (ret == ESP_OK)
-    {
-      g_hr_timer_initialized = true;
-      return OK;
-    }
-
-  return ERROR;
+  g_hr_timer_initialized = true;
+  return OK;
 }
