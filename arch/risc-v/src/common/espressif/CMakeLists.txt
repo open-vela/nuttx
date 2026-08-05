@@ -170,6 +170,10 @@ if(CONFIG_ESPRESSIF_EMAC)
   list(APPEND SRCS esp_emac.c)
 endif()
 
+if(CONFIG_ESP32P4_JPEG_ENCODER)
+  list(APPEND SRCS esp_jpeg_enc.c)
+endif()
+
 if(CONFIG_SYSTEM_NXDIAG_ESPRESSIF_CHIP_WO_TOOL)
   list(APPEND SRCS esp_nxdiag.c)
 endif()

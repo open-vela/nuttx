@@ -4842,4 +4842,12 @@ config ESPRESSIF_TEMP_THREAD_STACKSIZE
 
 endmenu # ESPRESSIF_TEMP
 
+config ESP32P4_JPEG_ENCODER
+	bool "ESP32-P4 hardware JPEG encoder"
+	default n
+	depends on ARCH_CHIP_ESP32P4
+	---help---
+		Enable ESP32-P4 hardware JPEG encoder in V4L2 M2M framework.
+		Encodes RGB565 frames to JPEG bitstream.
+
 endif

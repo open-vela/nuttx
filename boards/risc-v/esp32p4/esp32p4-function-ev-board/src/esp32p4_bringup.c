@@ -71,6 +71,10 @@
 #  include <nuttx/input/gt9xx.h>
 #endif
 
+#ifdef CONFIG_ESP32P4_JPEG_ENCODER
+#  include "esp_jpeg_enc.h"
+#endif
+
 #ifdef CONFIG_ESPRESSIF_EFUSE
 #  include "espressif/esp_efuse.h"
 #endif
@@ -605,6 +609,16 @@ int esp_bringup(void)
       syslog(LOG_ERR, "ERROR: board_gt911_initialize failed: %d\n", ret);
     }
 #endif /* CONFIG_INPUT_GT9XX */
+
+  /* Register JPEG encoder device (V4L2 M2M bridge to ESP-HAL) */
+
+#ifdef CONFIG_ESP32P4_JPEG_ENCODER
+  ret = esp_jpeg_encoder_register("/dev/jpeg");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: esp_jpeg_encoder_register failed: %d\n", ret);
+    }
+#endif
 
   /* If we got here then perhaps not all initialization was successful, but
    * at least enough succeeded to bring-up NSH with perhaps reduced
