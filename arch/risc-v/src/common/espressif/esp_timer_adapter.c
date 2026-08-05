@@ -479,10 +479,9 @@ int esp_hr_timer_init(void)
       return OK;
     }
 
-  /* esp_timer_init() and its callers traverse multiple ROM functions
-   * (0x4fc05ebc, 0x4fc05d1c, etc.) that cause PMP Load access faults
-   * in NuttX. Skip entire ESP-HAL timer init until PMP is fixed.
-   * EMAC driver will fail (ESP_ERR_INVALID_STATE) without timers. */
+  /* esp_timer_init() ROM call chain (0x4fc05ebc, 0x4fc05d1c, etc.)
+   * causes PMP faults in NuttX. Skip entirely.
+   * EMAC link check timer will fail gracefully (NULL guard in esp_eth.c). */
 
   g_hr_timer_initialized = true;
   return OK;
