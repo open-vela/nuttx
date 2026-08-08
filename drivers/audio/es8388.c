@@ -459,7 +459,7 @@ static void es8388_setvolume(FAR struct es8388_dev_s *priv,
   /* Convert from (0..1000) to (-96..0) */
 
   dbleftlvl = (int16_t)
-    (leftlvl ? (20 * log10f((float)rightlvl / AUDIO_VOLUME_MAX)) : -96);
+    (leftlvl ? (20 * log10f((float)leftlvl / AUDIO_VOLUME_MAX)) : -96);
   dbrightlvl = (int16_t)
     (rightlvl ? (20 * log10f((float)rightlvl / AUDIO_VOLUME_MAX)) : -96);
 
