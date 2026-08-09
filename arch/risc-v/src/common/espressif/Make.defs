@@ -37,10 +37,27 @@ CHIP_CSRCS += esp_irq.c esp_gpio.c esp_rtc_gpio.c esp_libc_stubs.c
 CHIP_CSRCS += esp_lowputc.c esp_serial.c
 CHIP_CSRCS += esp_systemreset.c
 
+# Keep the established openvela common layer for existing chips. ESP32-P4
+# uses a HAL-compatible startup path and does not require RTC GPIO for the
+# minimal USB Serial/JTAG console milestone.
+
+ifeq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
+	CHIP_CSRCS := $(filter-out esp_start.c esp_rtc_gpio.c esp_irq.c esp_gpio.c esp_lowputc.c esp_serial.c,$(CHIP_CSRCS))
+	CHIP_CSRCS += esp_start_p4.c esp_irq_p4.c esp_gpio_p4.c
+	CHIP_CSRCS += esp_lowputc_p4.c esp_serial_p4.c
+	CHIP_CSRCS += esp_p4_sched_compat.c
+	CHIP_ASRCS := $(filter-out esp_vectors.S,$(CHIP_ASRCS))
+	CHIP_ASRCS += esp_vectors_p4.S
+endif
+
 ifeq ($(CONFIG_SCHED_TICKLESS),y)
 	CHIP_CSRCS += esp_tickless.c
 else
+ifeq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
+	CHIP_CSRCS += esp_timerisr_p4.c
+else
 	CHIP_CSRCS += esp_timerisr.c
+endif
 endif
 
 ifeq ($(CONFIG_ESPRESSIF_WDT),y)
@@ -84,7 +101,11 @@ ifeq ($(CONFIG_ESP_PCNT_AS_QE),y)
 endif
 
 ifeq ($(CONFIG_ESPRESSIF_USBSERIAL),y)
+ifeq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
+	CHIP_CSRCS += esp_usbserial_p4.c
+else
 	CHIP_CSRCS += esp_usbserial.c
+endif
 endif
 
 ifeq ($(CONFIG_ESP_RMT),y)
@@ -188,6 +209,13 @@ chip/$(ESP_HAL_3RDPARTY_REPO):
 ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms: ${ESP_HAL_3RDPARTY_VERSION}"
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) checkout --quiet $(ESP_HAL_3RDPARTY_VERSION)
+endif
+ifeq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
+ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
+	$(Q) echo "Espressif HAL: initializing P4 crypto dependency..."
+	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) submodule --quiet update --init $(GIT_DEPTH_PARAMETER) components/mbedtls/mbedtls
+	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO)/components/mbedtls/mbedtls reset --quiet --hard
+endif
 endif
 ifeq ($(CONFIG_ESP_WIRELESS),y)
 ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
