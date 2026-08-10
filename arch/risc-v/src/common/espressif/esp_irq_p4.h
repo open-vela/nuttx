@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/risc-v/src/common/espressif/esp_irq.h
+ * arch/risc-v/src/common/espressif/esp_irq_p4.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *

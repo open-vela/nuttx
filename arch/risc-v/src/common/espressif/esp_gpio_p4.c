@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/risc-v/src/common/espressif/esp_gpio.c
+ * arch/risc-v/src/common/espressif/esp_gpio_p4.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
