@@ -63,6 +63,9 @@
 #  define FUNCTION_1        (1 << FUNCTION_SHIFT)
 #  define FUNCTION_2        (2 << FUNCTION_SHIFT)
 #  define FUNCTION_3        (3 << FUNCTION_SHIFT)
+#  define FUNCTION_4        (4 << FUNCTION_SHIFT)
+#  define FUNCTION_5        (5 << FUNCTION_SHIFT)
+#  define FUNCTION_6        (6 << FUNCTION_SHIFT)
 
 #define DRIVE_SHIFT         9
 #define DRIVE_MASK          (7 << DRIVE_SHIFT)

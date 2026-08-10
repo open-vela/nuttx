@@ -32,6 +32,7 @@
 
 #include <assert.h>
 #include <debug.h>
+#include <errno.h>
 #include <stdint.h>
 #include <sys/types.h>
 
@@ -70,6 +71,11 @@ static gpio_hal_context_t g_gpio_hal =
 {
   .dev = GPIO_HAL_GET_HW(GPIO_PORT_0)
 };
+
+#ifdef CONFIG_ESPRESSIF_GPIO_IRQ
+static struct intr_adapter_from_nuttx
+  g_gpio_intr_adapter[SOC_GPIO_PIN_COUNT];
+#endif
 
 /****************************************************************************
  * Private Functions
@@ -281,7 +287,7 @@ void esp_gpio_matrix_out(uint32_t pin, uint32_t signal_idx, bool out_inv,
 
 void esp_gpiowrite(int pin, bool value)
 {
-  DEBUGASSERT(pin >= 0 && pin <= SOC_GPIO_PIN_COUNT);
+  DEBUGASSERT(pin >= 0 && pin < SOC_GPIO_PIN_COUNT);
 
   gpio_hal_set_level(&g_gpio_hal, pin, value);
 }
@@ -302,7 +308,7 @@ void esp_gpiowrite(int pin, bool value)
 
 bool esp_gpioread(int pin)
 {
-  DEBUGASSERT(pin >= 0 && pin <= SOC_GPIO_PIN_COUNT);
+  DEBUGASSERT(pin >= 0 && pin < SOC_GPIO_PIN_COUNT);
 
   return gpio_hal_get_level(&g_gpio_hal, pin) != 0;
 }
@@ -325,9 +331,15 @@ bool esp_gpioread(int pin)
 #ifdef CONFIG_ESPRESSIF_GPIO_IRQ
 void esp_gpioirqinitialize(void)
 {
+  esp_err_t ret;
+
   /* Setup the GPIO interrupt. */
 
-  gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  ret = gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+  if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
+    {
+      gpioerr("gpio_install_isr_service() failed: %d\n", ret);
+    }
 }
 #endif
 
@@ -354,7 +366,7 @@ int esp_gpioirqenable(int id)
   if (esp_ret != ESP_OK)
     {
       gpioerr("gpio_intr_enable() failed: %d\n", esp_ret);
-      return -ERROR;
+      return -EIO;
     }
 
   return OK;
@@ -384,7 +396,7 @@ int esp_gpioirqdisable(int id)
   if (esp_ret != ESP_OK)
     {
       gpioerr("gpio_intr_disable() failed: %d\n", esp_ret);
-      return -ERROR;
+      return -EIO;
     }
 
   return OK;
@@ -415,22 +427,20 @@ int esp_gpioirqdisable(int id)
 #ifdef CONFIG_ESPRESSIF_GPIO_IRQ
 int esp_gpio_irq(int id, xcpt_t irqhandler, void *arg)
 {
-  int ret;
   int irq = ESP_PIN2IRQ(id);
+  esp_err_t esp_ret;
+  struct intr_adapter_from_nuttx *adapter;
+
+  if (id < 0 || id >= SOC_GPIO_PIN_COUNT)
+    {
+      return -EINVAL;
+    }
+
+  adapter = &g_gpio_intr_adapter[id];
 
   if (NULL != irqhandler)
     {
-      esp_err_t esp_ret;
-      struct intr_adapter_from_nuttx *adapter;
-
       gpioinfo("Attach %p\n", irqhandler);
-
-      adapter = kmm_calloc(1, sizeof(struct intr_adapter_from_nuttx));
-      if (adapter == NULL)
-        {
-          gpioerr("kmm_calloc() failed\n");
-          return -ERROR;
-        }
 
       adapter->func = irqhandler;
       adapter->irq = irq;
@@ -441,14 +451,24 @@ int esp_gpio_irq(int id, xcpt_t irqhandler, void *arg)
                                      (void *)adapter);
       if (esp_ret != ESP_OK)
         {
-          gpioerr("gpio_isr_handler_add() failed: %d\n", ret);
-          return -ERROR;
+          gpioerr("gpio_isr_handler_add() failed: %d\n", esp_ret);
+          adapter->func = NULL;
+          adapter->arg = NULL;
+          return -EIO;
         }
     }
   else
     {
       gpioinfo("Disable the interrupt\n");
-      gpio_isr_handler_remove(id);
+      esp_ret = gpio_isr_handler_remove(id);
+      if (esp_ret != ESP_OK)
+        {
+          gpioerr("gpio_isr_handler_remove() failed: %d\n", esp_ret);
+          return -EIO;
+        }
+
+      adapter->func = NULL;
+      adapter->arg = NULL;
     }
 
   return OK;
