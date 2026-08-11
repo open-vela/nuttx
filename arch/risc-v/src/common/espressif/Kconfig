@@ -357,7 +357,7 @@ config ESPRESSIF_I2C0
 config ESPRESSIF_I2C1
 	bool "I2C 1"
 	default n
-	depends on ARCH_CHIP_ESP32H2
+	depends on ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32P4
 	select ESPRESSIF_I2C
 	select I2C
 	select ESPRESSIF_I2C_PERIPH
@@ -1658,12 +1658,14 @@ if ESPRESSIF_I2C0
 config ESPRESSIF_I2C0_SCLPIN
 	int "I2C0 SCL Pin"
 	default 6
-	range 0 21
+	range 0 21 if !ARCH_CHIP_ESP32P4
+	range 0 54 if ARCH_CHIP_ESP32P4
 
 config ESPRESSIF_I2C0_SDAPIN
 	int "I2C0 SDA Pin"
 	default 5
-	range 0 21
+	range 0 21 if !ARCH_CHIP_ESP32P4
+	range 0 54 if ARCH_CHIP_ESP32P4
 
 endif # ESPRESSIF_I2C0
 
@@ -1672,12 +1674,14 @@ if ESPRESSIF_I2C1
 config ESPRESSIF_I2C1_SCLPIN
 	int "I2C1 SCL Pin"
 	default 2
-	range 0 21
+	range 0 21 if !ARCH_CHIP_ESP32P4
+	range 0 54 if ARCH_CHIP_ESP32P4
 
 config ESPRESSIF_I2C1_SDAPIN
 	int "I2C1 SDA Pin"
 	default 1
-	range 0 21
+	range 0 21 if !ARCH_CHIP_ESP32P4
+	range 0 54 if ARCH_CHIP_ESP32P4
 
 endif # ESPRESSIF_I2C1
 

@@ -47,17 +47,29 @@
 #include <arch/board/board.h>
 
 #include "esp_i2c.h"
-#include "esp_irq.h"
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+#  include "esp_irq_p4.h"
+#else
+#  include "esp_irq.h"
+#endif
 #include "esp_gpio.h"
 #include "riscv_internal.h"
 
-#include "periph_ctrl.h"
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+#  include "esp_private/periph_ctrl.h"
+#else
+#  include "periph_ctrl.h"
+#endif
 #include "hal/i2c_hal.h"
 #include "hal/i2c_types.h"
 #include "hal/i2c_ll.h"
 #include "soc/system_reg.h"
 #include "soc/gpio_sig_map.h"
-#include "soc/i2c_periph.h"
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+#  include "hal/i2c_periph.h"
+#else
+#  include "soc/i2c_periph.h"
+#endif
 #if defined(CONFIG_ESPRESSIF_ESP32H2) || defined(CONFIG_ESPRESSIF_ESP32C6)
 #  include "soc/pcr_reg.h"
 #endif
@@ -76,6 +88,36 @@
 #ifdef CONFIG_ESPRESSIF_ESP32C6
 #  define SYSTEM_I2C_EXT0_CLK_EN PCR_I2C_CLK_EN
 #  define SYSTEM_I2C_EXT0_RST    PCR_I2C_RST_EN
+#endif
+
+/* ESP32-P4 uses the newer HAL naming and controls I2C clocks directly from
+ * i2c_ll.h.  Keep these aliases local to the older openvela lower-half so
+ * the C3/C6/H2 paths retain their validated implementation.
+ */
+
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+#  define SYSTEM_I2C_EXT0_CLK_EN 0
+#  define SYSTEM_I2C_EXT0_RST    0
+#  define SYSTEM_I2C_EXT1_CLK_EN 0
+#  define SYSTEM_I2C_EXT1_RST    0
+#  define ETS_I2C_EXT0_INTR_SOURCE ETS_I2C0_INTR_SOURCE
+#  define ETS_I2C_EXT1_INTR_SOURCE ETS_I2C1_INTR_SOURCE
+#  define ESP_IRQ_I2C_EXT0 ESP_IRQ_I2C0
+#  define ESP_IRQ_I2C_EXT1 ESP_IRQ_I2C1
+#  define I2CEXT0_SCL_IN_IDX  I2C0_SCL_PAD_IN_IDX
+#  define I2CEXT0_SCL_OUT_IDX I2C0_SCL_PAD_OUT_IDX
+#  define I2CEXT0_SDA_IN_IDX  I2C0_SDA_PAD_IN_IDX
+#  define I2CEXT0_SDA_OUT_IDX I2C0_SDA_PAD_OUT_IDX
+#  define I2CEXT1_SCL_IN_IDX  I2C1_SCL_PAD_IN_IDX
+#  define I2CEXT1_SCL_OUT_IDX I2C1_SCL_PAD_OUT_IDX
+#  define I2CEXT1_SDA_IN_IDX  I2C1_SDA_PAD_IN_IDX
+#  define I2CEXT1_SDA_OUT_IDX I2C1_SDA_PAD_OUT_IDX
+#  define i2c_ll_write_cmd_reg i2c_ll_master_write_cmd_reg
+#  define i2c_ll_set_filter i2c_ll_master_set_filter
+#  define ESP32P4_I2C_XTAL_FREQ 40000000
+#  define ESP32P4_I2C_SCL_TIMEOUT_US \
+     (CONFIG_ESPRESSIF_I2CTIMEOSEC * 1000000 + \
+      CONFIG_ESPRESSIF_I2CTIMEOMS * 1000)
 #endif
 
 #define GET_STATUS(hw) hw->sr.val
@@ -260,7 +302,6 @@ struct esp_i2c_priv_s
 
 static void esp_i2c_reset_fifo(struct esp_i2c_priv_s *priv);
 static void esp_i2c_intr_enable(struct esp_i2c_priv_s *priv);
-static void esp_i2c_intr_enable(struct esp_i2c_priv_s *priv);
 static void esp_i2c_intr_disable(struct esp_i2c_priv_s *priv);
 static void esp_i2c_sendstart(struct esp_i2c_priv_s *priv);
 static void esp_i2c_senddata(struct esp_i2c_priv_s *priv);
@@ -272,7 +313,9 @@ static void esp_i2c_init_clock(struct esp_i2c_priv_s *priv,
 static void esp_i2c_init(struct esp_i2c_priv_s *priv);
 static void esp_i2c_deinit(struct esp_i2c_priv_s *priv);
 static void esp_i2c_reset_fsmc(struct esp_i2c_priv_s *priv);
+#ifndef CONFIG_I2C_POLLED
 static int esp_i2c_sem_waitdone(struct esp_i2c_priv_s *priv);
+#endif
 #ifdef CONFIG_I2C_POLLED
 static int esp_i2c_polling_waitdone(struct esp_i2c_priv_s *priv);
 #endif /* CONFIG_I2C_POLLED */
@@ -499,9 +542,9 @@ static void esp_i2c_sendstart(struct esp_i2c_priv_s *priv)
 {
   struct i2c_msg_s *msg = &priv->msgv[priv->msgid];
   uint32_t fifo_val = 0;
-  i2c_ll_hw_cmd_t restart_cmd;
-  i2c_ll_hw_cmd_t write_cmd;
-  i2c_ll_hw_cmd_t end_cmd;
+  i2c_ll_hw_cmd_t restart_cmd = {0};
+  i2c_ll_hw_cmd_t write_cmd = {0};
+  i2c_ll_hw_cmd_t end_cmd = {0};
 
   /* Write I2C command registers */
 
@@ -624,8 +667,8 @@ static void esp_i2c_startrecv(struct esp_i2c_priv_s *priv)
   int ack_value = 0;
   struct i2c_msg_s *msg = &priv->msgv[priv->msgid];
   int n = msg->length - priv->bytes;
-  i2c_ll_hw_cmd_t read_cmd;
-  i2c_ll_hw_cmd_t end_cmd;
+  i2c_ll_hw_cmd_t read_cmd = {0};
+  i2c_ll_hw_cmd_t end_cmd = {0};
 
   if (n > 1)
     {
@@ -709,8 +752,21 @@ static void esp_i2c_init_clock(struct esp_i2c_priv_s *priv,
     }
 
   i2c_clock_source_t src_clk = I2C_CLK_SRC_DEFAULT;
-  i2c_hal_set_bus_timing(priv->ctx, priv->config->clk_freq,
-                         src_clk, XTAL_CLK_FREQ);
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  PERIPH_RCC_ATOMIC()
+    {
+      i2c_hal_set_bus_timing(priv->ctx, bus_freq, src_clk,
+                             ESP32P4_I2C_XTAL_FREQ);
+      i2c_ll_set_source_clk(priv->ctx->dev, src_clk);
+    }
+#else
+  i2c_hal_set_bus_timing(priv->ctx, bus_freq, src_clk, XTAL_CLK_FREQ);
+#endif
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  i2c_hal_master_set_scl_timeout_val(priv->ctx,
+                                     ESP32P4_I2C_SCL_TIMEOUT_US,
+                                     ESP32P4_I2C_XTAL_FREQ);
+#endif
   i2c_ll_update(priv->ctx->dev);
   priv->clk_freq = bus_freq;
 }
@@ -745,9 +801,17 @@ static void esp_i2c_init(struct esp_i2c_priv_s *priv)
 
   /* Enable I2C hardware */
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  PERIPH_RCC_ATOMIC()
+    {
+      i2c_ll_enable_bus_clock(priv->id, true);
+      i2c_ll_reset_register(priv->id);
+      i2c_hal_init(priv->ctx, priv->id);
+    }
+#else
   periph_module_enable(i2c_periph_signal[priv->id].module);
-
   i2c_hal_init(priv->ctx, priv->id);
+#endif
 
   /* Disable I2C interrupts */
 
@@ -779,11 +843,21 @@ static void esp_i2c_init(struct esp_i2c_priv_s *priv)
 
 static void esp_i2c_deinit(struct esp_i2c_priv_s *priv)
 {
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   const struct esp_i2c_config_s *config = priv->config;
+#endif
 
   priv->clk_freq = 0;
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  PERIPH_RCC_ATOMIC()
+    {
+      i2c_hal_deinit(priv->ctx);
+      i2c_ll_enable_bus_clock(priv->id, false);
+    }
+#else
   i2c_hal_deinit(priv->ctx);
   periph_module_disable(i2c_periph_signal[priv->id].module);
+#endif
 }
 
 /****************************************************************************
@@ -1478,7 +1552,9 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
   struct esp_i2c_priv_s *priv;
 #ifndef CONFIG_I2C_POLLED
   const struct esp_i2c_config_s *config;
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   int ret;
+#endif
 #endif
 
   switch (port)
@@ -1519,9 +1595,17 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
       esp_teardown_irq(config->periph, priv->cpuint);
     }
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  priv->cpuint = esp_setup_irq(config->periph,
+                               ESP_IRQ_PRIORITY_DEFAULT,
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               esp_i2c_irq,
+                               priv);
+#else
   priv->cpuint = esp_setup_irq(config->periph,
                                ESP_IRQ_PRIORITY_DEFAULT,
                                ESP_IRQ_TRIGGER_LEVEL);
+#endif
   if (priv->cpuint < 0)
     {
       /* Failed to allocate a CPU interrupt of this type. */
@@ -1532,6 +1616,7 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
       return NULL;
     }
 
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   ret = irq_attach(config->irq, esp_i2c_irq, priv);
   if (ret != OK)
     {
@@ -1544,13 +1629,24 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
 
       return NULL;
     }
+#endif
 
-  /* Enable the CPU interrupt that is linked to the I2C device. */
+  /* Enable the CPU interrupt that is linked to the I2C device.  ESP32-P4
+   * must first reset the peripheral and clear its interrupt enables below;
+   * enabling the CPU IRQ before that point can service a reset-time pending
+   * interrupt continuously and prevent board bring-up from completing.
+   */
 
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   up_enable_irq(config->irq);
+#endif
 #endif
 
   esp_i2c_init(priv);
+
+#if !defined(CONFIG_I2C_POLLED) && defined(CONFIG_ARCH_CHIP_ESP32P4)
+  up_enable_irq(config->irq);
+#endif
   nxmutex_unlock(&priv->lock);
 
   i2cinfo("I2C bus initialized! Handler: %p\n", priv);
