@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# OpenVela NuttX ARM vendor build group.
+#
+# Each target appears twice: the plain entry schedules the build, the
+# matching CMake, entry selects the CMake flow when testbuild.sh runs
+# with -N. Blacklist entries use the testbuild grammar with the first
+# slash of the target replaced by a colon, e.g.:
+#   -Linux,vendor:openvela/boards/vela/configs/foo/
+
+vendor/openvela/boards/vela/configs/goldfish-armeabi-v7a-ap/
+CMake,vendor/openvela/boards/vela/configs/goldfish-armeabi-v7a-ap/
+vendor/openvela/boards/vela/configs/qemu-armeabi-v7a-ap/
+CMake,vendor/openvela/boards/vela/configs/qemu-armeabi-v7a-ap/
+vendor/openvela/boards/vela/configs/qemu-armeabi-v7a-bl/
+CMake,vendor/openvela/boards/vela/configs/qemu-armeabi-v7a-bl/
+vendor/openvela/boards/vela/configs/qemu-armeabi-v7a-server/
+CMake,vendor/openvela/boards/vela/configs/qemu-armeabi-v7a-server/
+vendor/openvela/boards/vela/configs/qemu-armeabi-v7a-tee/
+CMake,vendor/openvela/boards/vela/configs/qemu-armeabi-v7a-tee/
+vendor/openvela/boards/vela/configs/qemu-armeabi-v8m-ap/
+CMake,vendor/openvela/boards/vela/configs/qemu-armeabi-v8m-ap/

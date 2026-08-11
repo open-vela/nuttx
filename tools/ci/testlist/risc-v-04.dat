@@ -8,3 +8,24 @@
 
 # error: missing argument to '-Wstack-usage='
 -hifive1-revb:nsh
+
+# Prebuilt rv64 libgcc places __clz_tab out of R_RISCV_HI20 range:
+# "relocation truncated to fit" at link (lp64d and lp64 multilibs).
+-Linux,icicle:hwtest
+-Linux,icicle:knsh
+-Linux,icicle:network
+-Linux,icicle:nsh
+-Linux,icicle:pnsh
+-Linux,icicle:rpmsg-ch1
+-Linux,icicle:rpmsg-ch2
+-Linux,icicle:usb
+-Linux,m100pfsevp:nsh
+-Linux,maix-bit:elf
+-Linux,maix-bit:knsh
+-Linux,maix-bit:knsh_smp
+-Linux,maix-bit:kostest
+-Linux,maix-bit:module
+-Linux,maix-bit:nsh
+-Linux,maix-bit:posix_spawn
+-Linux,maix-bit:smp
+-Linux,maix-bit:smp2

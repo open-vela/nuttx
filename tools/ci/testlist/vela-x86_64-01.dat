@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# OpenVela NuttX x86_64 vendor build group.
+
+vendor/openvela/boards/vela/configs/goldfish-x86_64-ap/
+CMake,vendor/openvela/boards/vela/configs/goldfish-x86_64-ap/

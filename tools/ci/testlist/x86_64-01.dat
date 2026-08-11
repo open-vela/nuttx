@@ -4,3 +4,8 @@
 
 # error: missing binary operator before token
 -qemu-intel64:earlyfb
+
+# Two boards are named qemu-intel64 (x86_64/intel64 and x86_64/qemu), so
+# configure fails with "Multiple input files specified".
+-Linux,qemu-intel64:lvgl
+-Linux,qemu-intel64:fb

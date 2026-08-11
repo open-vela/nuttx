@@ -42,6 +42,7 @@ CHECKCLEAN=1
 CODECHECKER=0
 NINJACMAKE=0
 RUN=0
+BUILDSYSTEM=${TESTBUILD_BUILDSYSTEM:-}
 
 case $(uname -s) in
   Darwin*)
@@ -66,7 +67,7 @@ esac
 function showusage {
   echo ""
   echo "USAGE: $progname -h [-l|m|c|g|n] [-d] [-e <extraflags>] [-x] [-j <ncpus>] [-a <appsdir>] [-t <topdir>] [-p]"
-  echo "       [-A] [-C] [-G] [-N] [-R] [-S] [--codechecker] <testlist-file>"
+  echo "       [-A] [-C] [-G] [-N] [-R] [-S] [--codechecker] [--buildsystem <script>] <testlist-file>"
   echo ""
   echo "Where:"
   echo "  -h will show this help test and terminate"
@@ -91,6 +92,11 @@ function showusage {
   echo "  -R execute \"run\" script in the config directories if exists."
   echo "  -S Adds the nxtmpdir folder for third-party packages."
   echo "  --codechecker enables CodeChecker statically analyze the code."
+  echo "  --buildsystem <script> source <script> after the function definitions to"
+  echo "     override the per-target dispatch functions (resolveconfig, configure,"
+  echo "     build, distclean, refresh, run). Overrides not defined by the script"
+  echo "     keep the default implementation. The path is absolute or relative to"
+  echo "     the nuttx/ directory. Env fallback: TESTBUILD_BUILDSYSTEM."
   echo "  <testlist-file> selects the list of configurations to test.  No default"
   echo ""
   echo "Your PATH variable must include the path to both the build tools and the"
@@ -152,6 +158,10 @@ while [ ! -z "$1" ]; do
     ;;
   --codechecker )
     CODECHECKER=1
+    ;;
+  --buildsystem )
+    shift
+    BUILDSYSTEM="$1"
     ;;
   -h )
     showusage
@@ -490,6 +500,33 @@ function refresh {
   fi
 }
 
+# Resolve $config into the configuration directory $path
+
+function resolveconfig_default {
+  configdir=`echo $config | cut -s -d':' -f2`
+  if [ -z "${configdir}" ]; then
+    configdir=`echo $config | cut -s -d'/' -f2`
+    if [ -z "${configdir}" ]; then
+      echo "ERROR: Malformed configuration: ${config}"
+      showusage
+    else
+      boarddir=`echo $config | cut -d'/' -f1`
+    fi
+  else
+    boarddir=`echo $config | cut -d':' -f1`
+  fi
+
+  path=$nuttx/boards/*/*/$boarddir/configs/$configdir
+  if [ ! -r $path/defconfig ]; then
+    echo "ERROR: no configuration found at $path"
+    showusage
+  fi
+}
+
+function resolveconfig {
+  resolveconfig_default
+}
+
 function run {
   if [ ${RUN} -ne 0 ] && [ -z ${cmake} ]; then
     run_script="$path/run"
@@ -520,7 +557,7 @@ function dotest {
   unset cmake
   if [ ${NINJACMAKE} -eq 1 ]; then
     for l in $cmakelist; do
-      if [[ "${config/\//:}" == "${l}" ]]; then
+      if [[ "${config/\//:}" == "${l}" || "${config}" == "${l}" ]]; then
         echo "Cmake in present: $1"
         cmake=1
       fi
@@ -534,24 +571,7 @@ function dotest {
 
   # Parse the next line
 
-  configdir=`echo $config | cut -s -d':' -f2`
-  if [ -z "${configdir}" ]; then
-    configdir=`echo $config | cut -s -d'/' -f2`
-    if [ -z "${configdir}" ]; then
-      echo "ERROR: Malformed configuration: ${config}"
-      showusage
-    else
-      boarddir=`echo $config | cut -d'/' -f1`
-    fi
-  else
-    boarddir=`echo $config | cut -d':' -f1`
-  fi
-
-  path=$nuttx/boards/*/*/$boarddir/configs/$configdir
-  if [ ! -r $path/defconfig ]; then
-    echo "ERROR: no configuration found at $path"
-    showusage
-  fi
+  resolveconfig
 
   unset toolchain
   unset original_toolchain
@@ -575,6 +595,20 @@ function dotest {
     echo "  Skipping: $1"
   fi
 }
+
+# Optionally source a build-system plugin overriding the per-target
+# dispatch functions. Note: cwd is $nuttx at this point.
+
+if [ ! -z "$BUILDSYSTEM" ]; then
+  if [ -r "$BUILDSYSTEM" ]; then
+    source "$BUILDSYSTEM"
+  elif [ -r "$nuttx/$BUILDSYSTEM" ]; then
+    source "$nuttx/$BUILDSYSTEM"
+  else
+    echo "ERROR: build-system plugin not found: $BUILDSYSTEM"
+    exit 1
+  fi
+fi
 
 # Perform the build test for each entry in the test list file
 

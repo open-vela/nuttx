@@ -22,3 +22,11 @@ CMake,sim:bthcisock
 
 # error: missing argument to '-Wstack-usage='
 -sim:asan
+
+
+# LAME is fetched by an svn checkout only the Makefile performs; the CMake
+# build expects the sources to be there and fails at configure.
+-Linux,sim:alsa
+
+# The vendored libc++ is a clang-only fork that no host GCC can compile.
+-Linux,sim:binder

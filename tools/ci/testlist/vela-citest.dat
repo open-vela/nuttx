@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# OpenVela/NuttX runtime-test group (Make flow; run with -R).
+
+sim:citest
+
+# Not runnable yet:
+#   rv-virt:citest        - nsh timing tests flake under qemu
+#   rv-virt:citest64      - rv64 libgcc __clz_tab relocation overflow
+#   sabre-6quad:citest    - boot panic, arm_cpuidlestack.c:118
+#   qemu-armv8a:citest    - boot panic, arm64_mmu.c:473
+#   qemu-armv8a:citest_smp - boots, but 25 nsh filesystem tests time out
+#   fvp-armv8r:citest     - needs the ARM FVP simulator
+#   fvp-armv8r:citest_smp - needs the ARM FVP simulator
