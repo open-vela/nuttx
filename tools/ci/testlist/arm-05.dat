@@ -150,3 +150,12 @@ CMake,qemu-armv8r-aarch32:pbmp
 # overflowed
 -nrf5340-dk:mcuboot_loader_cpuapp
 -nrf9160-dk:mcuboot_loader
+
+# Clang-only configs; the manifest ships no bare-metal clang, and unlike a
+# CLANG override these cannot fall back to GNU_EABI.
+-Linux,mps3-an547:clang
+-Linux,mps3-an547:gcov
+
+# Fetches sdk-nrfxlib from github during the build and hit the 30 s
+# download timeout; network-dependent and flaky in CI.
+-Linux,nrf52832-dk:sdc

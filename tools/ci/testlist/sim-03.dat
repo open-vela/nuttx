@@ -64,3 +64,7 @@ CMake,sim:vncserver
 
 # undefined reference to `NXlink'
 -sim:toywasm
+
+# The manifest ships no prebuilts/rust project, so there is no rustc.
+-Linux,sim:rust
+

@@ -15,3 +15,27 @@ CMake,rv-virt:smp64
 
 # error: missing argument to '-Wstack-usage='
 -rv-virt:fb
+
+# Prebuilt rv64 libgcc places __clz_tab out of R_RISCV_HI20 range:
+# "relocation truncated to fit" at link.
+-Linux,rv-virt:fb64
+-Linux,rv-virt:flats64
+-Linux,rv-virt:kfb64
+-Linux,rv-virt:knetnsh64
+-Linux,rv-virt:knetnsh64_smp
+-Linux,rv-virt:knsh64
+-Linux,rv-virt:ksmp64
+-Linux,rv-virt:leds64
+-Linux,rv-virt:nsbi64
+-Linux,rv-virt:nsh64
+-Linux,rv-virt:pnsh64
+
+# The manifest ships no prebuilts/rust project, so there is no rustc.
+-Linux,rv-virt:leds64_rust
+
+# Same __clz_tab R_RISCV_HI20 overflow as the group above.
+-Linux,rv-virt:libcxx64
+
+# Same __clz_tab R_RISCV_HI20 overflow as the group above.
+-Linux,rv-virt:smp64
+-Linux,milkv_duos:nsh

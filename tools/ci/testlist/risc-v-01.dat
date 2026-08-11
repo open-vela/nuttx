@@ -6,3 +6,15 @@
 
 # error: unrecognized command-line option '-mno-relax'
 -bl602evb:nsh
+
+# OpenVela prebuilt riscv-none-elf-gcc ships a double-float libgcc.a;
+# bl602evb builds single-float and the linker cannot merge them
+# ("can't link double-float modules with single-float modules").
+-Linux,bl602evb:spiflash
+-Linux,bl602evb:fpu
+-Linux,bl602evb:dma
+-Linux,bl602evb:spi
+-Linux,bl602evb:wifi
+-Linux,bl602evb:i2c
+-Linux,bl602evb:timer
+-Linux,bl602evb:gpio

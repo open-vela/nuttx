@@ -60,3 +60,6 @@ CMake,sim:matter
 
 # error: missing argument to '-Wstack-usage='
 -sim:configdata
+
+# The vendored libc++ is a clang-only fork that no host GCC can compile.
+-Linux,sim:libcxxtest
