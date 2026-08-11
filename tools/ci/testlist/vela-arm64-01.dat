@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# OpenVela NuttX ARM64 vendor build group.
+
+vendor/openvela/boards/vela/configs/goldfish-arm64-v8a-ap/
+CMake,vendor/openvela/boards/vela/configs/goldfish-arm64-v8a-ap/
+vendor/openvela/boards/vela/configs/qemu-arm64-v8a-ap/
+CMake,vendor/openvela/boards/vela/configs/qemu-arm64-v8a-ap/
+vendor/openvela/boards/vela/configs/qemu-arm64-v8a-server/
+CMake,vendor/openvela/boards/vela/configs/qemu-arm64-v8a-server/

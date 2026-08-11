@@ -1,0 +1,41 @@
+name: OpenVela CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      max-targets:
+        description: Maximum targets per testlist. Use 0 for all targets.
+        required: true
+        default: "0"
+        type: string
+      jobs:
+        description: Build parallelism.
+        required: true
+        default: "4"
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+# The build matrix and citest orchestration live in the reusable
+# openvela-ci.yml workflow in public-actions, shared by all OpenVela
+# repositories; testlist selection defaults are maintained there.
+
+jobs:
+  ci:
+    uses: open-vela/public-actions/.github/workflows/openvela-ci.yml@dev
+    with:
+      image: ghcr.io/open-vela/openvela-ci-linux:dev
+      ci-assets-repository: open-vela/public-actions
+      ci-assets-ref: dev
+      repo-path: nuttx
+      max-targets: ${{ github.event_name == 'workflow_dispatch' && inputs.max-targets || '0' }}
+      jobs: ${{ github.event_name == 'workflow_dispatch' && inputs.jobs || '4' }}
