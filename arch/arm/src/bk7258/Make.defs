@@ -28,6 +28,9 @@ CHIP_CSRCS += bk7258_irq.c
 CHIP_CSRCS += bk7258_timerisr.c
 CHIP_CSRCS += bk7258_allocateheap.c
 CHIP_CSRCS += bk7258_serial.c
+ifeq ($(CONFIG_BK7258_PSRAM),y)
+CHIP_CSRCS += bk7258_psram.c
+endif
 
 # --- To be implemented (M2/M3) ---
 # CHIP_CSRCS += bk7258_clockconfig.c  # DPLL 480MHz clock config

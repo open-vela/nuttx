@@ -30,6 +30,20 @@ config BK7258_UART2
 	bool "UART2"
 	default n
 
+config BK7258_PSRAM
+	bool "PSRAM controller"
+	default n
+	---help---
+		Enable the BK7258 on-chip PSRAM controller driver.  Initializes
+		the PSRAM LDO, clock, and detects the external PSRAM chip
+		(APS6408L 8MB / APS128XXO 16MB / W955D8MKY 4MB) via the
+		command-register interface.  Provides NSH command "psram".
+
+		NOTE: Default n because the PSRAM power-on sequence touches
+		analog registers and may hard-fault if the sequence is wrong.
+		Enable explicitly in defconfig; if it hangs, disable to get
+		NSH back.
+
 endmenu # BK7258 Peripheral Selection
 
 # UART base address used for low-level console output (bk7258_lowputc.c).
