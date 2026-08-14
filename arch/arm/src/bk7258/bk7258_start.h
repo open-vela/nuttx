@@ -35,4 +35,12 @@
 
 void __start(void);
 
+/* Board-specific initialization, implemented by the board layer
+ * (boards/.../src/bk7258_boardinitialize.c).  Declared here because
+ * bk7258_start.c calls it; without a prototype GCC falls back to an
+ * implicit int-returning declaration.
+ */
+
+void arm_boardinitialize(void);
+
 #endif /* __ARCH_ARM_SRC_BK7258_BK7258_START_H */
