@@ -22,7 +22,18 @@
 #define __ARCH_ARM_SRC_BK7258_BK7258_PSRAM_H
 
 /****************************************************************************
- * Public Function Prototypes
+ * Included Files
+ ****************************************************************************/
+
+#include <nuttx/config.h>
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <malloc.h>
+
+/****************************************************************************
+ * Public Function Prototypes — PSRAM Controller
  ****************************************************************************/
 
 int bk7258_psram_init(void);
@@ -32,5 +43,18 @@ int bk7258_psram_probe(void);
 int bk7258_psram_test(uint32_t size_bytes);
 int bk7258_psram_alias(void);
 int bk7258_psram_width(void);
+
+/****************************************************************************
+ * Public Function Prototypes — PSRAM Heap
+ *
+ * Standalone heap over the PSRAM data window (0x60000000).
+ * Does NOT merge with the main SRAM heap.
+ ****************************************************************************/
+
+int bk7258_psram_heap_init(void);
+FAR void *bk7258_psram_malloc(size_t size);
+FAR void *bk7258_psram_calloc(size_t n, size_t size);
+void bk7258_psram_free(FAR void *ptr);
+void bk7258_psram_meminfo(FAR struct mallinfo *info);
 
 #endif /* __ARCH_ARM_SRC_BK7258_BK7258_PSRAM_H */

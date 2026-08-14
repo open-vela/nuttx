@@ -39,8 +39,10 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/mm/mm.h>
 #include <syslog.h>
 
 #include "arm_internal.h"
@@ -89,6 +91,12 @@
 
 static uint32_t g_psram_chip_id;
 static uint32_t g_psram_size;
+
+/* PSRAM heap — initialized on first use via bk7258_psram_heap_init().
+ * Uses the NuttX mm allocator over the PSRAM data window.
+ */
+
+static struct mm_heap_s *g_psram_heap;
 
 /****************************************************************************
  * Private Functions — Register Access
@@ -589,8 +597,8 @@ int bk7258_psram_init(void)
   psram_set_clk(1, 1);   /* sel=1 (480MHz), div=1 -> 120MHz */
 
   syslog(LOG_INFO,
-         "psram: init OK, ID=0x%04x, size=%lu KB\n",
-         g_psram_chip_id,
+         "psram: init OK, ID=0x%04lx, size=%lu KB\n",
+         (unsigned long)g_psram_chip_id,
          (unsigned long)(g_psram_size / 1024));
   return OK;
 }
@@ -716,9 +724,11 @@ int bk7258_psram_test(uint32_t size_bytes)
   uint32_t save_last;
   uint32_t i;
   uint32_t nwords;
-  clock_t start;
-  clock_t elapsed;
-  uint32_t mbps;
+  clock_t t_start;
+  clock_t t_wr;
+  clock_t t_rd;
+  uint32_t wr_kbps_x10;
+  uint32_t rd_kbps_x10;
   int ret;
 
   ret = bk7258_psram_init();
@@ -747,7 +757,7 @@ int bk7258_psram_test(uint32_t size_bytes)
 
   /* Write phase: each word gets its own byte address */
 
-  start = clock_systime_ticks();
+  t_start = clock_systime_ticks();
 
   for (i = 0; i < nwords; i++)
     {
@@ -762,7 +772,11 @@ int bk7258_psram_test(uint32_t size_bytes)
         }
     }
 
+  t_wr = clock_systime_ticks() - t_start;
+
   /* Read-and-verify phase */
+
+  t_start = clock_systime_ticks();
 
   for (i = 0; i < nwords; i++)
     {
@@ -802,15 +816,32 @@ int bk7258_psram_test(uint32_t size_bytes)
         }
     }
 
-  elapsed = clock_systime_ticks() - start;
-  if (elapsed > 0)
+  t_rd = clock_systime_ticks() - t_start;
+
+  /* KB/s with 1 decimal (integer math: value * 10 / 1024).
+   * size_bytes * 1000 stays < 2^32 for sizes up to 4 MB per
+   * phase; for larger sizes the intermediate is still safe
+   * up to ~16 MB (16M * 1000 = 16G < 2^34, fits uint64_t).
+   */
+
+  if (t_wr > 0)
     {
-      mbps = (uint32_t)((uint64_t)size_bytes *
-                         TICK_PER_SEC / elapsed / (1024 * 1024));
+      wr_kbps_x10 = (uint32_t)((uint64_t)size_bytes * 1000
+                     / (uint64_t)t_wr / 1024);
     }
   else
     {
-      mbps = 0;
+      wr_kbps_x10 = 0;
+    }
+
+  if (t_rd > 0)
+    {
+      rd_kbps_x10 = (uint32_t)((uint64_t)size_bytes * 1000
+                     / (uint64_t)t_rd / 1024);
+    }
+  else
+    {
+      rd_kbps_x10 = 0;
     }
 
   /* Boundary check: last word */
@@ -831,10 +862,18 @@ int bk7258_psram_test(uint32_t size_bytes)
   *last = save_last;
 
   syslog(LOG_INFO,
-         "psram test: done, %lu words, %lu errors, ~%lu MB/s\n",
+         "psram test: %lu words, %lu errors, "
+         "%lu.%lu / %lu.%lu KB/s (wr/rd), "
+         "%lu.%02lu s total\n",
          (unsigned long)nwords,
          (unsigned long)errors,
-         (unsigned long)mbps);
+         (unsigned long)(wr_kbps_x10 / 10),
+         (unsigned long)(wr_kbps_x10 % 10),
+         (unsigned long)(rd_kbps_x10 / 10),
+         (unsigned long)(rd_kbps_x10 % 10),
+         (unsigned long)((t_wr + t_rd) / TICK_PER_SEC),
+         (unsigned long)((t_wr + t_rd) % TICK_PER_SEC *
+                         100 / TICK_PER_SEC));
 
   if (errors > 0)
     {
@@ -1063,4 +1102,128 @@ int bk7258_psram_width(void)
   syslog(LOG_INFO,
          "psram width: all widths OK (8/16/32-bit)\n");
   return OK;
+}
+
+/****************************************************************************
+ * Name: bk7258_psram_heap_init
+ *
+ * Description:
+ *   Initialize a standalone heap over the PSRAM data window
+ *   (0x60000000, g_psram_size bytes).  Uses NuttX mm_initialize()
+ *   to create a private heap that does NOT merge with the main
+ *   SRAM heap.
+ *
+ *   Idempotent: calling when g_psram_heap != NULL is a no-op.
+ *   The caller must have run bk7258_psram_init() first.
+ *
+ * Returned Value:
+ *   OK on success, -ENOMEM if PSRAM not initialized.
+ *
+ ****************************************************************************/
+
+int bk7258_psram_heap_init(void)
+{
+  if (g_psram_heap != NULL)
+    {
+      return OK;
+    }
+
+  if (g_psram_size == 0)
+    {
+      syslog(LOG_ERR, "psram heap: PSRAM not initialized\n");
+      return -ENOMEM;
+    }
+
+  g_psram_heap = mm_initialize("psram",
+                                (FAR void *)0x60000000,
+                                g_psram_size);
+  if (g_psram_heap == NULL)
+    {
+      syslog(LOG_ERR, "psram heap: mm_initialize failed\n");
+      return -ENOMEM;
+    }
+
+  syslog(LOG_INFO,
+         "psram heap: ready, base=0x60000000, size=%lu KB\n",
+         (unsigned long)(g_psram_size / 1024));
+  return OK;
+}
+
+/****************************************************************************
+ * Name: bk7258_psram_malloc
+ *
+ * Description:
+ *   Allocate `size` bytes from the PSRAM heap.
+ *   Returns NULL if the heap is not initialized or allocation fails.
+ *   The returned pointer is guaranteed to be in 0x60xxxxxx.
+ *
+ ****************************************************************************/
+
+FAR void *bk7258_psram_malloc(size_t size)
+{
+  if (g_psram_heap == NULL)
+    {
+      return NULL;
+    }
+
+  return mm_malloc(g_psram_heap, size);
+}
+
+/****************************************************************************
+ * Name: bk7258_psram_calloc
+ *
+ * Description:
+ *   Allocate zero-initialized array from the PSRAM heap.
+ *
+ ****************************************************************************/
+
+FAR void *bk7258_psram_calloc(size_t n, size_t size)
+{
+  if (g_psram_heap == NULL)
+    {
+      return NULL;
+    }
+
+  return mm_calloc(g_psram_heap, n, size);
+}
+
+/****************************************************************************
+ * Name: bk7258_psram_free
+ *
+ * Description:
+ *   Free memory previously allocated from the PSRAM heap.
+ *
+ ****************************************************************************/
+
+void bk7258_psram_free(FAR void *ptr)
+{
+  if (g_psram_heap != NULL && ptr != NULL)
+    {
+      mm_free(g_psram_heap, ptr);
+    }
+}
+
+/****************************************************************************
+ * Name: bk7258_psram_meminfo
+ *
+ * Description:
+ *   Fill `info` with PSRAM heap statistics.  Equivalent to
+ *   mallinfo() but for the PSRAM heap only.
+ *
+ ****************************************************************************/
+
+void bk7258_psram_meminfo(FAR struct mallinfo *info)
+{
+  if (info == NULL)
+    {
+      return;
+    }
+
+  if (g_psram_heap == NULL)
+    {
+      memset(info, 0, sizeof(*info));
+      return;
+    }
+
+  *info = mm_mallinfo(g_psram_heap);
 }

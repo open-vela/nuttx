@@ -41,9 +41,10 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* Console = UART0 (on-board CH340).  NuttX runs as the CPU0 main core
- * (replacing the ARMINO CP app); CPU0 owns UART0 and the bootloader has
- * already set up its clock/pins.  115200 8N1, IRQ = EXTINT + 4.
+/* Console = UART0 (on-board CH340).  NuttX runs as the CPU0 main
+ * core (replacing the ARMINO CP app); CPU0 owns UART0 and the
+ * bootloader has already set up its clock/pins.
+ * 115200 8N1, IRQ = external-interrupt base + 4.
  */
 
 #define CONSOLE_BASE   BK7258_UART0_BASE
