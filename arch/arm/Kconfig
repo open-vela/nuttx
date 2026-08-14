@@ -321,6 +321,16 @@ config ARCH_CHIP_NRF91
 		Nordic nRF91 architectures (ARM Cortex-M33 with integrated
 		LTE-M/NB-IoT modem and GNSS).
 
+config ARCH_CHIP_BK7258
+	bool "Beken BK7258"
+	select ARCH_CORTEXM33
+	select ARCH_HAVE_FPU
+	select ARM_HAVE_MPU_UNIFIED
+	depends on EXPERIMENTAL
+	---help---
+		Beken BK7258 Wi-Fi AI-SoC (dual-core Armv8-M STAR-MC1, up to
+		480MHz).  Initial support targets a single core (CPU0), non-SMP.
+
 config ARCH_CHIP_NUC1XX
 	bool "Nuvoton NUC100/120"
 	select ARCH_CORTEXM0
@@ -1116,6 +1126,7 @@ config ARCH_CHIP
 	default "max326xx"	if ARCH_CHIP_MAX326XX
 	default "moxart"	if ARCH_CHIP_MOXART
 	default "nrf52"		if ARCH_CHIP_NRF52
+	default "bk7258"	if ARCH_CHIP_BK7258
 	default "nrf53"		if ARCH_CHIP_NRF53
 	default "nrf91"		if ARCH_CHIP_NRF91
 	default "nuc1xx"	if ARCH_CHIP_NUC1XX
@@ -1579,6 +1590,9 @@ source "arch/arm/src/moxart/Kconfig"
 endif
 if ARCH_CHIP_NRF52
 source "arch/arm/src/nrf52/Kconfig"
+endif
+if ARCH_CHIP_BK7258
+source "arch/arm/src/bk7258/Kconfig"
 endif
 if ARCH_CHIP_NRF53
 source "arch/arm/src/nrf53/Kconfig"
