@@ -54,6 +54,7 @@ int bk7258_psram_width(void);
 int bk7258_psram_heap_init(void);
 FAR void *bk7258_psram_malloc(size_t size);
 FAR void *bk7258_psram_calloc(size_t n, size_t size);
+FAR void *bk7258_psram_memalign(size_t alignment, size_t size);
 void bk7258_psram_free(FAR void *ptr);
 void bk7258_psram_meminfo(FAR struct mallinfo *info);
 

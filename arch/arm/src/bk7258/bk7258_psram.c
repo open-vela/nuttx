@@ -38,6 +38,7 @@
 #include <nuttx/config.h>
 
 #include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -91,6 +92,7 @@
 
 static uint32_t g_psram_chip_id;
 static uint32_t g_psram_size;
+static bool g_psram_init_done;
 
 /* PSRAM heap — initialized on first use via bk7258_psram_heap_init().
  * Uses the NuttX mm allocator over the PSRAM data window.
@@ -500,6 +502,11 @@ int bk7258_psram_init(void)
   uint32_t val;
   uint32_t id;
 
+  if (g_psram_init_done)
+    {
+      return OK;
+    }
+
   g_psram_chip_id = 0;
   g_psram_size = 0;
 
@@ -595,6 +602,8 @@ int bk7258_psram_init(void)
 
   up_mdelay(1);
   psram_set_clk(1, 1);   /* sel=1 (480MHz), div=1 -> 120MHz */
+
+  g_psram_init_done = true;
 
   syslog(LOG_INFO,
          "psram: init OK, ID=0x%04lx, size=%lu KB\n",
@@ -693,6 +702,31 @@ int bk7258_psram_probe(void)
 }
 
 /****************************************************************************
+ * Name: psram_check_no_heap
+ *
+ * Description:
+ *   Guard for destructive tests.  If the PSRAM heap has been
+ *   initialized its metadata lives at 0x60000000; any write to
+ *   that region would corrupt it.  Returns -EBUSY if the heap
+ *   is active.
+ *
+ ****************************************************************************/
+
+static int psram_check_no_heap(FAR const char *who)
+{
+  if (g_psram_heap != NULL)
+    {
+      syslog(LOG_ERR,
+             "psram %s: heap is active, "
+             "reboot to run destructive tests\n",
+             who);
+      return -EBUSY;
+    }
+
+  return OK;
+}
+
+/****************************************************************************
  * Name: bk7258_psram_test
  *
  * Description:
@@ -730,6 +764,12 @@ int bk7258_psram_test(uint32_t size_bytes)
   uint32_t wr_kbps_x10;
   uint32_t rd_kbps_x10;
   int ret;
+
+  ret = psram_check_no_heap("test");
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   ret = bk7258_psram_init();
   if (ret < 0)
@@ -912,6 +952,12 @@ int bk7258_psram_alias(void)
   int ret;
   int aliased = 0;
 
+  ret = psram_check_no_heap("alias");
+  if (ret < 0)
+    {
+      return ret;
+    }
+
   ret = bk7258_psram_init();
   if (ret < 0)
     {
@@ -1016,6 +1062,12 @@ int bk7258_psram_width(void)
   int failures = 0;
   int ret;
 
+  ret = psram_check_no_heap("width");
+  if (ret < 0)
+    {
+      return ret;
+    }
+
   ret = bk7258_psram_init();
   if (ret < 0)
     {
@@ -1114,24 +1166,26 @@ int bk7258_psram_width(void)
  *   SRAM heap.
  *
  *   Idempotent: calling when g_psram_heap != NULL is a no-op.
- *   The caller must have run bk7258_psram_init() first.
+ *   Internally ensures the PSRAM controller is initialized.
  *
  * Returned Value:
- *   OK on success, -ENOMEM if PSRAM not initialized.
+ *   OK on success, negative errno on failure.
  *
  ****************************************************************************/
 
 int bk7258_psram_heap_init(void)
 {
+  int ret;
+
   if (g_psram_heap != NULL)
     {
       return OK;
     }
 
-  if (g_psram_size == 0)
+  ret = bk7258_psram_init();
+  if (ret < 0)
     {
-      syslog(LOG_ERR, "psram heap: PSRAM not initialized\n");
-      return -ENOMEM;
+      return ret;
     }
 
   g_psram_heap = mm_initialize("psram",
@@ -1226,4 +1280,33 @@ void bk7258_psram_meminfo(FAR struct mallinfo *info)
     }
 
   *info = mm_mallinfo(g_psram_heap);
+}
+
+/****************************************************************************
+ * Name: bk7258_psram_memalign
+ *
+ * Description:
+ *   Allocate `size` bytes from the PSRAM heap with `alignment`
+ *   byte alignment.  Required for DMA targets (DVP, SPI) that
+ *   need 32/64-byte aligned buffers.
+ *
+ *   D-cache note (2026-08): the current defconfig does NOT enable
+ *   CONFIG_ARMV8M_DCACHE, so no cache maintenance is needed.
+ *   If D-cache is enabled in the future, every buffer written by
+ *   DMA must be cache-invalidated before the CPU reads it
+ *   (arm_dcache_invalidate / up_invalidate_dcache).
+ *   Without this the CPU will read stale cache lines instead of
+ *   the DMA data — a data-corruption bug that is very hard to
+ *   diagnose after the fact.
+ *
+ ****************************************************************************/
+
+FAR void *bk7258_psram_memalign(size_t alignment, size_t size)
+{
+  if (g_psram_heap == NULL)
+    {
+      return NULL;
+    }
+
+  return mm_memalign(g_psram_heap, alignment, size);
 }
