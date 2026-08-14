@@ -1308,5 +1308,23 @@ FAR void *bk7258_psram_memalign(size_t alignment, size_t size)
       return NULL;
     }
 
+  /* Reject alignment == 0 and non-power-of-two alignment.
+   *
+   * mm_memalign() only rejects non-powers of two: its check
+   * ((alignment & -alignment) != alignment) lets 0 through, and the
+   * subsequent DEBUGASSERT(((uintptr_t)ptr) % alignment == 0) then
+   * divides by zero.  Filter it here so a bad caller gets NULL
+   * instead of an assertion or an undefined-behaviour trap.
+   */
+
+  if (alignment == 0 || (alignment & (alignment - 1)) != 0)
+    {
+      syslog(LOG_ERR,
+             "psram heap: invalid alignment %zu "
+             "(must be a non-zero power of two)\n",
+             alignment);
+      return NULL;
+    }
+
   return mm_memalign(g_psram_heap, alignment, size);
 }
