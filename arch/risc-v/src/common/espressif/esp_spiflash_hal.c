@@ -7,6 +7,10 @@
  * ASF licenses this file to you under the Apache License, Version 2.0.
  ****************************************************************************/
 
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <errno.h>
@@ -18,6 +22,10 @@
 #include "esp_private/esp_flash_internal.h"
 #include "esp_spiflash.h"
 
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
 static int esp_spiflash_result(int ret)
 {
   if (ret != ESP_OK)
@@ -28,6 +36,10 @@ static int esp_spiflash_result(int ret)
 
   return OK;
 }
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
 
 int spi_flash_read(uint32_t address, void *buffer, uint32_t length)
 {
