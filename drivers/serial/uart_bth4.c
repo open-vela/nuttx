@@ -168,6 +168,9 @@ static int uart_bth4_receive(FAR struct bt_driver_s *drv,
     }
   else
     {
+      syslog(LOG_ERR,
+             "uart_bth4 rx dropped: circbuf full (type=%u len=%zu space=%u)\n",
+             (unsigned int)type, buflen, circbuf_space(&dev->circbuf));
       ret = -ENOMEM;
     }
 
