@@ -62,6 +62,89 @@ config ESPRESSIF_FLASH_16M
 
 endchoice # ESPRESSIF_FLASH
 
+config ESPRESSIF_DONT_USE_ROM_LIBC
+	bool "Don't use ROM libc functions"
+	default n
+	---help---
+		Use NuttX libc instead of ROM newlib functions.  This prevents
+		cross-heap allocation when external RAM is added to the NuttX heap.
+
+menuconfig ESPRESSIF_SPIRAM
+	bool "External SPI RAM (SPIRAM)"
+	depends on ESPRESSIF_ESP32P4
+	default n
+	---help---
+		Enable package-integrated PSRAM through the Espressif HAL.
+
+if ESPRESSIF_SPIRAM
+
+config ESPRESSIF_SPIRAM_BOOT_INIT
+	bool "Initialize SPIRAM during early boot"
+	default y
+
+config ESPRESSIF_SPIRAM_IGNORE_NOTFOUND
+	bool "Ignore SPIRAM not found"
+	depends on !ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+	default n
+
+config ESPRESSIF_SPIRAM_MEMTEST
+	bool "Run SPIRAM memory test at boot"
+	default y
+
+config ESPRESSIF_SPIRAM_USE_8LINE_MODE
+	bool "Use x8 line mode"
+	default n
+	---help---
+		Leave this disabled for the ESP32-P4NRW32X x16 PSRAM interface.
+
+config ESPRESSIF_SPIRAM_ECC_ENABLE
+	bool "Enable SPIRAM ECC"
+	default n
+
+choice ESPRESSIF_SPIRAM_SPEED
+	prompt "SPIRAM speed"
+	default ESPRESSIF_SPIRAM_SPEED_200M if ESP32P4_REV_MIN_300
+	default ESPRESSIF_SPIRAM_SPEED_80M
+
+config ESPRESSIF_SPIRAM_SPEED_20M
+	bool "20 MHz"
+
+config ESPRESSIF_SPIRAM_SPEED_80M
+	bool "80 MHz"
+
+config ESPRESSIF_SPIRAM_SPEED_200M
+	bool "200 MHz"
+	depends on ESP32P4_REV_MIN_300
+
+config ESPRESSIF_SPIRAM_SPEED_250M
+	bool "250 MHz"
+	depends on ESP32P4_REV_MIN_300
+
+endchoice # ESPRESSIF_SPIRAM_SPEED
+
+config ESPRESSIF_SPIRAM_SPEED
+	int
+	default 20 if ESPRESSIF_SPIRAM_SPEED_20M
+	default 80 if ESPRESSIF_SPIRAM_SPEED_80M
+	default 200 if ESPRESSIF_SPIRAM_SPEED_200M
+	default 250 if ESPRESSIF_SPIRAM_SPEED_250M
+
+config ESPRESSIF_SPIRAM_USER_HEAP
+	bool "Add SPIRAM to user heap"
+	default y
+	select ESPRESSIF_DONT_USE_ROM_LIBC
+	---help---
+		Add initialized PSRAM as an additional NuttX heap region.
+
+config ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+	bool "Allow .bss segment placed in external memory"
+	default n
+	---help---
+		Allow EXT_RAM_BSS_ATTR data to be placed in PSRAM.  Keep this
+		disabled during initial bring-up so boot does not depend on PSRAM.
+
+endif # ESPRESSIF_SPIRAM
+
 config ESPRESSIF_FLASH_DETECT
 	bool "Auto-detect FLASH size"
 	default n

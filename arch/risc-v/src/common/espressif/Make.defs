@@ -141,7 +141,11 @@ ifeq ($(CONFIG_ESPRESSIF_SPI),y)
 endif
 
 ifeq ($(CONFIG_ESPRESSIF_SPIFLASH),y)
+	ifeq ($(CONFIG_ESPRESSIF_ESP32P4),y)
+		CHIP_CSRCS += esp_spiflash_hal.c
+	else
 	CHIP_CSRCS += esp_spiflash.c
+	endif
 	ifeq ($(CONFIG_ESPRESSIF_MTD),y)
 		CHIP_CSRCS += esp_spiflash_mtd.c
 	endif
