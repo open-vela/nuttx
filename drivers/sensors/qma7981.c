@@ -61,7 +61,8 @@
 #define QMA7981_PM_ACTIVE_100KHZ    0x80
 
 /* Full-scale range: ±16 g (1 LSB ≈ 128 μg);
- * measured 1g ≈ 128 LSB on this silicon */
+ * measured 1g ≈ 128 LSB on this silicon
+ */
 
 
 #define QMA7981_FSR_16G             0x04
