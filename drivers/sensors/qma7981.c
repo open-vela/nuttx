@@ -64,7 +64,6 @@
  * measured 1g ≈ 128 LSB on this silicon
  */
 
-
 #define QMA7981_FSR_16G             0x04
 
 /* Bandwidth / output data rate: 100 kHz / 1935 ≈ 51.7 Hz */
