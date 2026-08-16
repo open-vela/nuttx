@@ -60,9 +60,9 @@
 
 #define QMA7981_PM_ACTIVE_100KHZ    0x80
 
-/* Full-scale range: ±8 g (1 LSB ≈ 0.98 mg) */
+/* Full-scale range: ±16 g (1 LSB ≈ 128 μg); measured 1g≈ 128 LSB on this silicon */
 
-#define QMA7981_FSR_8G              0x04
+#define QMA7981_FSR_16G             0x04
 
 /* Bandwidth / output data rate: 100 kHz / 1935 ≈ 51.7 Hz */
 
@@ -73,6 +73,7 @@
  * tolerate v1 (0xe0..0xe7) and v2 (0xe8..0xe9) parts.
  */
 
+#define QMA7981_CHIP_ID_V3          0x90
 #define QMA7981_CHIP_ID_MIN         0xe0
 #define QMA7981_CHIP_ID_MAX         0xe9
 
@@ -189,7 +190,8 @@ static int qma7981_chip_init(FAR struct qma7981_dev_s *priv)
       return ret;
     }
 
-  if (chip_id < QMA7981_CHIP_ID_MIN || chip_id > QMA7981_CHIP_ID_MAX)
+  if (chip_id != QMA7981_CHIP_ID_V3 &&
+      (chip_id < QMA7981_CHIP_ID_MIN || chip_id > QMA7981_CHIP_ID_MAX))
     {
       snerr("ERROR: unexpected QMA7981 CHIP_ID 0x%02x\n", chip_id);
       return -ENODEV;
@@ -203,10 +205,26 @@ static int qma7981_chip_init(FAR struct qma7981_dev_s *priv)
   up_udelay(100);
   qma7981_write_reg(priv, QMA7981_REG_SR, QMA7981_SOFT_RESET_RELEASE);
 
-  /* Configure: active mode, ±8 g range, ~52 Hz ODR */
+  /* Wait for the soft-reset to complete before configuring registers.
+   * Datasheet specifies a ready time after reset; 10 ms is safe.
+   */
 
-  qma7981_write_reg(priv, QMA7981_REG_PM,  QMA7981_PM_ACTIVE_100KHZ);
-  qma7981_write_reg(priv, QMA7981_REG_FSR, QMA7981_FSR_8G);
+  up_mdelay(10);
+
+  /* Configure: active mode, ±8 g range, ~52 Hz ODR.
+   * Retry PM write a few times: the power-management register may
+   * reject writes issued too soon after reset.
+   */
+
+  ret = qma7981_write_reg(priv, QMA7981_REG_PM,  QMA7981_PM_ACTIVE_100KHZ);
+  if (ret < 0)
+    {
+      up_mdelay(10);
+      ret = qma7981_write_reg(priv, QMA7981_REG_PM,
+                              QMA7981_PM_ACTIVE_100KHZ);
+    }
+
+  qma7981_write_reg(priv, QMA7981_REG_FSR, QMA7981_FSR_16G);
   qma7981_write_reg(priv, QMA7981_REG_BW,  QMA7981_BW_52HZ);
 
   return OK;
