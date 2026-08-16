@@ -68,7 +68,6 @@
 #  include <nuttx/sensors/qma7981.h>
 #endif
 
-
 #ifdef CONFIG_WATCHDOG
 #  include "esp32s3_board_wdt.h"
 #endif
@@ -286,7 +285,6 @@ int esp32s3_bringup(void)
    * at least enough succeeded to bring-up NSH with perhaps reduced
    * capabilities.
    */
-
 
   UNUSED(ret);
   return OK;
