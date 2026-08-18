@@ -4,7 +4,6 @@
 #
 
 if ARCH_CHIP_ESP32P4
-
 source "arch/risc-v/src/common/espressif/Kconfig"
 
 config ESP32P4_SELECTS_REV_LESS_V3
@@ -184,3 +183,81 @@ config P4_REV3_MSPI_WORKAROUND_SIZE
 	hex
 	default 0x100 if ESP32P4_REV_MIN_300
 	default 0
+config ESP32P4_SDMMC
+	bool "SD/MMC Host"
+	default n
+	select ESP32P4_GPIO
+	select ESPRESSIF_DMA
+	help
+		Enable SD/MMC Host controller support.
+
+if ESP32P4_SDMMC
+
+config ESP32P4_SDMMC_SLOT0
+	bool "Enable Slot 0 (SDIO 3.0, Fixed Pins)"
+	default y
+	help
+		Slot 0: fixed pins 39-48, SDIO 3.0 / UHS-I.
+		Requires LDO for VDD_IO_5.
+
+config ESP32P4_SDMMC_SLOT1
+	bool "Enable Slot 1 (SDIO 2.0, GPIO Matrix)"
+	default n
+	help
+		Slot 1: GPIO Matrix routing, SDIO 2.0 only.
+
+config ESP32P4_SDMMC_LDO
+	bool "Enable LDO for Slot 0"
+	default y if ESP32P4_SDMMC_SLOT0
+	select ESPRESSIF_LDO
+	help
+		Enable on-chip LDO for VDD_IO_5.
+
+config ESP32P4_SDMMC_LDO_CHAN
+	int "LDO Channel"
+	default 4
+	range 1 4
+	depends on ESP32P4_SDMMC_LDO
+
+config ESP32P4_SDMMC_LDO_VOLTAGE
+	int "LDO Voltage (mV)"
+	default 3300
+	range 500 3300
+	depends on ESP32P4_SDMMC_LDO
+
+config ESP32P4_SDMMC_SLOT1_CLK
+	int "Slot 1 CLK GPIO"
+	default 43
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_CMD
+	int "Slot 1 CMD GPIO"
+	default 44
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_D0
+	int "Slot 1 D0 GPIO"
+	default 39
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_D1
+	int "Slot 1 D1 GPIO"
+	default 40
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_D2
+	int "Slot 1 D2 GPIO"
+	default 41
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_D3
+	int "Slot 1 D3 GPIO"
+	default 42
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_DMA_DESC_NUM
+	int "DMA Descriptor Number"
+	default 4
+	range 1 16
+
+endif # ESP32P4_SDMMC

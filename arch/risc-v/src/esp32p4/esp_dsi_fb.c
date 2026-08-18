@@ -13,6 +13,7 @@
 #include "esp_dsi_fb.h"
 #include "esp_lcd_dsi_bus_nuttx.h"
 #include "esp_lcd_panel_dpi_nuttx.h"
+#include "esp_ldo.h"
 #include "hal/mipi_dsi_hal.h"
 #include "esp_cache.h"
 
@@ -24,11 +25,6 @@
 #define GPIO_OUT_W1TC     (*(volatile uint32_t *)(GPIO_BASE + 0x0C))
 #define GPIO_ENABLE_W1TS  (*(volatile uint32_t *)(GPIO_BASE + 0x24))
 
-/* PMU LDO for DSI PHY (2.5V, proven working) */
-
-#define PMU_EXT_LDO_CTRL  (*(volatile uint32_t *)0x501151C0)
-#define PMU_EXT_LDO_ANA   (*(volatile uint32_t *)0x501151C4)
-
 static esp_lcd_dsi_bus_handle_t g_dsi_bus;
 static esp_lcd_dpi_panel_handle_t g_dpi_panel;
 
@@ -36,13 +32,24 @@ static esp_lcd_dpi_panel_handle_t g_dpi_panel;
  * Private Functions
  ****************************************************************************/
 
-static void dsi_phy_ldo_enable(void)
-{
-  /* LDO channel 3 -> 2.5V: dref=13, mul=3 */
+static struct esp_ldo_config_t g_dsi_ldo;
 
-  PMU_EXT_LDO_ANA = (13u << 28) | (3u << 23);
-  PMU_EXT_LDO_CTRL = (1u << 7) | (1u << 8); /* force_tieh_sel + xpd */
-  usleep(5000); /* Wait for LDO to stabilize */
+static void dsi_enable_phy_ldo(void)
+{
+  int ret;
+
+  g_dsi_ldo.chan_id    = 3;      /* LDO channel 3 = VDDO_3 = VDD_MIPI_DPHY */
+  g_dsi_ldo.voltage_mv = 2500;   /* 2.5V */
+  g_dsi_ldo.handler    = NULL;
+
+  ret = esp_ldo_channel_acquire(&g_dsi_ldo);
+  if (ret != 0)
+    {
+      syslog(LOG_ERR, "[DSI] Failed to acquire LDO channel 3: %d\n", ret);
+      return;
+    }
+
+  syslog(LOG_INFO, "[DSI] LDO channel 3 acquired at 2500mV\n");
 }
 
 static void gpio_set_output(uint32_t pin)
@@ -124,7 +131,7 @@ int esp_dsi_fb_initialize(void)
   esp_lcd_dpi_panel_config_t dpi_cfg;
   memset(&dpi_cfg, 0, sizeof(dpi_cfg));
   dpi_cfg.virtual_channel = 0;
-  dpi_cfg.dpi_clock_freq_mhz = 52.0f;
+  dpi_cfg.dpi_clock_freq_mhz = 48.0f;
   dpi_cfg.video_timing.h_size = 1024;
   dpi_cfg.video_timing.v_size = 600;
   dpi_cfg.video_timing.hsync_pulse_width = 10;

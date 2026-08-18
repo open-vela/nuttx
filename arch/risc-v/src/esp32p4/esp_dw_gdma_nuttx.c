@@ -31,10 +31,13 @@
 #include <errno.h>
 #include <debug.h>
 #include <nuttx/kmalloc.h>
+#include <nuttx/irq.h>
 #include <nuttx/spinlock.h>
 
 #include "esp_idf_shim.h"
 #include "esp_dw_gdma_nuttx.h"
+#include "esp_irq.h"
+#include "soc/interrupts.h"
 #include "hal/dw_gdma_ll.h"
 #include "esp_private/periph_ctrl.h"
 
@@ -52,13 +55,15 @@
 #define DW_GDMA_CACHE_ADDR(addr) \
   ((uint32_t)(addr) - SOC_NON_CACHEABLE_OFFSET_SRAM)
 
-/* DSI uses channel 1; channel 0 is reserved for CSI */
-
-#define DW_GDMA_DSI_CHANNEL_ID  1
-
 /* DW-GDMA group (only one group on ESP32-P4) */
 
 #define DW_GDMA_GROUP_ID        0
+
+/* Channel 0 = CSI (camera), Channel 1 = DSI (display) */
+
+#define DW_GDMA_CSI_CHANNEL_ID  0
+#define DW_GDMA_DSI_CHANNEL_ID  1
+#define DW_GDMA_NUM_CHANNELS    2
 
 /****************************************************************************
  * Private Types
@@ -66,11 +71,12 @@
 
 struct dw_gdma_channel_t
 {
-  int chan_id;                            /* channel number (1 for DSI) */
+  int chan_id;                            /* channel number */
   dw_gdma_dev_t *dev;                    /* HW register base */
   dw_gdma_trans_done_cb_t on_block_trans_done;
   void *user_data;
   spinlock_t spinlock;
+  bool allocated;
 };
 
 struct dw_gdma_link_list_t
@@ -84,26 +90,121 @@ struct dw_gdma_link_list_t
  * Private Data
  ****************************************************************************/
 
-static struct dw_gdma_channel_t g_dsi_channel;
-static bool g_dsi_channel_allocated = false;
+static struct dw_gdma_channel_t g_gdma_channels[DW_GDMA_NUM_CHANNELS];
 static bool g_gdma_clock_enabled = false;
+static bool g_gdma_isr_installed = false;
+static int g_gdma_cpuint = -1;
 
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: dw_gdma_isr
+ *
+ * Description:
+ *   Shared DW-GDMA interrupt handler. Dispatches to per-channel handlers.
+ ****************************************************************************/
+
+static int dw_gdma_isr(int irq, void *context, void *arg)
+{
+  dw_gdma_dev_t *dev = DW_GDMA_LL_GET_HW(DW_GDMA_GROUP_ID);
+  int ch;
+
+  UNUSED(irq);
+  UNUSED(context);
+  UNUSED(arg);
+
+  for (ch = 0; ch < DW_GDMA_NUM_CHANNELS; ch++)
+    {
+      struct dw_gdma_channel_t *chan = &g_gdma_channels[ch];
+      uint32_t status;
+
+      if (!chan->allocated || chan->on_block_trans_done == NULL)
+        {
+          continue;
+        }
+
+      status = dw_gdma_ll_channel_get_intr_status(dev, ch);
+      if (status == 0)
+        {
+          continue;
+        }
+
+      dw_gdma_ll_channel_clear_intr(dev, ch, status);
+
+      /* Invoke callback */
+
+      dw_gdma_trans_done_event_data_t ev;
+      memset(&ev, 0, sizeof(ev));
+      chan->on_block_trans_done(chan, &ev, chan->user_data);
+    }
+
+  return OK;
+}
+
+/****************************************************************************
  * Name: dw_gdma_ensure_clock_enabled
  *
  * Description:
- *   No-op: Camera CSI already enabled GDMA bus clock via
- *   PERIPH_RCC_ATOMIC + dw_gdma_ll_enable_bus_clock.
- *   We only need dw_gdma_ll_enable_controller (in dw_gdma_new_channel).
+ *   Enable GDMA bus clock and install shared ISR if not done yet.
  ****************************************************************************/
 
 static void dw_gdma_ensure_clock_enabled(void)
 {
+  if (g_gdma_clock_enabled)
+    {
+      return;
+    }
+
+  /* Enable bus clock */
+  PERIPH_RCC_ATOMIC()
+    {
+      dw_gdma_ll_enable_bus_clock(DW_GDMA_GROUP_ID, true);
+      dw_gdma_ll_reset_register(DW_GDMA_GROUP_ID);
+    }
+
   g_gdma_clock_enabled = true;
+
+  /* Install shared ISR */
+  if (!g_gdma_isr_installed)
+    {
+      g_gdma_cpuint = esp_setup_irq(
+          ETS_DW_GDMA_INTR_SOURCE,
+          ESP_IRQ_PRIORITY_DEFAULT,
+          ESP_IRQ_TRIGGER_LEVEL,
+          dw_gdma_isr,          /* ← 补上 handler */
+          NULL);                /* ← 补上 arg */
+      if (g_gdma_cpuint >= 0)
+        {
+          irq_attach(
+              ESP_SOURCE2IRQ(ETS_DW_GDMA_INTR_SOURCE),
+              dw_gdma_isr, NULL);
+          up_enable_irq(ESP_SOURCE2IRQ(ETS_DW_GDMA_INTR_SOURCE));
+          g_gdma_isr_installed = true;
+        }
+    }
+}
+
+/****************************************************************************
+ * Name: dw_gdma_role_to_channel_id
+ *
+ * Description:
+ *   Map peripheral role to channel ID.
+ *   CSI (camera) → channel 0, DSI (display) → channel 1.
+ ****************************************************************************/
+
+static int dw_gdma_role_to_channel_id(
+    const dw_gdma_channel_alloc_config_t *config)
+{
+  if (config->src.role == DW_GDMA_ROLE_PERIPH_CSI)
+    {
+      return DW_GDMA_CSI_CHANNEL_ID;
+    }
+
+  /* Default to DSI channel */
+
+  return DW_GDMA_DSI_CHANNEL_ID;
 }
 
 /****************************************************************************
@@ -119,61 +220,69 @@ int dw_gdma_new_channel(const dw_gdma_channel_alloc_config_t *config,
 {
   struct dw_gdma_channel_t *chan;
   dw_gdma_dev_t *dev;
-  int ch = DW_GDMA_DSI_CHANNEL_ID;
+  int ch;
 
   if (config == NULL || ret_chan == NULL)
     {
       return -EINVAL;
     }
 
-  if (g_dsi_channel_allocated)
+  /* Determine channel ID from source role */
+
+  ch = dw_gdma_role_to_channel_id(config);
+
+  if (ch < 0 || ch >= DW_GDMA_NUM_CHANNELS)
+    {
+      return -EINVAL;
+    }
+
+  chan = &g_gdma_channels[ch];
+
+  if (chan->allocated)
     {
       return -EBUSY;
     }
 
   /* Ensure DW-GDMA clock is enabled */
-
   dw_gdma_ensure_clock_enabled();
-
-  /* Use the static channel struct */
-
-  chan = &g_dsi_channel;
+  printf("[CSI DMA] Allocating GDMA channel\n");
+  /* Use the channel struct */
+  printf("[CSI DMA] Allocating GDMA channel\n");
   memset(chan, 0, sizeof(*chan));
   chan->chan_id = ch;
   chan->dev = DW_GDMA_LL_GET_HW(DW_GDMA_GROUP_ID);
   spin_lock_init(&chan->spinlock);
-
+  printf("[CSI DMA] Allocating GDMA channel\n");
   dev = chan->dev;
-
-  /* Enable the DMA controller (idempotent if already enabled by CSI) */
-
+  printf("[CSI DMA] Allocating GDMA channel\n");
+  /* Enable the DMA controller (idempotent if already enabled) */
   dw_gdma_ll_enable_controller(dev, true);
   dw_gdma_ll_enable_intr_global(dev, true);
-
+  printf("[CSI DMA] Allocating GDMA channel\n");
   /* Disable channel before configuration */
-
   dw_gdma_ll_channel_enable(dev, ch, false);
-
+  printf("[CSI DMA] Allocating GDMA channel\n");
   /* Set transfer flow controller */
-
+  
   dw_gdma_ll_channel_set_trans_flow(dev, ch,
                                     config->src.role,
                                     config->dst.role,
                                     config->flow_controller);
+  printf("[CSI DMA] Allocating GDMA channel\n");
   /* Set multi-block transfer types */
 
   dw_gdma_ll_channel_set_src_multi_block_type(dev, ch,
       config->src.block_transfer_type);
   dw_gdma_ll_channel_set_dst_multi_block_type(dev, ch,
       config->dst.block_transfer_type);
-
+  printf("[CSI DMA] Allocating GDMA channel\n");
   /* Set handshake interface type */
 
   dw_gdma_ll_channel_set_src_handshake_interface(dev, ch,
       config->src.handshake_type);
   dw_gdma_ll_channel_set_dst_handshake_interface(dev, ch,
       config->dst.handshake_type);
-
+  printf("[CSI DMA] Allocating GDMA channel\n");
   /* Set handshake peripheral if not memory role */
 
   if (config->src.role != DW_GDMA_ROLE_MEM)
@@ -205,15 +314,13 @@ int dw_gdma_new_channel(const dw_gdma_channel_alloc_config_t *config,
       dw_gdma_ll_channel_set_dst_outstanding_limit(dev, ch,
           config->dst.num_outstanding_requests);
     }
-
-  /* Disable intr propagation for ch1 — use timer-based polling re-arm
-   * instead to avoid interrupt storm with shared CSI ISR.
-   */
+  printf("[CSI DMA] Allocating GDMA channel\n");
+  /* Enable interrupt generation and propagation */
 
   dw_gdma_ll_channel_enable_intr_generation(dev, ch, UINT32_MAX, true);
-  dw_gdma_ll_channel_enable_intr_propagation(dev, ch, UINT32_MAX, false);
-
-  g_dsi_channel_allocated = true;
+  dw_gdma_ll_channel_enable_intr_propagation(dev, ch, UINT32_MAX, true);
+  printf("[CSI DMA] Allocating GDMA channel\n");
+  chan->allocated = true;
   *ret_chan = chan;
 
   return 0;
@@ -456,12 +563,12 @@ int dw_gdma_channel_register_event_callbacks(
 
 void esp_dsi_dma_isr_handler(void)
 {
-  struct dw_gdma_channel_t *chan = &g_dsi_channel;
+  struct dw_gdma_channel_t *chan = &g_gdma_channels[DW_GDMA_DSI_CHANNEL_ID];
   dw_gdma_dev_t *dev = chan->dev;
   int ch = chan->chan_id;
   uint32_t status;
 
-  if (!g_dsi_channel_allocated || dev == NULL)
+  if (!chan->allocated || dev == NULL)
     {
       return;
     }
@@ -477,6 +584,47 @@ void esp_dsi_dma_isr_handler(void)
   dw_gdma_ll_channel_clear_intr(dev, ch, status);
 
   /* If block transfer done, invoke callback to re-arm DMA */
+
+  if (chan->on_block_trans_done)
+    {
+      dw_gdma_trans_done_event_data_t ev;
+      memset(&ev, 0, sizeof(ev));
+      chan->on_block_trans_done(chan, &ev, chan->user_data);
+    }
+}
+
+/****************************************************************************
+ * Name: esp_csi_dma_isr_handler
+ *
+ * Description:
+ *   Called from the shared DW-GDMA ISR when channel 0 (CSI) has pending
+ *   interrupt status. Clears the interrupt and invokes the registered
+ *   trans_done callback.
+ ****************************************************************************/
+
+void esp_csi_dma_isr_handler(void)
+{
+  struct dw_gdma_channel_t *chan = &g_gdma_channels[DW_GDMA_CSI_CHANNEL_ID];
+  dw_gdma_dev_t *dev = chan->dev;
+  int ch = chan->chan_id;
+  uint32_t status;
+
+  if (!chan->allocated || dev == NULL)
+    {
+      return;
+    }
+
+  /* Read and clear channel 0 interrupt status */
+
+  status = dw_gdma_ll_channel_get_intr_status(dev, ch);
+  if (status == 0)
+    {
+      return;
+    }
+
+  dw_gdma_ll_channel_clear_intr(dev, ch, status);
+
+  /* If block transfer done, invoke callback */
 
   if (chan->on_block_trans_done)
     {

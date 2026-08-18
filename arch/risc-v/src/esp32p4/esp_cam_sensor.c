@@ -263,24 +263,41 @@ static int sc2336_i2c_write_reg(uint16_t reg, uint8_t val)
   uint8_t buf[3];
   int ret;
 
-  buf[0] = (reg >> 8) & 0xff;   /* Register address high byte */
-  buf[1] = reg & 0xff;          /* Register address low byte */
-  buf[2] = val;                  /* Data byte */
+  /* 方案：拆分为两个 I2C transaction，中间加 STOP */
+  /* Transaction 1: 写寄存器地址 (2 bytes) */
+  buf[0] = (reg >> 8) & 0xff;
+  buf[1] = reg & 0xff;
 
   msg.frequency = SC2336_I2C_FREQ;
   msg.addr      = SC2336_I2C_ADDR;
-  msg.flags     = 0;            /* Write */
+  msg.flags     = 0;
   msg.buffer    = buf;
-  msg.length    = 3;
+  msg.length    = 2;
 
   ret = I2C_TRANSFER(g_i2c_dev, &msg, 1);
   if (ret < 0)
     {
-      syslog(LOG_ERR, "SC2336: I2C write failed reg=0x%04x ret=%d\n",
-             reg, ret);
+      syslog(LOG_ERR, "SC2336: I2C write-addr failed reg=0x%04x ret=%d\n", reg, ret);
+      return ret;
     }
 
-  return ret;
+  /* Transaction 2: 写数据 (1 byte) */
+  buf[0] = val;
+
+  msg.frequency = SC2336_I2C_FREQ;
+  msg.addr      = SC2336_I2C_ADDR;
+  msg.flags     = 0;
+  msg.buffer    = buf;
+  msg.length    = 1;
+
+  ret = I2C_TRANSFER(g_i2c_dev, &msg, 1);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "SC2336: I2C write-data failed reg=0x%04x ret=%d\n", reg, ret);
+      return ret;
+    }
+
+  return 0;
 }
 
 /****************************************************************************

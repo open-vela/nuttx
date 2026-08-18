@@ -43,6 +43,7 @@
 #include <unistd.h>
 
 #include "esp_mipi_dsi.h"
+#include "esp_ldo.h"
 #include "esp_dw_gdma_idf.h"
 #include "esp_cache.h"
 #include "soc/soc.h"       /* SOC_NON_CACHEABLE_OFFSET_SRAM */
@@ -57,52 +58,6 @@
 #include "hal/mipi_dsi_brg_ll.h"
 #include "hal/dw_gdma_ll.h"
 #include "hal/dw_gdma_types.h"
-
-/****************************************************************************
- * MIPI PHY LDO Configuration (Direct Register Access)
- *
- * LDO channel 3 → unit = LDO_ID2UNIT(3) = 2
- * index_array[4] = {0, 3, 1, 4} → index_array[2] = 1
- * ext_ldo[1] corresponds to P0_0P2A registers:
- *   Control reg: PMU_BASE + 0x1c0
- *   ANA reg:     PMU_BASE + 0x1c4
- *
- * pmu_ext_ldo_reg_t bit fields:
- *   bit[7]    : force_tieh_sel (0=hw, 1=sw)
- *   bit[8]    : xpd (enable)
- *   bit[9:11] : tieh_sel
- *   bit[14]   : tieh (0=Vref*Mul, 1=3.3V)
- *
- * pmu_ext_ldo_ana_reg_t bit fields:
- *   bit[23:25]: mul (3 bits)
- *   bit[28:31]: dref (4 bits)
- *
- * For 2500mV without eFuse calibration: dref=13, mul=3
- ****************************************************************************/
-
-#define PMU_BASE_ADDR                   0x50115000
-#define PMU_EXT_LDO_P0_0P2A_REG_ADDR   (PMU_BASE_ADDR + 0x1c0)
-#define PMU_EXT_LDO_P0_0P2A_ANA_ADDR   (PMU_BASE_ADDR + 0x1c4)
-
-/* Bit positions in ext_ldo control register */
-
-#define EXT_LDO_FORCE_TIEH_SEL_BIT      (1 << 7)
-#define EXT_LDO_XPD_BIT                 (1 << 8)
-#define EXT_LDO_TIEH_SEL_SHIFT          9
-#define EXT_LDO_TIEH_SEL_MASK           (0x7 << EXT_LDO_TIEH_SEL_SHIFT)
-#define EXT_LDO_TIEH_BIT                (1 << 14)
-
-/* Bit positions in ext_ldo ANA register */
-
-#define EXT_LDO_ANA_MUL_SHIFT           23
-#define EXT_LDO_ANA_MUL_MASK            (0x7 << EXT_LDO_ANA_MUL_SHIFT)
-#define EXT_LDO_ANA_DREF_SHIFT          28
-#define EXT_LDO_ANA_DREF_MASK           (0xF << EXT_LDO_ANA_DREF_SHIFT)
-
-/* Voltage parameters for 2500mV (computed from ldo_ll algorithm) */
-
-#define MIPI_PHY_LDO_DREF               13
-#define MIPI_PHY_LDO_MUL                3
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -389,49 +344,34 @@ static void dsi_enable_backlight(void)
  *
  ****************************************************************************/
 
+/****************************************************************************
+ * Name: dsi_enable_phy_ldo
+ *
+ * Description:
+ *   Enable LDO channel 3 at 2.5V for MIPI PHY power supply.
+ *   Uses NuttX esp_ldo driver (from PR#19684) which internally calls
+ *   ESP-IDF esp_ldo_acquire_channel() with eFuse calibration.
+ *
+ ****************************************************************************/
+
+static struct esp_ldo_config_t g_dsi_ldo;
+
 static void dsi_enable_phy_ldo(void)
 {
-  volatile uint32_t *ldo_ctrl =
-      (volatile uint32_t *)PMU_EXT_LDO_P0_0P2A_REG_ADDR;
-  volatile uint32_t *ldo_ana =
-      (volatile uint32_t *)PMU_EXT_LDO_P0_0P2A_ANA_ADDR;
-  uint32_t reg;
+  int ret;
 
-  /* Step 1: Set owner to software (force_tieh_sel = 1, tieh_sel = 0) */
+  g_dsi_ldo.chan_id    = 3;      /* LDO channel 3 = VDDO_3 = VDD_MIPI_DPHY */
+  g_dsi_ldo.voltage_mv = 2500;   /* 2.5V */
+  g_dsi_ldo.handler    = NULL;
 
-  reg = *ldo_ctrl;
-  reg |= EXT_LDO_FORCE_TIEH_SEL_BIT;          /* force_tieh_sel = 1 (SW) */
-  reg &= ~EXT_LDO_TIEH_SEL_MASK;              /* tieh_sel = 0 */
-  *ldo_ctrl = reg;
+  ret = esp_ldo_channel_acquire(&g_dsi_ldo);
+  if (ret != 0)
+    {
+      syslog(LOG_ERR, "[DSI] Failed to acquire LDO channel 3: %d\n", ret);
+      return;
+    }
 
-  /* Step 2: Set voltage parameters (dref and mul) in ANA register */
-
-  reg = *ldo_ana;
-  reg &= ~EXT_LDO_ANA_DREF_MASK;
-  reg |= ((uint32_t)MIPI_PHY_LDO_DREF << EXT_LDO_ANA_DREF_SHIFT);
-  reg &= ~EXT_LDO_ANA_MUL_MASK;
-  reg |= ((uint32_t)MIPI_PHY_LDO_MUL << EXT_LDO_ANA_MUL_SHIFT);
-  *ldo_ana = reg;
-
-  /* Step 3: Set tieh = 0 (use Vref*Mul, not rail voltage) */
-
-  reg = *ldo_ctrl;
-  reg &= ~EXT_LDO_TIEH_BIT;                   /* tieh = 0 */
-  *ldo_ctrl = reg;
-
-  /* Step 4: Enable the LDO (xpd = 1) */
-
-  reg = *ldo_ctrl;
-  reg |= EXT_LDO_XPD_BIT;                     /* xpd = 1 */
-  *ldo_ctrl = reg;
-
-  /* Step 5: Wait for voltage to stabilize */
-
-  dsi_delay_ms(5);
-
-  lcdinfo("DSI PHY LDO enabled: chan=%d, voltage=%dmV (dref=%d, mul=%d)\n",
-          ESP_DSI_PHY_LDO_CHAN, ESP_DSI_PHY_LDO_MV,
-          MIPI_PHY_LDO_DREF, MIPI_PHY_LDO_MUL);
+  syslog(LOG_INFO, "[DSI] LDO channel 3 acquired at 2500mV\n");
 }
 
 /****************************************************************************

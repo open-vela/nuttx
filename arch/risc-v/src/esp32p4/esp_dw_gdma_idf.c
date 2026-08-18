@@ -381,6 +381,7 @@ static esp_err_t dw_gdma_install_channel_interrupt(dw_gdma_channel_t *chan)
                              ESP_IRQ_TRIGGER_LEVEL,
                              dw_gdma_isr_wrapper,
                              group);
+      //printf("[GDMA] Step 10: Manual IRQ done, cpuint=%d\n", cpuint);
       if (cpuint < 0)
         {
           ESP_LOGE(TAG, "alloc interrupt failed");
@@ -837,16 +838,16 @@ esp_err_t dw_gdma_channel_register_event_callbacks(
   dw_gdma_group_t *group = chan->group;
   dw_gdma_hal_context_t *hal = &group->hal;
   int chan_id = chan->chan_id;
-
+  
   /* Lazy install interrupt service */
-
+  //printf("[GDMA] Step 10: Manual IRQ done, cpuint=%d\n", chan->cpuint);
   if (chan->cpuint < 0)
     {
       ESP_RETURN_ON_ERROR(
           dw_gdma_install_channel_interrupt(chan), TAG,
           "install interrupt service failed");
     }
-
+  printf("[GDMA] Step 10: Manual IRQ done, cpuint=%d\n", chan->cpuint);
   /* Enable interrupt propagation for registered events */
 
   dw_gdma_ll_channel_enable_intr_propagation(hal->dev, chan_id,

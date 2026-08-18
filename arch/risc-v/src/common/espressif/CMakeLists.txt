@@ -227,7 +227,7 @@ if(DEFINED ENV{ESP_HAL_3RDPARTY_VERSION})
       CACHE STRING "ESP HAL 3rdparty version")
 else()
   set(ESP_HAL_3RDPARTY_VERSION
-      2ca0ed97158c816c8fe2f764181d6806fbf9ba4a
+      633221442ea89d0f1c3f1891b61a8391a3cf34b7
       CACHE STRING "ESP HAL 3rdparty version")
 endif()
 
@@ -237,7 +237,7 @@ if(DEFINED ENV{ESP_HAL_3RDPARTY_URL})
       CACHE STRING "ESP HAL 3rdparty URL")
 else()
   set(ESP_HAL_3RDPARTY_URL
-      https://github.com/Joneyao/esp-hal-3rdparty.git
+      https://github.com/Vincent1-python/esp-hal-3rdparty.git
       CACHE STRING "ESP HAL 3rdparty URL")
 endif()
 

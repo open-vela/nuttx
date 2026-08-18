@@ -159,6 +159,7 @@ int esp_lcd_new_dsi_bus(const esp_lcd_dsi_bus_config_t *config,
   /* Step 10: mipi_dsi_hal_init */
 
   mipi_dsi_hal_init(&bus->hal, &hal_config);
+  usleep(2000);
 
   /* Step 11: Get PHY clock source frequency (XTAL 40MHz on ESP32-P4) */
 
@@ -168,6 +169,7 @@ int esp_lcd_new_dsi_bus(const esp_lcd_dsi_bus_config_t *config,
 
   mipi_dsi_hal_configure_phy_pll(&bus->hal, phy_clk_src_freq_hz,
                                  config->lane_bit_rate_mbps);
+  usleep(1000);
 
   /* Step 13: Wait for PLL lock */
 

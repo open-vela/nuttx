@@ -715,29 +715,38 @@ static int esp_csi_dma_init(void)
    * queued). RAW8 sized, 64-byte (cache line) aligned.
    */
 
+  //printf("[CSI DMA] Allocating frame buffers\n");
+  /*
   g_csi_dev.frame_buffer[0] = (uint8_t *)kmm_memalign(64,
                                                       ESP_CSI_FRAME_SIZE);
   g_csi_dev.frame_buffer[1] = (uint8_t *)kmm_memalign(64,
                                                       ESP_CSI_FRAME_SIZE);
-  if (g_csi_dev.frame_buffer[0] == NULL || g_csi_dev.frame_buffer[1] == NULL)
+                                                      */
+  g_csi_dev.frame_buffer[0] = (uint8_t *)heap_caps_aligned_calloc(64, 1, ESP_CSI_FRAME_SIZE, MALLOC_CAP_SPIRAM);
+  g_csi_dev.frame_buffer[1] = (uint8_t *)heap_caps_aligned_calloc(64, 1, ESP_CSI_FRAME_SIZE, MALLOC_CAP_SPIRAM);
+  if (g_csi_dev.frame_buffer[0] == NULL)
     {
-      syslog(LOG_ERR, "CSI: Failed to allocate frame buffers\n");
+      printf("[CSI DMA ERROR] Failed to allocate frame buffers0\n");
       return -ENOMEM;
     }
-
+  if (g_csi_dev.frame_buffer[1] == NULL)
+  {
+      printf("[CSI DMA ERROR] Failed to allocate frame buffers1\n");
+      return -ENOMEM;
+    }
   memset(g_csi_dev.frame_buffer[0], 0, ESP_CSI_FRAME_SIZE);
   memset(g_csi_dev.frame_buffer[1], 0, ESP_CSI_FRAME_SIZE);
   g_csi_dev.active_buf = 0;
-
   /* Ask the high-level DW-GDMA driver for a channel matching the camera's
    * transfer shape (peripheral -> memory, contiguous, CSI is the flow
    * controller). The driver picks the first free channel in the group.
    */
 
+  //printf("[CSI DMA] Allocating GDMA channel\n");
   err = dw_gdma_new_channel(&alloc_cfg, &g_csi_dma_chan);
   if (err != ESP_OK)
     {
-      syslog(LOG_ERR, "CSI: Failed to allocate DW-GDMA channel: %d\n",
+      printf("[CSI DMA ERROR] Failed to allocate DW-GDMA channel: %d\n",
              (int)err);
       return -ENODEV;
     }
@@ -787,30 +796,37 @@ int esp_csi_init(void)
 
   /* Step 1: Enable MIPI PHY LDO */
 
+  //printf("[CSI] Step 1: LDO enable\n");
   esp_csi_ldo_enable();
 
   /* Steps 2-5: Enable clocks */
 
+  //printf("[CSI] Step 2: Clock enable\n");
   esp_csi_clock_enable();
 
   /* ISP initialization: open the MIPI data gate (must be before bridge) */
 
+  //printf("[CSI] Step 3: ISP init\n");
   esp_csi_isp_init();
 
   /* Steps 6-8: Initialize D-PHY */
 
+  //printf("[CSI] Step 4: PHY init\n");
   esp_csi_phy_init();
 
   /* Steps 9-12: Configure Host Controller */
 
+  //printf("[CSI] Step 5: Host init\n");
   esp_csi_host_init();
 
   /* Steps 13-17: Configure Bridge */
 
+  //printf("[CSI] Step 6: Bridge init\n");
   esp_csi_bridge_init();
 
   /* Steps 18-19: Initialize DMA */
 
+  //printf("[CSI] Step 7: DMA init\n");
   ret = esp_csi_dma_init();
   if (ret < 0)
     {
@@ -821,7 +837,7 @@ int esp_csi_init(void)
   g_csi_dev.v_res = ESP_CSI_VRES;
   g_csi_dev.initialized = true;
 
-  syslog(LOG_INFO, "CSI: Initialization complete\n");
+  printf("[CSI] Initialization complete\n");
   return OK;
 }
 

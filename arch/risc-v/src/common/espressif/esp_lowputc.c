@@ -335,9 +335,9 @@ bool esp_lowputc_uart_module_enable(const struct esp_uart_s *priv)
 {
   int uart_num = priv->id;
   bool newly_enabled = false;
-  mutex_t lock;
+  sem_t lock;
 
-  nxmutex_init(&lock);
+  sem_init(&lock, 0, 1);
 
   g_uart_context[uart_num].mutex = (_lock_t)&lock;
 
@@ -371,7 +371,7 @@ bool esp_lowputc_uart_module_enable(const struct esp_uart_s *priv)
     }
 
   _lock_release(&(g_uart_context[uart_num].mutex));
-  nxmutex_destroy(&lock);
+  sem_destroy(&lock);
   g_uart_context[uart_num].mutex = NULL;
   return newly_enabled;
 }

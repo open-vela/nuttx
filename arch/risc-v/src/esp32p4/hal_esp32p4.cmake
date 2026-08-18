@@ -93,6 +93,8 @@ set(ESP32P4_INCLUDES
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_rmt/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_rtc_timer/${CHIP_SERIES}/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_rtc_timer/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_sd/${CHIP_SERIES}/include/
+    ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_sd/include/
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_security/${CHIP_SERIES}/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_security/include
     ${ESP_HAL_3RDPARTY_REPO}/components/esp_hal_timg/${CHIP_SERIES}/include
@@ -157,6 +159,7 @@ set(ESP32P4_INCLUDES
     ${ESP_HAL_3RDPARTY_REPO}/components/mbedtls/port/psa_driver/include
     ${ESP_HAL_3RDPARTY_REPO}/components/riscv/include
     ${ESP_HAL_3RDPARTY_REPO}/components/soc/${CHIP_SERIES}/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/soc/${CHIP_SERIES}/register/hw_ver3
     ${ESP_HAL_3RDPARTY_REPO}/components/soc/include
     ${ESP_HAL_3RDPARTY_REPO}/components/spi_flash/include
     ${ESP_HAL_3RDPARTY_REPO}/components/spi_flash/include/esp_flash_chips
@@ -174,6 +177,10 @@ set(ESP32P4_INCLUDES
     ${ESP_HAL_3RDPARTY_REPO}/components/upper_hal_gpio/include
     ${ESP_HAL_3RDPARTY_REPO}/components/upper_hal_rmt/include
     ${ESP_HAL_3RDPARTY_REPO}/components/upper_hal_rmt/src
+    ${ESP_HAL_3RDPARTY_REPO}/components/upper_hal_sdmmc/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/upper_hal_sdmmc/legacy/include
+    ${ESP_HAL_3RDPARTY_REPO}/components/upper_hal_sdmmc/legacy/src
+    ${ESP_HAL_3RDPARTY_REPO}/components/upper_hal_sdmmc/src
     ${ESP_HAL_3RDPARTY_REPO}/components/upper_hal_uart/include)
 
 if(CONFIG_ESP32P4_SELECTS_REV_LESS_V3)

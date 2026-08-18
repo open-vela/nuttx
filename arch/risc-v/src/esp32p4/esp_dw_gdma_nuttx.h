@@ -143,11 +143,30 @@ extern "C"
  * Name: dw_gdma_new_channel
  *
  * Description:
- *   Allocate a DW-GDMA channel for DSI (channel 1, hardcoded).
+ *   Allocate a DW-GDMA channel. Channel ID is determined by source role:
+ *   CSI (camera) → channel 0, DSI (display) → channel 1.
  ****************************************************************************/
 
 int dw_gdma_new_channel(const dw_gdma_channel_alloc_config_t *config,
                         dw_gdma_channel_handle_t *ret_chan);
+
+/****************************************************************************
+ * Name: esp_dsi_dma_isr_handler
+ *
+ * Description:
+ *   DSI DMA ISR handler (channel 1). Called from shared DW-GDMA ISR.
+ ****************************************************************************/
+
+void esp_dsi_dma_isr_handler(void);
+
+/****************************************************************************
+ * Name: esp_csi_dma_isr_handler
+ *
+ * Description:
+ *   CSI DMA ISR handler (channel 0). Called from shared DW-GDMA ISR.
+ ****************************************************************************/
+
+void esp_csi_dma_isr_handler(void);
 
 /****************************************************************************
  * Name: dw_gdma_new_link_list

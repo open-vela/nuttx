@@ -489,19 +489,21 @@ int esp_camera_initialize(void)
 {
   int ret;
 
-  syslog(LOG_INFO, "ESP Camera: Initializing camera subsystem\n");
+  printf("[CAMERA] Initializing camera subsystem\n");
 
   /* Step 1: Initialize the MIPI-CSI controller */
 
+  printf("[CAMERA] Step 1: CSI init\n");
   ret = esp_csi_init();
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ESP Camera: CSI init failed: %d\n", ret);
+      printf("[CAMERA ERROR] CSI init failed: %d\n", ret);
       return ret;
     }
 
   /* Step 2: Register with V4L2 capture framework (if available) */
 
+  printf("[CAMERA] Step 2: V4L2 register\n");
 #ifdef CONFIG_VIDEO_STREAM
   {
     FAR struct imgsensor_s *sensor_ptr;
@@ -513,18 +515,15 @@ int esp_camera_initialize(void)
                            1);
     if (ret < 0)
       {
-        syslog(LOG_ERR, "ESP Camera: capture_register failed: %d\n", ret);
+        printf("[CAMERA ERROR] capture_register failed: %d\n", ret);
         return ret;
       }
   }
 #else
-  syslog(LOG_WARNING,
-         "ESP Camera: CONFIG_VIDEO_STREAM not enabled, "
-         "V4L2 device not registered\n");
+  printf("[CAMERA] CONFIG_VIDEO_STREAM not enabled, V4L2 device not registered\n");
 #endif
 
-  syslog(LOG_INFO, "ESP Camera: %s initialized successfully\n",
-         ESP_CAMERA_DEVPATH);
+  printf("[CAMERA] %s initialized successfully\n", ESP_CAMERA_DEVPATH);
 
 #ifdef CONFIG_ESP32P4_CAMERA_DMA_SELFTEST
   esp_camera_dma_selftest();

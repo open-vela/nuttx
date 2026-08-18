@@ -44,7 +44,7 @@
 
 #define SC2336_I2C_ADDR        0x30     /* 7-bit I2C address */
 #define SC2336_I2C_PORT        0        /* I2C port 0 */
-#define SC2336_I2C_FREQ        100000   /* 100 kHz */
+#define SC2336_I2C_FREQ        400000   /* 100 kHz */
 #define SC2336_SCL_GPIO        8        /* GPIO8 = SCL */
 #define SC2336_SDA_GPIO        7        /* GPIO7 = SDA */
 
