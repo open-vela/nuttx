@@ -29,8 +29,16 @@ TOPDIR = Path(__file__).resolve().parents[1]
 VELA_ROOT = TOPDIR.parent
 
 sys.path.insert(
-    0, str(VELA_ROOT / "prebuilts" / "tools" / "python" / "dist-packages" /
-           "kconfiglib"))
+    0,
+    str(
+        VELA_ROOT
+        / "prebuilts"
+        / "tools"
+        / "python"
+        / "dist-packages"
+        / "kconfiglib"
+    ),
+)
 
 import kconfiglib  # noqa: E402
 
