@@ -40,9 +40,11 @@ config ESP32P4_FUNCTION_EV_TOUCH
 	depends on ESPRESSIF_I2C0
 	---help---
 		Enable the Goodix GT911 capacitive touch screen connected
-		on I2C0 (GPIO7/GPIO8).  The GT911 INT pin is GPIO9, reset
-		is GPIO45.  Address 0x14 is selected when INT is held low
-		during reset.
+		on I2C0 (GPIO7/GPIO8).  On this board the GT911 INT and RESET
+		lines are NOT wired (esp-bsp: BSP_LCD_TOUCH_INT/RST = NC; they
+		only break out on the LCD adapter J6 header), so the driver runs
+		in polling mode.  With INT floating at power-up the controller
+		latches I2C address 0x5D (0x14 would require INT held high).
 		Requires CONFIG_INPUT_GT9XX=y and CONFIG_ESPRESSIF_I2C0=y.
 
 # ---- ES8311 audio codec + I2S0 ----

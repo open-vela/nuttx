@@ -26,15 +26,15 @@
  *   1. Allocate RGB565 FB in PSRAM (page-aligned)
  *   2. Reset LCD / power on backlight GPIO
  *   3. Get MIPI-DSI host (registered by arch bringup)
- *   4. Configure DPI video-mode timing for EK79007 (800x1280)
- *   5. ILI9881C vendor DCS register init
+ *   4. Configure DPI video-mode timing for EK79007 (1024x600)
+ *   5. EK79007AD vendor DCS register init
  *   6. Bind framebuffer → video_start → display_on
  *   7. Enable backlight
  *
- * The scan geometry sent over the DSI bus is 1280 cols x 800 rows
- * (the ILI9881C native orientation).  The EK79007 carrier board
- * rotates the panel 90°, so the visible area and the LVGL
- * framebuffer are 800 wide x 1280 tall.
+ * The scan geometry sent over the DSI bus is 1024 cols x 600 rows,
+ * matching the panel (AML070JGI50, EK79007AD source driver +
+ * EK73217BCGA gate drivers) native landscape orientation, so the
+ * visible area and the LVGL framebuffer are both 1024 x 600.
  */
 
 /****************************************************************************
