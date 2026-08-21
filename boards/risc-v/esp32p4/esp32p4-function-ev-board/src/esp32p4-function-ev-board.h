@@ -203,7 +203,9 @@ int funev_touchscreen_init(void);
 /* Sign voice ROMFS image (signs_romfs.c) */
 
 extern const unsigned char g_signs_romfs[];
+extern const unsigned char g_models_romfs[];
 extern const unsigned int g_signs_romfs_len;
+extern const unsigned int g_models_romfs_len;
 
 /* Audio (ES8311 codec + I2S0) */
 

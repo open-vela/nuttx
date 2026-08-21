@@ -1964,6 +1964,8 @@ int nxsched_smp_call_delay(cpu_set_t cpuset, sclock_t delay,
 
 #endif
 
+int usleep(useconds_t usec);   /* POSIX usleep with C linkage */
+
 #undef EXTERN
 #if defined(__cplusplus)
 }
@@ -1980,7 +1982,12 @@ int nxsched_smp_call_delay(cpu_set_t cpuset, sclock_t delay,
 
 static inline_function int nxsched_usleep(useconds_t usec)
 {
-  extern int usleep(useconds_t usec);
+  /* usleep() with C linkage is declared inside the extern "C" block
+   * above (see the function prototype section).  A local 'extern'
+   * here would give it C++ linkage in C++ translation units and
+   * conflict with the C-linkage declaration in <unistd.h>.
+   */
+
   return usleep(usec);
 }
 

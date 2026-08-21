@@ -208,6 +208,48 @@ static int funev_signs_romfs_mount(void)
          (unsigned)g_signs_romfs_len);
   return OK;
 }
+
+#if defined(CONFIG_FS_ROMFS) && defined(CONFIG_TFLITEMICRO)
+/****************************************************************************
+ * Name: funev_models_romfs_mount
+ *
+ * Description:
+ *   Mount the embedded TFLite model ROMFS image at /etc/models.
+ *
+ ****************************************************************************/
+
+#define MODELS_ROMFS_SECTORSIZE  64
+#define MODELS_ROMFS_MINOR       9
+
+static int funev_models_romfs_mount(void)
+{
+  char devname[16];
+  int ret;
+
+  ret = romdisk_register(MODELS_ROMFS_MINOR, g_models_romfs,
+                         SIGNS_ROMFS_NSECTORS(g_models_romfs_len),
+                         MODELS_ROMFS_SECTORSIZE);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "models romfs: romdisk_register failed: %d\n", ret);
+      return ret;
+    }
+
+  snprintf(devname, sizeof(devname), "/dev/ram%d", MODELS_ROMFS_MINOR);
+  mkdir("/etc", 0777);
+
+  ret = nx_mount(devname, "/etc/models", "romfs", MS_RDONLY, NULL);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "models romfs: mount failed: %d\n", ret);
+      return ret;
+    }
+
+  syslog(LOG_INFO, "models romfs: mounted /etc/models (%u bytes)\n",
+         (unsigned)g_models_romfs_len);
+  return OK;
+}
+#endif
 #endif /* CONFIG_FS_ROMFS && CONFIG_ESP32P4_FUNCTION_EV_AUDIO */
 
 int esp_bringup(void)
@@ -594,6 +636,14 @@ int esp_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_WARNING, "signs romfs mount failed: %d\n", ret);
+    }
+#endif
+
+#if defined(CONFIG_FS_ROMFS) && defined(CONFIG_TFLITEMICRO)
+  ret = funev_models_romfs_mount();
+  if (ret < 0)
+    {
+      syslog(LOG_WARNING, "models romfs mount failed: %d\n", ret);
     }
 #endif
 

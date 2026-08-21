@@ -36,6 +36,7 @@ ifeq ($(CONFIG_ESP32P4_FUNCTION_EV_AUDIO),y)
   CSRCS += esp32p4_es8311.c
   ifeq ($(CONFIG_FS_ROMFS),y)
     CSRCS += signs_romfs.c
+    CSRCS += models_romfs.c
   endif
 endif
 

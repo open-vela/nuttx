@@ -595,6 +595,11 @@ SECTIONS
  __init_array_start = ABSOLUTE(.);
     KEEP (*(EXCLUDE_FILE (*crtend.* *crtbegin.*) .init_array))
     __init_array_end = ABSOLUTE(.);
+
+    /* NuttX lib_cxx_initialize() expects the _sinit/_einit symbols */
+
+    _sinit = __init_array_start;
+    _einit = __init_array_end;
     /* Addresses of memory regions reserved via SOC_RESERVE_MEMORY_REGION() */
 
  . = ALIGN(4);
