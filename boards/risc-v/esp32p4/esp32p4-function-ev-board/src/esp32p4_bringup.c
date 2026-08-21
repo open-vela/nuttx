@@ -254,6 +254,7 @@ static int funev_models_romfs_mount(void)
 
 int esp_bringup(void)
 {
+  FAR struct i2c_master_s *cam_i2c;
   int ret = OK;
 
 #ifdef CONFIG_FS_PROCFS
@@ -677,26 +678,24 @@ int esp_bringup(void)
 #endif
 
 #ifdef CONFIG_ESP32P4_FUNCTION_EV_CAMERA
-  {
-    FAR struct i2c_master_s *cam_i2c = esp_i2cbus_initialize(ESPRESSIF_I2C0);
-    if (cam_i2c != NULL)
-      {
-        ret = esp32p4_sc2336_initialize(cam_i2c);
-        if (ret < 0)
-          {
-            syslog(LOG_WARNING, "camera: sc2336 not detected: %d\n", ret);
-          }
-        else
-          {
-            ret = esp32p4_sc2336_configure();
-            if (ret < 0)
-              {
-                syslog(LOG_WARNING, "camera: sc2336 configure failed: %d\n",
-                       ret);
-              }
-          }
-      }
-  }
+  cam_i2c = esp_i2cbus_initialize(ESPRESSIF_I2C0);
+  if (cam_i2c != NULL)
+    {
+      ret = esp32p4_sc2336_initialize(cam_i2c);
+      if (ret < 0)
+        {
+          syslog(LOG_WARNING, "camera: sc2336 not detected: %d\n", ret);
+        }
+      else
+        {
+          ret = esp32p4_sc2336_configure();
+          if (ret < 0)
+            {
+              syslog(LOG_WARNING, "camera: sc2336 configure failed: %d\n",
+                     ret);
+            }
+        }
+    }
 #endif
 
   /* If we got here then perhaps not all initialization was successful, but

@@ -1,4 +1,3 @@
-#include <nuttx/mutex.h>
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_ws2812.c
  *
@@ -30,6 +29,7 @@
 #include <string.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/mutex.h>
 #include <nuttx/signal.h>
 #include <nuttx/leds/ws2812.h>
 

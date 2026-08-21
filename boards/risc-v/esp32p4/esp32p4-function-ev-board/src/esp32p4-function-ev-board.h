@@ -46,7 +46,7 @@
 #define FUNEV_GPIO_UART0_TX    37
 #define FUNEV_GPIO_UART0_RX    38
 
-/* ---- I2C0: touch GT911, shared with audio codec on function-ev-board ---- */
+/* ---- I2C0: touch GT911, shared with the audio codec on this board ---- */
 
 #define FUNEV_GPIO_I2C0_SCL    8
 #define FUNEV_GPIO_I2C0_SDA    7
@@ -64,18 +64,21 @@
 /* ---- EK79007 MIPI-DSI panel ---- */
 
 /* LCD reset: per Espressif user guide V1.8, RST_LCD is wired (dupont) to
- * GPIO27 by default.  Drives EK79007AD GRB (active low) via the adapter. */
+ * GPIO27 by default.  Drives EK79007AD GRB (active low) via the adapter.
+ */
 
 #define FUNEV_GPIO_LCD_RST     27
 
 /* Backlight: per user guide, PWM/backlight enable wired to GPIO26 by
- * default (drives the AP3012K boost EN on the LCD adapter board). */
+ * default (drives the AP3012K boost EN on the LCD adapter board).
+ */
 
 #define FUNEV_GPIO_LCD_BL_EN   26
 
 /* ---- SC2336 MIPI-CSI camera ----
  * SCCB shares I2C0 (SCL=8 SDA=7).  MIPI data lanes are dedicated CSI pads.
- * XVCLK provided by the 24 MHz crystal on the camera adapter board. */
+ * XVCLK provided by the 24 MHz crystal on the camera adapter board.
+ */
 
 #define FUNEV_SC2336_I2C_ADDR  0x3c
 #define FUNEV_SC2336_I2C_FREQ  400000
