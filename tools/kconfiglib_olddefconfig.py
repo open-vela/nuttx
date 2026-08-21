@@ -30,14 +30,7 @@ VELA_ROOT = TOPDIR.parent
 
 sys.path.insert(
     0,
-    str(
-        VELA_ROOT
-        / "prebuilts"
-        / "tools"
-        / "python"
-        / "dist-packages"
-        / "kconfiglib"
-    ),
+    str(VELA_ROOT / "prebuilts" / "tools" / "python" / "dist-packages" / "kconfiglib"),
 )
 
 import kconfiglib  # noqa: E402

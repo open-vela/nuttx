@@ -1,9 +1,33 @@
-/* Auto-generated ROMFS image containing sign language voice files.
- * Source: contest2026_408_signbridge/media/signs/ (50 Chinese WAV files)
- * Mounted at /media/signs by board bringup.
+/****************************************************************************
+ * boards/risc-v/esp32p4/esp32p4-function-ev-board/src/signs_romfs.c
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/* Auto-generated ROMFS image (sign language voice library (50 Chinese WAV files)).
+ * Mounted by the board bring-up code (/media/signs).
  */
 
-const unsigned char g_signs_romfs[] = {
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+const unsigned char g_signs_romfs[] =
+{
   0x2d, 0x72, 0x6f, 0x6d, 0x31, 0x66, 0x73, 0x2d, 0x00, 0x23, 0xca, 0xd0,
   0x86, 0x6b, 0x1d, 0xd2, 0x73, 0x69, 0x67, 0x6e, 0x62, 0x72, 0x69, 0x64,
   0x67, 0x65, 0x5f, 0x73, 0x69, 0x67, 0x6e, 0x73, 0x00, 0x00, 0x00, 0x00,
