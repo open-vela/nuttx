@@ -1,0 +1,75 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+
+# ---- MIPI-DSI display (EK79007 + ILI9881C) ----
+
+config ESP32P4_FUNCTION_EV_LCD
+	bool "EK79007 7 inch 1024x600 MIPI-DSI display"
+	default n
+	depends on ESPRESSIF_MIPI_DSI
+	depends on VIDEO_FB
+	---help---
+		Enable the 7 inch EK79007AD (1024x600) MIPI-DSI display on the
+		ESP32-P4-Function-EV-Board.  The ILI9881C LCD controller
+		is driven in video mode via MIPI-DSI 2 lanes at 1000 Mbps.
+		Requires CONFIG_ESPRESSIF_MIPI_DSI=y and CONFIG_FB=y.
+
+config ESP32P4_FUNCTION_EV_LCD_ST7121
+	bool
+	default n
+
+config ESP32P4_FUNCTION_EV_LCD_APO_TEST
+	bool "Enable All-Pixels-On test at boot"
+	default n
+	depends on ESP32P4_FUNCTION_EV_LCD
+	---help---
+		Flash the screen to All-Pixels-On (white) for 1 second at
+		boot to prove DCS and backlight are working, then restore
+		normal mode.  Useful for bringup debug.
+
+# ---- GT911 capacitive touch ----
+
+config ESP32P4_FUNCTION_EV_TOUCH
+	bool "GT911 capacitive touch screen (I2C0)"
+	default n
+	depends on INPUT_GT9XX
+	depends on ESPRESSIF_I2C0
+	---help---
+		Enable the Goodix GT911 capacitive touch screen connected
+		on I2C0 (GPIO7/GPIO8).  The GT911 INT pin is GPIO9, reset
+		is GPIO45.  Address 0x14 is selected when INT is held low
+		during reset.
+		Requires CONFIG_INPUT_GT9XX=y and CONFIG_ESPRESSIF_I2C0=y.
+
+# ---- ES8311 audio codec + I2S0 ----
+
+config ESP32P4_FUNCTION_EV_AUDIO
+	bool "ES8311 audio codec + I2S0 playback/recording"
+	default n
+	depends on ESPRESSIF_I2S0
+	depends on AUDIO
+	select AUDIO_ES8311
+	select AUDIO_PCM
+	select ESPRESSIF_I2C0
+	---help---
+		Enable the ES8311 audio codec connected via I2S0 on the
+		ESP32-P4-Function-EV-Board.  Registers /dev/audio/pcm0
+		(playback) and /dev/audio/pcm_in0 (recording).  The power
+		amplifier enable pin is GPIO53.
+
+# ---- SC2336 MIPI-CSI camera ----
+
+config ESP32P4_FUNCTION_EV_CAMERA
+	bool "SC2336 2MP MIPI-CSI camera (SCCB on I2C0)"
+	default n
+	depends on ESPRESSIF_I2C0
+	---help---
+		Enable the SC2336 2MP MIPI-CSI camera sensor control path
+		(SCCB over I2C0).  Configures the sensor for 1920x1080 RAW10
+		2-lane output; the on-chip ISP converts RAW to RGB.
+
+endif # ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD

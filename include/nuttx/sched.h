@@ -1968,6 +1968,22 @@ int nxsched_smp_call_delay(cpu_set_t cpuset, sclock_t delay,
 #if defined(__cplusplus)
 }
 #endif
+
+/****************************************************************************
+ * Name: nxsched_usleep
+ *
+ * Description:
+ *   Compatibility shim for upstream NuttX: suspend the calling task for
+ *   the specified number of microseconds.  Maps onto the POSIX usleep().
+ *
+ ****************************************************************************/
+
+static inline_function int nxsched_usleep(useconds_t usec)
+{
+  extern int usleep(useconds_t usec);
+  return usleep(usec);
+}
+
 #endif /* __ASSEMBLY__ */
 
 #endif /* __INCLUDE_NUTTX_SCHED_H */
