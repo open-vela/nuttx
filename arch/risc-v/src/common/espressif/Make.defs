@@ -85,7 +85,9 @@ ifeq ($(CONFIG_ESPRESSIF_HR_TIMER),y)
 endif
 
 ifeq ($(CONFIG_ESPRESSIF_DMA),y)
+ifneq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
 	CHIP_CSRCS += esp_dma.c
+endif
 endif
 
 ifeq ($(CONFIG_ESPRESSIF_TWAI),y)
