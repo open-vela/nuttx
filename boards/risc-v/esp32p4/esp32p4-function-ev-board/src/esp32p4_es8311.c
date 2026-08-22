@@ -121,6 +121,9 @@ int esp32p4_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
                               int i2s_port)
 {
   struct audio_lowerhalf_s *es8311;
+#ifndef CONFIG_SYSTEM_NXLOOPER
+  struct audio_lowerhalf_s *pcm;
+#endif
   struct i2s_dev_s *i2s;
   struct i2c_master_s *i2c;
   static bool initialized = false;
@@ -195,17 +198,15 @@ int esp32p4_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
        * a WAV/PCM front end for playback.
        */
 
-      {
-        struct audio_lowerhalf_s *pcm = pcm_decode_initialize(es8311);
-        if (pcm == NULL)
-          {
-            auderr("ERROR: Failed to create the PCM decoder\n");
-            ret = -ENODEV;
-            goto errout;
-          }
+      pcm = pcm_decode_initialize(es8311);
+      if (pcm == NULL)
+        {
+          auderr("ERROR: Failed to create the PCM decoder\n");
+          ret = -ENODEV;
+          goto errout;
+        }
 
-        ret = audio_register("pcm0", pcm);
-      }
+      ret = audio_register("pcm0", pcm);
 #endif
       if (ret < 0)
         {

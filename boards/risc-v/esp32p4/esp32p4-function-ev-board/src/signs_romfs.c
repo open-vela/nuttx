@@ -18,8 +18,8 @@
  *
  ****************************************************************************/
 
-/* Auto-generated ROMFS image (sign language voice library (50 Chinese WAV files)).
- * Mounted by the board bring-up code (/media/signs).
+/* Auto-generated ROMFS image: sign language voice library (50 Chinese
+ * WAV files).  Mounted by the board bring-up code (/media/signs).
  */
 
 /****************************************************************************
@@ -195528,4 +195528,9 @@ const unsigned char g_signs_romfs[] =
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
+
 const unsigned int g_signs_romfs_len = 2345984;
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/

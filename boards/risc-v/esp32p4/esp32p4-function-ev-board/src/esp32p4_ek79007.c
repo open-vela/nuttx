@@ -70,12 +70,12 @@
  * Private Types
  ****************************************************************************/
 
-/* Command table entry: DCS write, optional payload, optional delay */
+/* Command table entry: DCS write, optional single-byte payload, delay */
 
 struct ek79007_cmd_s
 {
   uint8_t cmd;
-  FAR const uint8_t *data;
+  uint8_t val;        /* Payload byte, valid when len == 1 */
   uint8_t len;
   uint16_t delay_ms;
 };
@@ -84,36 +84,22 @@ struct ek79007_cmd_s
  * Private Data
  ****************************************************************************/
 
-/* Vendor-specific init (Espressif esp_lcd_ek79007 default sequence) */
-
-static const uint8_t g_ek79007_r80[] = {0x8b};
-static const uint8_t g_ek79007_r81[] = {0x78};
-static const uint8_t g_ek79007_r82[] = {0x84};
-static const uint8_t g_ek79007_r83[] = {0x88};
-static const uint8_t g_ek79007_r84[] = {0xa8};
-static const uint8_t g_ek79007_r85[] = {0xe3};
-static const uint8_t g_ek79007_r86[] = {0x88};
-static const uint8_t g_ek79007_lane2[] = {EK79007_DSI_2_LANE};
+/* Vendor-specific init (Espressif esp_lcd_ek79007 default sequence):
+ * 2-lane MIPI-DSI mode, vendor registers 0x80..0x86, then sleep out
+ * with a 120 ms wait.
+ */
 
 static const struct ek79007_cmd_s g_ek79007_init[] =
 {
-  /* 2-lane MIPI-DSI mode */
-
-  {EK79007_PAD_CONTROL, g_ek79007_lane2, sizeof(g_ek79007_lane2), 0},
-
-  /* Vendor registers */
-
-  {0x80, g_ek79007_r80, sizeof(g_ek79007_r80), 0},
-  {0x81, g_ek79007_r81, sizeof(g_ek79007_r81), 0},
-  {0x82, g_ek79007_r82, sizeof(g_ek79007_r82), 0},
-  {0x83, g_ek79007_r83, sizeof(g_ek79007_r83), 0},
-  {0x84, g_ek79007_r84, sizeof(g_ek79007_r84), 0},
-  {0x85, g_ek79007_r85, sizeof(g_ek79007_r85), 0},
-  {0x86, g_ek79007_r86, sizeof(g_ek79007_r86), 0},
-
-  /* Sleep out, then wait 120 ms */
-
-  {EK79007_CMD_SLPOUT, NULL, 0, 120},
+  { EK79007_PAD_CONTROL, EK79007_DSI_2_LANE, 1, 0 },
+  { 0x80, 0x8b, 1, 0 },
+  { 0x81, 0x78, 1, 0 },
+  { 0x82, 0x84, 1, 0 },
+  { 0x83, 0x88, 1, 0 },
+  { 0x84, 0xa8, 1, 0 },
+  { 0x85, 0xe3, 1, 0 },
+  { 0x86, 0x88, 1, 0 },
+  { EK79007_CMD_SLPOUT, 0x00, 0, 120 },
 };
 
 #define EK79007_INIT_COUNT \
@@ -132,7 +118,9 @@ static int ek79007_send_init(FAR struct mipi_dsi_device *device)
     {
       FAR const struct ek79007_cmd_s *cmd = &g_ek79007_init[i];
 
-      n = mipi_dsi_dcs_write(device, cmd->cmd, cmd->data, cmd->len);
+      FAR const uint8_t *data = cmd->len > 0 ? &cmd->val : NULL;
+
+      n = mipi_dsi_dcs_write(device, cmd->cmd, data, cmd->len);
       if (n < 0)
         {
           syslog(LOG_ERR, "ek79007: DCS write 0x%02x failed: %d\n",
