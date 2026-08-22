@@ -189,6 +189,64 @@ endif # ESP32P4_I2S0
 
 endif # ESP32P4_I2S
 
+menuconfig ESP32P4_MIPI_DSI
+	bool "MIPI DSI Host & Bridge Controller"
+	default n
+	select DRIVERS_VIDEO
+	select VIDEO_FB
+	---help---
+		Enable ESP32-P4 MIPI DSI Host controller, D-PHY TX PLL, and Bridge.
+
+if ESP32P4_MIPI_DSI
+
+config ESP32P4_MIPI_DSI_LANES
+	int "Number of MIPI DSI Data Lanes"
+	default 2
+	range 1 2
+
+config ESP32P4_MIPI_DSI_LANE_BITRATE_MBPS
+	int "MIPI DSI Lane Bitrate (Mbps)"
+	default 1000
+	range 100 1500
+
+choice
+	prompt "MIPI DSI Default Display Panel"
+	default ESP32P4_MIPI_DSI_PANEL_EK79007
+
+config ESP32P4_MIPI_DSI_PANEL_EK79007
+	bool "EK79007 (1024x600, 2-lane, RGB565/RGB888)"
+
+config ESP32P4_MIPI_DSI_PANEL_ILI9881C
+	bool "ILI9881C (720x1280, 2-lane, RGB565/RGB888)"
+
+config ESP32P4_MIPI_DSI_PANEL_ST7701S
+	bool "ST7701S (480x800, 2-lane, RGB565/RGB888)"
+
+config ESP32P4_MIPI_DSI_PANEL_GENERIC
+	bool "Generic DPI Video Mode Panel"
+
+endchoice
+
+config ESP32P4_MIPI_DSI_WIDTH
+	int "Display Horizontal Resolution (pixels)"
+	default 1024 if ESP32P4_MIPI_DSI_PANEL_EK79007
+	default 720 if ESP32P4_MIPI_DSI_PANEL_ILI9881C
+	default 480 if ESP32P4_MIPI_DSI_PANEL_ST7701S
+	default 1024
+
+config ESP32P4_MIPI_DSI_HEIGHT
+	int "Display Vertical Resolution (pixels)"
+	default 600 if ESP32P4_MIPI_DSI_PANEL_EK79007
+	default 1280 if ESP32P4_MIPI_DSI_PANEL_ILI9881C
+	default 800 if ESP32P4_MIPI_DSI_PANEL_ST7701S
+	default 600
+
+config ESP32P4_MIPI_DSI_COLOR_RGB565
+	bool "Use 16-bit RGB565 Color Format"
+	default y
+
+endif # ESP32P4_MIPI_DSI
+
 endif # ARCH_CHIP_ESP32P4
 
 config P4_REV3_MSPI_CRASH_AFTER_POWER_UP_WORKAROUND
