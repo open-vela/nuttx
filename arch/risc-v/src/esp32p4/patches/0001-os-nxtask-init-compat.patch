@@ -1,0 +1,39 @@
+diff --git a/nuttx/src/platform/os.c b/nuttx/src/platform/os.c
+index 99470d7e7c0..177f4e4938a 100644
+--- a/nuttx/src/platform/os.c
++++ b/nuttx/src/platform/os.c
+@@ -13,6 +13,7 @@
+ 
+ #include <debug.h>
+ #include <errno.h>
++#include <fcntl.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+@@ -1310,6 +1311,7 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+   FAR struct tcb_s *tcb;
+   FAR struct task_wrapper_args_s *wrapper_args;
+   FAR char *argv[2];
++  posix_spawnattr_t attr;
+   char ptr_buf[32];
+   int ret;
+ 
+@@ -1335,9 +1337,15 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+ 
+   tcb->flags = TCB_FLAG_TTYPE_KERNEL | TCB_FLAG_FREE_TCB;
+ 
+-  ret = nxtask_init(tcb, name, priority,
+-                    NULL, stack_size,
+-                    task_wrapper_entry, argv, NULL, NULL);
++  /* openvela fork: nxtask_init() takes (tcb, name, entry, actions, attr,
++   * argv, envp); priority and stack size travel via posix_spawnattr_t.
++   */
++
++  memset(&attr, 0, sizeof(attr));
++  attr.priority  = priority;
++  attr.stacksize = stack_size;
++
++  ret = nxtask_init(tcb, name, task_wrapper_entry, NULL, &attr, argv, NULL);
+   if (ret < 0)
+     {
+       kmm_free(wrapper_args);

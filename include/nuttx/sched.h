@@ -1964,10 +1964,33 @@ int nxsched_smp_call_delay(cpu_set_t cpuset, sclock_t delay,
 
 #endif
 
+int usleep(useconds_t usec);   /* POSIX usleep with C linkage */
+
 #undef EXTERN
 #if defined(__cplusplus)
 }
 #endif
+
+/****************************************************************************
+ * Name: nxsched_usleep
+ *
+ * Description:
+ *   Compatibility shim for upstream NuttX: suspend the calling task for
+ *   the specified number of microseconds.  Maps onto the POSIX usleep().
+ *
+ ****************************************************************************/
+
+static inline_function int nxsched_usleep(useconds_t usec)
+{
+  /* usleep() with C linkage is declared inside the extern "C" block
+   * above (see the function prototype section).  A local 'extern'
+   * here would give it C++ linkage in C++ translation units and
+   * conflict with the C-linkage declaration in <unistd.h>.
+   */
+
+  return usleep(usec);
+}
+
 #endif /* __ASSEMBLY__ */
 
 #endif /* __INCLUDE_NUTTX_SCHED_H */
