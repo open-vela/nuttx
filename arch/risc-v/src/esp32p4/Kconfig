@@ -84,11 +84,110 @@ config ESP_EFUSE_BLOCK_REV_MAX_FULL
   # The revision in the comment must correspond to the default value of ESP_EFUSE_BLOCK_REV_MAX_FULL
 
 config ESP32P4_MIPI_CSI
-  bool "ESP32-P4 MIPI CSI Controller"
-  default n
-  ---help---
-    Enables the ESP32-P4 MIPI CSI-2 Host controller, D-PHY receiver,
-    and CSI Bridge subsystem.
+	bool "ESP32-P4 MIPI CSI Controller"
+	default n
+	---help---
+		Enables the ESP32-P4 MIPI CSI-2 Host controller, D-PHY receiver,
+		and CSI Bridge subsystem.
+
+menuconfig ESP32P4_I2S
+	bool "ESP32-P4 I2S"
+	default n
+	select I2S
+	---help---
+		Enable support for the ESP32-P4 I2S peripheral.
+
+if ESP32P4_I2S
+
+config ESP32P4_I2S_MAXINFLIGHT
+	int "I2S queue size"
+	default 4
+	range 1 16
+	---help---
+		Total number of audio buffers that can be in flight simultaneously.
+
+config ESP32P4_I2S0
+	bool "I2S 0"
+	default y
+	---help---
+		Enable I2S Port 0.
+
+if ESP32P4_I2S0
+
+config ESP32P4_I2S0_TX
+	bool "Enable I2S0 TX (Transmitter/Playback)"
+	default y
+	---help---
+		Enable I2S0 transmitter channel.
+
+config ESP32P4_I2S0_RX
+	bool "Enable I2S0 RX (Receiver/Record)"
+	default y
+	---help---
+		Enable I2S0 receiver channel.
+
+choice
+	prompt "I2S0 Role"
+	default ESP32P4_I2S0_ROLE_MASTER
+	---help---
+		Select Master or Slave operation mode.
+
+config ESP32P4_I2S0_ROLE_MASTER
+	bool "Master"
+
+config ESP32P4_I2S0_ROLE_SLAVE
+	bool "Slave"
+
+endchoice # I2S0 Role
+
+config ESP32P4_I2S0_DATA_BIT_WIDTH
+	int "I2S0 Data Bit Width"
+	default 16
+	range 8 32
+	---help---
+		Sample data bit width (8, 16, 24, or 32).
+
+config ESP32P4_I2S0_SAMPLE_RATE
+	int "I2S0 Default Sample Rate (Hz)"
+	default 44100
+	---help---
+		Default audio sample rate in Hz (e.g. 16000, 44100, 48000).
+
+config ESP32P4_I2S0_MCLKPIN
+	int "I2S0 MCLK Pin"
+	default 13
+	---help---
+		GPIO pin number for I2S0 Master Clock output (Default 13 on EV Board V1.8).
+
+config ESP32P4_I2S0_BCLKPIN
+	int "I2S0 BCLK Pin"
+	default 12
+	---help---
+		GPIO pin number for I2S0 Bit Clock (Default 12 on EV Board V1.8).
+
+config ESP32P4_I2S0_WSPIN
+	int "I2S0 WS / LRCK Pin"
+	default 10
+	---help---
+		GPIO pin number for I2S0 Word Select / Left-Right Clock (Default 10 on EV Board V1.8).
+
+config ESP32P4_I2S0_DOUTPIN
+	int "I2S0 DOUT (TX/Playback) Pin"
+	default 9
+	depends on ESP32P4_I2S0_TX
+	---help---
+		GPIO pin number for I2S0 Data Output (Default 9 on EV Board V1.8).
+
+config ESP32P4_I2S0_DINPIN
+	int "I2S0 DIN (RX/Record) Pin"
+	default 11
+	depends on ESP32P4_I2S0_RX
+	---help---
+		GPIO pin number for I2S0 Data Input (Default 11 on EV Board V1.8).
+
+endif # ESP32P4_I2S0
+
+endif # ESP32P4_I2S
 
 endif # ARCH_CHIP_ESP32P4
 
