@@ -266,7 +266,17 @@ static void hci_acl(FAR struct bt_buf_s *buf)
       return;
     }
 
+  /* The HCI RX worker releases its ACL buffer after this returns, while
+   * the L2CAP/ATT receive path also owns and releases that buffer.  Give
+   * the consumer its own reference before dispatching the packet.  Also
+   * release the connection reference taken by bt_conn_lookup_handle() so
+   * inbound ACL traffic does not leak the only connection slot across
+   * disconnect and reconnect cycles.
+   */
+
+  bt_buf_addref(buf);
   bt_conn_receive(conn, buf, flags);
+  bt_conn_release(conn);
 }
 
 /* HCI event processing */
