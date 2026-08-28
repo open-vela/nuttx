@@ -23,6 +23,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <arch/board/board.h>
 
 #include <sys/types.h>
 #include <syslog.h>
@@ -140,6 +141,16 @@ int stm32_bringup(void)
              "ERROR: Failed to mount the PROC filesystem: %d\n",  ret);
     }
 #endif /* CONFIG_FS_PROCFS */
+
+#ifdef CONFIG_PWM
+  /* Initialize PWM and register the PWM device. */
+
+  ret = stm32_pwm_setup();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_pwm_setup failed: %d\n", ret);
+    }
+#endif
 
 #ifdef CONFIG_RPTUN
 #  ifdef CONFIG_ARCH_CHIP_STM32H7_CORTEXM7
@@ -261,6 +272,21 @@ int stm32_bringup(void)
              "ERROR: Failed to start USB monitor: %d\n",
              ret);
     }
+#endif
+
+#ifdef CONFIG_UART7_RS485
+  ret = symlink("/dev/ttyS2", "/dev/rs485");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "ERROR: Failed to create symlink for RS485: %d\n",
+             ret);
+    }
+#endif
+
+#ifdef CONFIG_STM32H7_USART2
+  stm32_configgpio(GPIO_ESP_EN);
+  stm32_configgpio(GPIO_ESP_RST);
 #endif
 
   return OK;

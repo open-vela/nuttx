@@ -182,6 +182,8 @@ int stm32_bringup(void);
  *
  ****************************************************************************/
 
+int stm32_pwm_setup(void);
+
 #ifdef CONFIG_STM32H7_OTGFS
 void weak_function stm32_usbinitialize(void);
 #endif
