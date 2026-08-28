@@ -83,6 +83,14 @@ int nxtask_exit(void)
   sinfo("%s pid=%d,TCB=%p\n", get_task_name(dtcb),
         dtcb->pid, dtcb);
 
+  /* Finish critical section accounting while this task is still current.
+   * A threshold report may use a syslog mutex owned by this task.
+   */
+
+#if CONFIG_SCHED_CRITMONITOR_MAXTIME_CSECTION >= 0
+  nxsched_critmon_csection(dtcb, false, NULL);
+#endif
+
   /* Remove the TCB of the current task from the ready-to-run list.  A
    * context switch will definitely be necessary -- that must be done
    * by the architecture-specific logic.
@@ -120,9 +128,6 @@ int nxtask_exit(void)
 
 #ifdef CONFIG_SCHED_INSTRUMENTATION_CSECTION
   sched_note_csection(dtcb, false);
-#endif
-#if CONFIG_SCHED_CRITMONITOR_MAXTIME_CSECTION >= 0
-  nxsched_critmon_csection(dtcb, false, NULL);
 #endif
 
   sched_note_stop(dtcb);

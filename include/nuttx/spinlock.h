@@ -1528,7 +1528,9 @@ void write_unlock_irqrestore(FAR rwlock_t *lock, irqstate_t flags);
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SMP
+#if defined(CONFIG_SMP) || \
+    CONFIG_SCHED_CRITMONITOR_MAXTIME_CSECTION >= 0 || \
+    defined(CONFIG_SCHED_INSTRUMENTATION_CSECTION)
 #  define enter_critical_section_notrace() rspin_lock_irqsave(&g_schedlock)
 #else
 #  define enter_critical_section_notrace() up_irq_save()
@@ -1581,7 +1583,9 @@ irqstate_t enter_critical_section(void) noinstrument_function;
  *
  ****************************************************************************/
 
-#ifdef CONFIG_SMP
+#if defined(CONFIG_SMP) || \
+    CONFIG_SCHED_CRITMONITOR_MAXTIME_CSECTION >= 0 || \
+    defined(CONFIG_SCHED_INSTRUMENTATION_CSECTION)
 #  define leave_critical_section_notrace(f) rspin_unlock_irqrestore(&g_schedlock, f)
 #else
 #  define leave_critical_section_notrace(f) up_irq_restore(f)

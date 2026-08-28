@@ -53,6 +53,11 @@ DEFINE_PER_CPU_BMP(rspinlock_t, g_schedlock) = RSPINLOCK_INITIALIZER;
     defined(CONFIG_SCHED_INSTRUMENTATION_CSECTION)
 void restore_critical_section(uint16_t count)
 {
+  if (count == 0)
+    {
+      return;
+    }
+
   /* If CONFIG_SCHED_CRITMONITOR_MAXTIME_BUSYWAIT >= 0,
    * start counting time of busy-waiting.
    */
@@ -81,10 +86,11 @@ void restore_critical_section(uint16_t count)
 uint16_t break_critical_section(void)
 {
   FAR struct tcb_s *rtcb = running_task();
+  uint16_t count = rspin_lock_count(&g_schedlock);
 
-  /* If rtcb is NULL, it means rtcb has exited. */
+  /* Only stop a timer that was started for an actual critical section. */
 
-  if (rtcb != NULL)
+  if (rtcb != NULL && count > 0)
     {
 #  ifdef CONFIG_SCHED_INSTRUMENTATION_CSECTION
       sched_note_csection(rtcb, false);
