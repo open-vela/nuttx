@@ -50,6 +50,11 @@
 #  endif
 #endif
 
+#ifdef CONFIG_STM32H750B_DK_QSPI_BOOT
+#  define STM32_QSPI_BOOT_BASE 0x90000000
+#  define STM32_QSPI_BOOT_SIZE (128 * 1024 * 1024)
+#endif
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -99,6 +104,12 @@ void stm32_mpuinitialize(void)
   /* Configure shared memory as non-cacheable */
 
   mpu_priv_shmem((uintptr_t)STM32_SHMEM_BASE, STM32_SHMEM_SIZE);
+#endif
+
+#ifdef CONFIG_STM32H750B_DK_QSPI_BOOT
+  /* Keep the external QSPI XIP window executable after the MPU is enabled. */
+
+  mpu_priv_flash((uintptr_t)STM32_QSPI_BOOT_BASE, STM32_QSPI_BOOT_SIZE);
 #endif
 
   /* Then enable the MPU */

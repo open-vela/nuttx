@@ -945,6 +945,24 @@ static int ft5x06_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         }
         break;
 
+      case TSIOC_GETMAXPOINTS:  /* arg: Pointer to uint8_t maxpoint value */
+        {
+          FAR uint8_t *ptr = (FAR uint8_t *)((uintptr_t)arg);
+
+          if (ptr == NULL)
+            {
+              ret = -EINVAL;
+              break;
+            }
+
+#ifdef CONFIG_FT5X06_SINGLEPOINT
+          *ptr = 1;
+#else
+          *ptr = FT5X06_MAX_TOUCHES;
+#endif
+        }
+        break;
+
       default:
         ret = -ENOTTY;
         break;
