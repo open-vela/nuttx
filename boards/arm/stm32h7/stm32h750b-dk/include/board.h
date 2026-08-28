@@ -350,6 +350,7 @@
 #endif
 
 #define BOARD_SDRAM2_SIZE               (8*1024*1024)
+#define BOARD_SDRAM2_HEAP_OFFSET        (1*1024*1024)
 
 /* BOARD_FMC_SDCR[1..2] - Initial value for SDRAM control registers for SDRAM
  *      bank 1-2. Note that some bits in SDCR1 influence both SDRAM banks and
