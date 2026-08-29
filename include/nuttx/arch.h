@@ -94,6 +94,14 @@
  * Pre-processor definitions
  ****************************************************************************/
 
+/* Size required by up_saveusercontext().  Architectures may override this
+ * when the saved user context differs from an interrupt context.
+ */
+
+#ifndef SAVEUSERCONTEXT_SIZE
+#  define SAVEUSERCONTEXT_SIZE XCPTCONTEXT_SIZE
+#endif
+
 #define IRQ_RISING_EDGE          0x00
 #define IRQ_FALLING_EDGE         0x01
 #define IRQ_BOTH_EDGE            0x02
@@ -2986,6 +2994,9 @@ ssize_t up_show_cpuinfo(FAR char *buf, size_t buf_size, off_t file_off);
  *
  * Description:
  *   Save the current thread context
+ *
+ * Input Parameters:
+ *   saveregs - Buffer of at least SAVEUSERCONTEXT_SIZE bytes
  *
  ****************************************************************************/
 
