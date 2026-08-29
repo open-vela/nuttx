@@ -688,6 +688,7 @@ static void up_send(struct uart_dev_s *dev, int ch);
 static void up_txint(struct uart_dev_s *dev, bool enable);
 #endif
 static bool up_txready(struct uart_dev_s *dev);
+static bool up_txempty(struct uart_dev_s *dev);
 
 #ifdef SERIAL_HAVE_TXDMA
 static void up_dma_send(struct uart_dev_s *dev);
@@ -742,7 +743,7 @@ static const struct uart_ops_s g_uart_ops =
   .send           = up_send,
   .txint          = up_txint,
   .txready        = up_txready,
-  .txempty        = up_txready,
+  .txempty        = up_txempty,
 };
 #endif
 
@@ -763,7 +764,7 @@ static const struct uart_ops_s g_uart_rxtxdma_ops =
   .send           = up_send,
   .txint          = up_dma_txint,
   .txready        = up_txready,
-  .txempty        = up_txready,
+  .txempty        = up_txempty,
   .dmatxavail     = up_dma_txavailable,
   .dmasend        = up_dma_send,
 };
@@ -786,7 +787,7 @@ static const struct uart_ops_s g_uart_rxdma_ops =
   .send           = up_send,
   .txint          = up_txint,
   .txready        = up_txready,
-  .txempty        = up_txready,
+  .txempty        = up_txempty,
 };
 #endif
 
@@ -807,7 +808,7 @@ static const struct uart_ops_s g_uart_txdma_ops =
   .send           = up_send,
   .txint          = up_dma_txint,
   .txready        = up_txready,
-  .txempty        = up_txready,
+  .txempty        = up_txempty,
   .dmatxavail     = up_dma_txavailable,
   .dmasend        = up_dma_send,
 };
@@ -2161,15 +2162,22 @@ static int up_setup(struct uart_dev_s *dev)
 
   /* Enable Rx, Tx, and the USART */
 
-  /* Enable FIFO */
-
   regval  = up_serialin(priv, STM32_USART_CR1_OFFSET);
   regval |= (USART_CR1_UE | USART_CR1_TE | USART_CR1_RE);
 #ifdef SERIAL_HAVE_RXDMA
   regval |= USART_CR1_IDLEIE;
 #endif
 
-  regval |= USART_CR1_FIFOEN;
+  /* H7 defaults to FIFOEN (TXE becomes TXFNF).  For RS-485 half-duplex,
+   * keep classic shift-register semantics so TC/DIR timing stays sane.
+   */
+
+#ifdef HAVE_RS485
+  if (priv->rs485_dir_gpio == 0)
+#endif
+    {
+      regval |= USART_CR1_FIFOEN;
+    }
 
   up_serialout(priv, STM32_USART_CR1_OFFSET, regval);
 
@@ -2330,8 +2338,11 @@ static void up_shutdown(struct uart_dev_s *dev)
 #endif
 
 #ifdef HAVE_RS485
+  /* Return bus to receive before releasing the pin. */
+
   if (priv->rs485_dir_gpio != 0)
     {
+      stm32_gpiowrite(priv->rs485_dir_gpio, !priv->rs485_dir_polarity);
       stm32_unconfiggpio(priv->rs485_dir_gpio);
     }
 #endif
@@ -2497,13 +2508,17 @@ static int up_interrupt(int irq, void *context, void *arg)
    * Note - this should be first, to have the most recent TC bit value
    * from SR register - sending data affects TC, but without refresh we
    * will not know that...
+   *
+   * Do NOT drop DIR to RX here.  Flip DIR in up_txempty() after tcdrain
+   * sees TXE|TC (thread context), or in up_shutdown().  ISR-only DIR drops
+   * were implicated in mid-frame bus floats when combined with a bad USB
+   * adapter; LA on DI/DIR proved MCU timing fine once the peer PHY was OK.
    */
 
   if ((priv->sr & USART_ISR_TC) != 0 &&
       (priv->ie & USART_CR1_TCIE) != 0 &&
       (priv->ie & USART_CR1_TXEIE) == 0)
     {
-      stm32_gpiowrite(priv->rs485_dir_gpio, !priv->rs485_dir_polarity);
       up_restoreusartint(priv, priv->ie & ~USART_CR1_TCIE);
     }
 #endif
@@ -3520,6 +3535,9 @@ static void up_txint(struct uart_dev_s *dev, bool enable)
 #  ifdef HAVE_RS485
       if (priv->rs485_dir_gpio != 0)
         {
+          /* Clear stale TC so enabling TCIE does not race the next frame. */
+
+          up_serialout(priv, STM32_USART_ICR_OFFSET, USART_ICR_TCCF);
           ie |= USART_CR1_TCIE;
         }
 #  endif
@@ -3565,6 +3583,38 @@ static bool up_txready(struct uart_dev_s *dev)
 {
   struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
   return ((up_serialin(priv, STM32_USART_ISR_OFFSET) & USART_ISR_TXE) != 0);
+}
+
+/****************************************************************************
+ * Name: up_txempty
+ *
+ * Description:
+ *   Return true when the transmitter is fully idle.  For RS-485 require
+ *   TXE|TC then force DIR to receive so tcdrain() outlives the shift
+ *   register without an app-layer usleep().
+ *
+ ****************************************************************************/
+
+static bool up_txempty(struct uart_dev_s *dev)
+{
+  struct up_dev_s *priv = (struct up_dev_s *)dev->priv;
+  uint32_t isr = up_serialin(priv, STM32_USART_ISR_OFFSET);
+
+#ifdef HAVE_RS485
+  if (priv->rs485_dir_gpio != 0)
+    {
+      if ((isr & (USART_ISR_TXE | USART_ISR_TC)) !=
+          (USART_ISR_TXE | USART_ISR_TC))
+        {
+          return false;
+        }
+
+      stm32_gpiowrite(priv->rs485_dir_gpio, !priv->rs485_dir_polarity);
+      return true;
+    }
+#endif
+
+  return (isr & USART_ISR_TXE) != 0;
 }
 
 /****************************************************************************
