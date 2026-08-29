@@ -824,7 +824,10 @@ int rtc_initialize(int minor, FAR struct rtc_lowerhalf_s *lower)
   char devpath[20];
   int ret;
 
-  DEBUGASSERT(lower && lower->ops && minor >= 0 && minor < 1000);
+  if (lower == NULL || lower->ops == NULL || minor < 0 || minor >= 1000)
+    {
+      return -EINVAL;
+    }
 
   /* Allocate an upper half container structure */
 
