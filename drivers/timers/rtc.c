@@ -379,6 +379,12 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         FAR struct rtc_time *rtctime =
           (FAR struct rtc_time *)((uintptr_t)arg);
 
+        if (rtctime == NULL)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
         if (ops->rdtime)
           {
             ret = ops->rdtime(upper->lower, rtctime);
@@ -396,6 +402,12 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       {
         FAR const struct rtc_time *rtctime =
           (FAR const struct rtc_time *)((uintptr_t)arg);
+
+        if (rtctime == NULL)
+          {
+            ret = -EINVAL;
+            break;
+          }
 
         if (ops->settime)
           {
@@ -422,6 +434,12 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
       {
         FAR bool *have_set_time = (FAR bool *)((uintptr_t)arg);
 
+        if (have_set_time == NULL)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
         if (ops->havesettime)
           {
             *have_set_time = ops->havesettime(upper->lower);
@@ -445,9 +463,18 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         struct lower_setalarm_s lowerinfo;
         int alarmid;
 
-        DEBUGASSERT(alarminfo != NULL);
+        if (alarminfo == NULL)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
         alarmid = alarminfo->id;
-        DEBUGASSERT(alarmid >= 0 && alarmid < CONFIG_RTC_NALARMS);
+        if (alarmid >= CONFIG_RTC_NALARMS)
+          {
+            ret = -EINVAL;
+            break;
+          }
 
         /* Is the alarm active? */
 
@@ -516,9 +543,18 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         struct lower_setrelative_s lowerinfo;
         int alarmid;
 
-        DEBUGASSERT(alarminfo != NULL);
+        if (alarminfo == NULL)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
         alarmid = alarminfo->id;
-        DEBUGASSERT(alarmid >= 0 && alarmid < CONFIG_RTC_NALARMS);
+        if (alarmid >= CONFIG_RTC_NALARMS)
+          {
+            ret = -EINVAL;
+            break;
+          }
 
         /* Is the alarm active? */
 
@@ -582,10 +618,15 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
     case RTC_CANCEL_ALARM:
       {
         FAR struct rtc_alarminfo_s *upperinfo;
-        int alarmid = (int)arg;
+        int alarmid;
 
-        DEBUGASSERT(alarmid >= 0 && alarmid < CONFIG_RTC_NALARMS);
+        if (arg >= CONFIG_RTC_NALARMS)
+          {
+            ret = -EINVAL;
+            break;
+          }
 
+        alarmid = (int)arg;
         upperinfo = &upper->alarminfo[alarmid];
 
         if (ops->cancelalarm)
@@ -614,9 +655,18 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         struct lower_rdalarm_s lowerinfo;
         int alarmid;
 
-        DEBUGASSERT(alarmquery != NULL);
+        if (alarmquery == NULL)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
         alarmid = alarmquery->id;
-        DEBUGASSERT(alarmid >= 0 && alarmid < CONFIG_RTC_NALARMS);
+        if (alarmid >= CONFIG_RTC_NALARMS)
+          {
+            ret = -EINVAL;
+            break;
+          }
 
         /* Is the alarm active? */
 
@@ -650,9 +700,18 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
         struct lower_setperiodic_s lowerinfo;
         int id;
 
-        DEBUGASSERT(alarminfo != NULL);
+        if (alarminfo == NULL)
+          {
+            ret = -EINVAL;
+            break;
+          }
+
         id = alarminfo->id;
-        DEBUGASSERT(id >= 0);
+        if (id != 0)
+          {
+            ret = -EINVAL;
+            break;
+          }
 
         /* Is the alarm active? */
 
@@ -715,10 +774,15 @@ static int rtc_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
     case RTC_CANCEL_PERIODIC:
       {
         FAR struct rtc_alarminfo_s *upperinfo;
-        int id = (int)arg;
+        int id;
 
-        DEBUGASSERT(id >= 0);
+        if (arg != 0)
+          {
+            ret = -EINVAL;
+            break;
+          }
 
+        id = (int)arg;
         upperinfo = &upper->periodicinfo;
 
         if (ops->cancelperiodic)
