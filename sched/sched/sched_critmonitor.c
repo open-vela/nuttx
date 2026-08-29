@@ -280,16 +280,23 @@ void nxsched_critmon_csection(FAR struct tcb_s *tcb, bool state,
       tcb->crit_start  = current;
       tcb->crit_caller = caller;
     }
-  else
+  else if (tcb->crit_caller != NULL)
     {
       /* Leaving .. Check for the max elapsed time */
 
       clock_t elapsed = current - tcb->crit_start;
+      FAR void *caller = tcb->crit_caller;
+
+      /* Clear the active marker before reporting.  Reporting can enter
+       * another critical section through the syslog backend.
+       */
+
+      tcb->crit_caller = NULL;
 
       if (elapsed > tcb->crit_max)
         {
           tcb->crit_max        = elapsed;
-          tcb->crit_max_caller = tcb->crit_caller;
+          tcb->crit_max_caller = caller;
           CHECK_CSECTION(tcb->pid, elapsed);
         }
 
