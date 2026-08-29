@@ -2172,7 +2172,8 @@ FAR struct gdb_state_s *gdb_state_init(gdb_send_func_t send,
   state->recv = recv;
   state->priv = priv;
   state->monitor = monitor;
-  state->running_regs = lib_memalign(XCPTCONTEXT_ALIGN, XCPTCONTEXT_SIZE);
+  state->running_regs = lib_memalign(XCPTCONTEXT_ALIGN,
+                                     SAVEUSERCONTEXT_SIZE);
 
 #ifdef CONFIG_LIB_GDBSTUB_DEBUG
   lib_syslograwstream_open(&state->stream);

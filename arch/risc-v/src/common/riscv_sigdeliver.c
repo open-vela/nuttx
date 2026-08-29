@@ -115,6 +115,11 @@ retry:
 
   board_autoled_off(LED_SIGNAL);
 
+#if defined(CONFIG_ARCH_FPU) && defined(CONFIG_ARCH_LAZYFPU)
+  memcpy(rtcb->xcp.fregs, rtcb->xcp.saved_fregs,
+         sizeof(rtcb->xcp.fregs));
+#endif
+
   g_running_task = NULL;
   rtcb->xcp.regs = regs;
   riscv_fullcontextrestore();

@@ -329,7 +329,8 @@
 #  define FPU_XCPT_SIZE     (0)
 #endif /* CONFIG_ARCH_FPU */
 
-#define XCPTCONTEXT_REGS    (INT_XCPT_REGS + FPU_XCPT_REGS)
+#define XCPTCONTEXT_REGS     (INT_XCPT_REGS + FPU_XCPT_REGS)
+#define SAVEUSERCONTEXT_SIZE (INT_XCPT_SIZE + FPU_XCPT_SIZE)
 
 #ifdef CONFIG_ARCH_LAZYFPU
 /* Save only integer regs. FPU is handled separately */
@@ -652,6 +653,10 @@ struct xcptcontext
    */
 
   uintreg_t *saved_regs;
+
+#if defined(CONFIG_ARCH_FPU) && defined(CONFIG_ARCH_LAZYFPU)
+  uintreg_t saved_fregs[FPU_XCPT_REGS];
+#endif
 
 #ifndef CONFIG_BUILD_FLAT
   /* This is the saved address to use when returning from a user-space

@@ -91,6 +91,12 @@ void up_schedule_sigaction(struct tcb_s *tcb)
 
   tcb->xcp.saved_regs        = tcb->xcp.regs;
 
+#if defined(CONFIG_ARCH_FPU) && defined(CONFIG_ARCH_LAZYFPU)
+  riscv_savefpu(tcb->xcp.saved_regs, tcb->xcp.fregs);
+  memcpy(tcb->xcp.saved_fregs, tcb->xcp.fregs,
+         sizeof(tcb->xcp.saved_fregs));
+#endif
+
   /* Duplicate the register context.  These will be
    * restored by the signal trampoline after the signal has been
    * delivered.

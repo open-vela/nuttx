@@ -84,7 +84,7 @@ struct elf_dumpinfo_s
  * Private Data
  ****************************************************************************/
 
-static uint8_t g_running_regs[XCPTCONTEXT_SIZE]
+static uint8_t g_running_regs[SAVEUSERCONTEXT_SIZE]
                aligned_data(XCPTCONTEXT_ALIGN);
 
 #ifdef CONFIG_BOARD_COREDUMP_COMPRESSION
