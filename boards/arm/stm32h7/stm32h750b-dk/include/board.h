@@ -271,7 +271,26 @@
 #define STM32_SDMMC_MMCXFR_CLKDIV   (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 #define STM32_SDMMC_SDXFR_CLKDIV    (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 
-#define STM32_SDMMC_CLKCR_EDGE      STM32_SDMMC_CLKCR_NEGEDGE
+/* ST BSP stm32h750b_discovery_mmc.c uses rising edge; prefer that for eMMC. */
+
+#define STM32_SDMMC_CLKCR_EDGE      (0) /* rising */
+
+/* SDMMC1 — on-board eMMC (U11), 8-bit wiring (MB1381 / ST BSP MSP):
+ *   CK=PC12, CMD=PD2, D0–D3=PC8–11, D4–D5=PB8–9, D6–D7=PC6–7
+ * NuttX stm32_sdmmc.c configures D0–D3 (+CK/CMD) in sdio_initialize();
+ * board stm32_sdmmc.c also arms D4–D7 for a future 8-bit path.
+ */
+
+#define GPIO_SDMMC1_CK   (GPIO_SDMMC1_CK_0|GPIO_SPEED_100MHz)   /* PC12 */
+#define GPIO_SDMMC1_CMD  (GPIO_SDMMC1_CMD_0|GPIO_SPEED_100MHz)  /* PD2 */
+#define GPIO_SDMMC1_D0   (GPIO_SDMMC1_D0_0|GPIO_SPEED_100MHz)   /* PC8 */
+#define GPIO_SDMMC1_D1   (GPIO_SDMMC1_D1_0|GPIO_SPEED_100MHz)   /* PC9 */
+#define GPIO_SDMMC1_D2   (GPIO_SDMMC1_D2_0|GPIO_SPEED_100MHz)   /* PC10 */
+#define GPIO_SDMMC1_D3   (GPIO_SDMMC1_D3_0|GPIO_SPEED_100MHz)   /* PC11 */
+#define GPIO_SDMMC1_D4   (GPIO_SDMMC1_D4_0|GPIO_SPEED_100MHz)   /* PB8 */
+#define GPIO_SDMMC1_D5   (GPIO_SDMMC1_D5_0|GPIO_SPEED_100MHz)   /* PB9 */
+#define GPIO_SDMMC1_D6   (GPIO_SDMMC1_D6_0|GPIO_SPEED_100MHz)   /* PC6 */
+#define GPIO_SDMMC1_D7   (GPIO_SDMMC1_D7_0|GPIO_SPEED_100MHz)   /* PC7 */
 
 /* Ethernet definitions *****************************************************/
 
@@ -507,6 +526,10 @@
 
 /* Alternate function pin selections ****************************************/
 
+/* USART2 - ESP-01 (VelaGuard expansion board, STMod P1-2/3) */
+#define GPIO_USART2_RX   (GPIO_USART2_RX_2 | GPIO_SPEED_100MHz)  /* PD6 */
+#define GPIO_USART2_TX   (GPIO_USART2_TX_2 | GPIO_SPEED_100MHz)  /* PD5 */
+
 /* USART3 (Nucleo Virtual Console) */
 
 #define GPIO_USART3_RX   (GPIO_USART3_RX_1 | GPIO_SPEED_100MHz)  /* PB11 */
@@ -516,6 +539,9 @@
 
 #define GPIO_UART7_RX   (GPIO_UART7_RX_1 | GPIO_SPEED_100MHz)  /* PA8 */
 #define GPIO_UART7_TX   (GPIO_UART7_TX_2 | GPIO_SPEED_100MHz)  /* PB4 */
+
+/* TIM15 - PWM (VelaGuard D01 / passive buzzer) */
+#define GPIO_TIM15_CH2OUT (GPIO_TIM15_CH2OUT_2 | GPIO_SPEED_50MHz)  /* PE6 */
 
 /* I2C4 - Used by Touchscreen and Audio Codec */
 
@@ -555,6 +581,19 @@
 #define GPIO_LTDC_HSYNC  (GPIO_LTDC_HSYNC_3 | GPIO_SPEED_100MHz)
 #define GPIO_LTDC_DE     (GPIO_LTDC_DE_3 | GPIO_SPEED_100MHz)
 #define GPIO_LTDC_CLK    (GPIO_LTDC_CLK_3 | GPIO_SPEED_100MHz)
+
+/* RS485 direction (VelaGuard expansion, Arduino D4 / PK1) */
+#define GPIO_UART7_RS485_DIR (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_CLEAR|\
+                              GPIO_PORTK|GPIO_PIN1) /* PK1 */
+
+/* ESP-01S control (STMod P1-14 / P1-12) */
+#define GPIO_ESP_EN (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_SET|\
+                              GPIO_PORTA|GPIO_PIN3) /* PA3 */
+#define GPIO_ESP_RST (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_SET|\
+                              GPIO_PORTH|GPIO_PIN10) /* PH10 */
 
 /* DMA **********************************************************************/
 

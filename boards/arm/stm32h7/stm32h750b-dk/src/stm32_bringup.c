@@ -23,8 +23,12 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <arch/board/board.h>
 
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <stdio.h>
 #include <syslog.h>
 #include <errno.h>
 
@@ -119,6 +123,100 @@ void rpmsg_serialinit(void)
  *
  ****************************************************************************/
 
+#ifdef HAVE_SDIO
+#  if defined(CONFIG_FS_FAT) && defined(CONFIG_FS_LINKS)
+
+static void vg_setup_data_layout(void)
+{
+  struct stat st;
+  int ret;
+
+  ret = mkdir("/mnt/emmc/data", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: mkdir /mnt/emmc/data failed: %d\n", ret);
+    }
+
+  /* One-time stage0 → stage1: /mnt/emmc/velaguard → /mnt/emmc/data/velaguard */
+
+  if (stat("/mnt/emmc/velaguard", &st) == 0 &&
+      stat("/mnt/emmc/data/velaguard", &st) != 0)
+    {
+      ret = rename("/mnt/emmc/velaguard", "/mnt/emmc/data/velaguard");
+      if (ret < 0)
+        {
+          syslog(LOG_WARNING,
+                 "WARNING: migrate velaguard dir failed: %d\n", ret);
+        }
+      else
+        {
+          syslog(LOG_INFO,
+                 "Migrated /mnt/emmc/velaguard -> /mnt/emmc/data/velaguard\n");
+        }
+    }
+
+  ret = mkdir("/mnt/emmc/data/velaguard/config", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: mkdir velaguard/config failed: %d\n", ret);
+    }
+
+  ret = mkdir("/mnt/emmc/data/agent", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: mkdir data/agent failed: %d\n", ret);
+    }
+
+  ret = mkdir("/mnt/emmc/data/agent/config", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: mkdir agent/config failed: %d\n", ret);
+    }
+
+  ret = mkdir("/mnt/emmc/data/agent/memory", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: mkdir agent/memory failed: %d\n", ret);
+    }
+
+  ret = mkdir("/mnt/emmc/data/agent/sessions", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: mkdir agent/sessions failed: %d\n", ret);
+    }
+
+  ret = mkdir("/mnt/emmc/data/agent/skills", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_WARNING,
+             "WARNING: mkdir agent/skills failed: %d\n", ret);
+    }
+
+  if (lstat("/data", &st) != 0)
+    {
+      ret = symlink("/mnt/emmc/data", "/data");
+      if (ret < 0)
+        {
+          syslog(LOG_WARNING,
+                 "WARNING: symlink /data -> /mnt/emmc/data failed: %d\n",
+                 ret);
+        }
+      else
+        {
+          syslog(LOG_INFO, "Symlink /data -> /mnt/emmc/data\n");
+        }
+    }
+}
+
+#  endif /* CONFIG_FS_FAT && CONFIG_FS_LINKS */
+#endif /* HAVE_SDIO */
+
 int stm32_bringup(void)
 {
   int ret;
@@ -140,6 +238,16 @@ int stm32_bringup(void)
              "ERROR: Failed to mount the PROC filesystem: %d\n",  ret);
     }
 #endif /* CONFIG_FS_PROCFS */
+
+#ifdef CONFIG_PWM
+  /* Initialize PWM and register the PWM device. */
+
+  ret = stm32_pwm_setup();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_pwm_setup failed: %d\n", ret);
+    }
+#endif
 
 #ifdef CONFIG_RPTUN
 #  ifdef CONFIG_ARCH_CHIP_STM32H7_CORTEXM7
@@ -261,6 +369,52 @@ int stm32_bringup(void)
              "ERROR: Failed to start USB monitor: %d\n",
              ret);
     }
+#endif
+
+#ifdef CONFIG_UART7_RS485
+  ret = symlink("/dev/ttyS2", "/dev/rs485");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to create symlink for RS485: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_STM32H7_USART2
+  stm32_configgpio(GPIO_ESP_EN);
+  stm32_configgpio(GPIO_ESP_RST);
+#endif
+
+#ifdef HAVE_SDIO
+  /* Initialize on-board eMMC (SDMMC1) and try FAT at /mnt/emmc.
+   * First boot may lack a filesystem — mount failure is logged only;
+   * format manually with NSH: mkfatfs /dev/mmcsd0
+   */
+
+  ret = stm32_sdio_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "ERROR: Failed to initialize eMMC/SDIO: %d\n", ret);
+    }
+#ifdef CONFIG_FS_FAT
+  else
+    {
+      ret = nx_mount("/dev/mmcsd0", "/mnt/emmc", "vfat", 0, NULL);
+      if (ret < 0)
+        {
+          syslog(LOG_WARNING,
+                 "WARNING: eMMC FAT mount /mnt/emmc failed: %d "
+                 "(try: mkfatfs /dev/mmcsd0)\n", ret);
+        }
+      else
+        {
+          syslog(LOG_INFO, "eMMC mounted at /mnt/emmc\n");
+#  if defined(CONFIG_FS_FAT) && defined(CONFIG_FS_LINKS)
+          vg_setup_data_layout();
+#  endif
+        }
+    }
+#endif
 #endif
 
   return OK;

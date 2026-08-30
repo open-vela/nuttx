@@ -156,6 +156,19 @@
 #define GPIO_LCD_B2        (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
                             GPIO_OUTPUT_CLEAR|GPIO_PORTJ|GPIO_PIN14)
 
+/* SDMMC / on-board eMMC ****************************************************/
+
+#if defined(CONFIG_STM32H7_SDMMC1)
+#  define HAVE_SDIO
+#endif
+
+#if defined(CONFIG_DISABLE_MOUNTPOINT) || !defined(CONFIG_MMCSD_SDIO)
+#  undef HAVE_SDIO
+#endif
+
+#define SDIO_SLOTNO        0
+#define SDIO_MINOR         0
+
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
@@ -181,6 +194,8 @@ int stm32_bringup(void);
  *   USB-related GPIO pins for the stm32h750b-dk board.
  *
  ****************************************************************************/
+
+int stm32_pwm_setup(void);
 
 #ifdef CONFIG_STM32H7_OTGFS
 void weak_function stm32_usbinitialize(void);
@@ -212,6 +227,18 @@ int stm32_usbhost_initialize(void);
 
 #ifdef CONFIG_INPUT_FT5X06
 int stm32_tsc_setup(int minor);
+#endif
+
+/****************************************************************************
+ * Name: stm32_sdio_initialize
+ *
+ * Description:
+ *   Initialize SDIO-based MMC/SD card support (on-board eMMC).
+ *
+ ****************************************************************************/
+
+#ifdef HAVE_SDIO
+int stm32_sdio_initialize(void);
 #endif
 
 #endif /* __BOARDS_ARM_STM32H7_STM32H750B_DK_SRC_STM32H750B_DK_H */
