@@ -57,6 +57,10 @@ ifeq ($(CONFIG_ESP32P4_PPA),y)
 CHIP_CSRCS += esp32p4_ppa.c
 endif
 
+ifeq ($(CONFIG_ESP32P4_SDMMC),y)
+CHIP_CSRCS += esp32p4_sdmmc.c
+endif
+
 CFLAGS += ${DEFINE_PREFIX}_RETARGETABLE_LOCKING
 CFLAGS += ${DEFINE_PREFIX}CONFIG_ESPRESSIF_LOG_LEVEL=0
 CFLAGS += -include common/espressif/esp_p4_sched_compat.h

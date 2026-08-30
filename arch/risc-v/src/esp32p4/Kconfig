@@ -262,6 +262,17 @@ config ESP32P4_PPA
 		for ESP32-P4, providing hardware image scaling, rotation,
 		blending, and color space conversion.
 
+config ESP32P4_SDMMC
+	bool "ESP32-P4 SDMMC Host Controller"
+	default n
+	select ARCH_HAVE_SDIO
+	select MMCSD
+	select MMCSD_SDIO
+	select SDIO_BLOCKSETUP
+	---help---
+		Enables SDMMC Host Controller driver support for ESP32-P4,
+		supporting MicroSD/TF card slot in 4-bit bus mode.
+
 endif # ARCH_CHIP_ESP32P4
 
 config P4_REV3_MSPI_CRASH_AFTER_POWER_UP_WORKAROUND
