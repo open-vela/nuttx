@@ -78,6 +78,9 @@ FAR void *mm_realloc(FAR struct mm_heap_s *heap, FAR void *oldmem,
   size_t nextsize = 0;
   FAR void *newmem;
   bool bypass;
+#ifdef CONFIG_MM_RECORD_STACK
+  FAR void *oldstack;
+#endif
 
   /* If oldmem is NULL, then realloc is equivalent to malloc */
 
@@ -144,8 +147,7 @@ FAR void *mm_realloc(FAR struct mm_heap_s *heap, FAR void *oldmem,
   DEBUGASSERT(MM_NODE_IS_ALLOC(oldnode));
 
 #ifdef CONFIG_MM_RECORD_STACK
-  backtrace_remove(oldnode->stack);
-  oldnode->stack = NULL;
+  oldstack = oldnode->stack;
 #endif
 
   /* Check if this is a request to reduce the size of the allocation. */
@@ -168,6 +170,10 @@ FAR void *mm_realloc(FAR struct mm_heap_s *heap, FAR void *oldmem,
 
       /* Then return the original address */
 
+#ifdef CONFIG_MM_RECORD_STACK
+      backtrace_remove(oldstack);
+      oldnode->stack = NULL;
+#endif
       kasan_bypass(bypass);
       DEBUGVERIFY(nxrmutex_unlock(&heap->mm_lock));
       MM_RECORD(heap, oldnode);
@@ -399,6 +405,10 @@ FAR void *mm_realloc(FAR struct mm_heap_s *heap, FAR void *oldmem,
       sched_note_heap(NOTE_HEAP_ALLOC, heap, newmem, newsize,
                       heap->mm_curused);
 
+#ifdef CONFIG_MM_RECORD_STACK
+      backtrace_remove(oldstack);
+      oldnode->stack = NULL;
+#endif
       size = MM_SIZEOF_NODE(oldnode);
 
       kasan_bypass(bypass);
