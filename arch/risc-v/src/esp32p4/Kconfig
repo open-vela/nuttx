@@ -247,6 +247,21 @@ config ESP32P4_MIPI_DSI_COLOR_RGB565
 
 endif # ESP32P4_MIPI_DSI
 
+config ESP32P4_DMA2D
+	bool "ESP32-P4 2D-DMA Controller"
+	default y if ESP32P4_PPA
+	---help---
+		Enables 2D-DMA hardware controller support for ESP32-P4.
+
+config ESP32P4_PPA
+	bool "ESP32-P4 PPA (Pixel Processing Accelerator)"
+	default y
+	select ESP32P4_DMA2D
+	---help---
+		Enables hardware 2D Pixel Processing Accelerator (PPA) support
+		for ESP32-P4, providing hardware image scaling, rotation,
+		blending, and color space conversion.
+
 endif # ARCH_CHIP_ESP32P4
 
 config P4_REV3_MSPI_CRASH_AFTER_POWER_UP_WORKAROUND
