@@ -1,0 +1,710 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_ESP32P4
+
+source "arch/risc-v/src/common/espressif/Kconfig"
+
+config ESP32P4_SELECTS_REV_LESS_V3
+	bool "Select ESP32-P4 revisions <3.0 (No >=3.x Support)"
+	default n
+	---help---
+		Select this option to support ESP32-P4 revisions 0.x and 1.x.
+		Revisions higher than 3.0 (included) and revisions less than 3.0
+		have huge hardware difference.
+		Revisions higher than 3.0 (included) is not compatible with 0.x and 1.x.
+
+choice ESP32P4_REV_MIN
+	prompt "Minimum Supported ESP32-P4 Revision"
+	default ESP32P4_REV_MIN_301
+	---help---
+		Required minimum chip revision. ESP-IDF will check for it and
+		reject to boot if the chip revision fails the check.
+		This ensures the chip used will have some modifications (features, or bugfixes).
+
+		The compiled binary will only support chips above this revision,
+		this will also help to reduce binary size.
+
+config ESP32P4_REV_MIN_0
+	depends on ESP32P4_SELECTS_REV_LESS_V3
+	bool "Rev v0.0"
+
+config ESP32P4_REV_MIN_1
+	depends on ESP32P4_SELECTS_REV_LESS_V3
+	bool "Rev v0.1"
+
+config ESP32P4_REV_MIN_100
+	depends on ESP32P4_SELECTS_REV_LESS_V3
+	bool "Rev v1.0"
+
+config ESP32P4_REV_MIN_300
+	bool "Rev v3.0"
+	depends on !ESP32P4_SELECTS_REV_LESS_V3
+
+config ESP32P4_REV_MIN_301
+	bool "Rev v3.1"
+	depends on !ESP32P4_SELECTS_REV_LESS_V3
+
+endchoice # ESP32P4_REV_MIN
+
+config ESP32P4_REV_MIN_FULL
+	int
+	default 0 if ESP32P4_REV_MIN_0
+	default 1 if ESP32P4_REV_MIN_1
+	default 100 if ESP32P4_REV_MIN_100
+	default 300 if ESP32P4_REV_MIN_300
+	default 301 if ESP32P4_REV_MIN_301
+
+config ESP_REV_MIN_FULL
+	int
+	default ESP32P4_REV_MIN_FULL
+
+config ESP32P4_REV_MAX_FULL
+	int
+	default 399 if !ESP32P4_SELECTS_REV_LESS_V3
+	default 199 if ESP32P4_SELECTS_REV_LESS_V3
+
+# keep in sync the "Maximum Supported Revision" description with this value
+
+config ESP_REV_MAX_FULL
+	int
+	default ESP32P4_REV_MAX_FULL
+
+config ESP_EFUSE_BLOCK_REV_MIN_FULL
+	int "Minimum Supported ESP32-P4 eFuse Block Revision"
+	default 0
+	---help---
+		Required minimum eFuse Block revision. ESP-IDF will check it at the 2nd bootloader stage
+		whether the current image can work correctly for this eFuse Block revision.
+		So that to avoid running an incompatible image on a SoC that contains breaking change in the eFuse Block.
+		If you want to update this value to run the image that not compatible with the current eFuse Block revision,
+		please contact to Espressif's business team for details:
+		https://www.espressif.com.cn/en/contact-us/sales-questions
+
+config ESP_EFUSE_BLOCK_REV_MAX_FULL
+	int
+	default 199
+	comment "Maximum Supported ESP32-P4 eFuse Block Revision (eFuse Block Rev v0.99)"
+
+# The revision in the comment must correspond to the default value of ESP_EFUSE_BLOCK_REV_MAX_FULL
+
+menu "Cache config"
+
+choice ESPRESSIF_CACHE_L2_CACHE_SIZE_SELECT
+	prompt "L2 cache size"
+	default ESPRESSIF_CACHE_L2_CACHE_256KB
+	---help---
+		L2 cache size to be set on application startup.
+
+config ESPRESSIF_CACHE_L2_CACHE_128KB
+	bool "128KB"
+
+config ESPRESSIF_CACHE_L2_CACHE_256KB
+	bool "256KB"
+
+config ESPRESSIF_CACHE_L2_CACHE_512KB
+	bool "512KB"
+
+endchoice # ESPRESSIF_CACHE_L2_CACHE_SIZE_SELECT
+
+config ESPRESSIF_CACHE_L2_CACHE_SIZE
+	hex
+	default 0x20000 if ESPRESSIF_CACHE_L2_CACHE_128KB
+	default 0x40000 if ESPRESSIF_CACHE_L2_CACHE_256KB
+	default 0x80000 if ESPRESSIF_CACHE_L2_CACHE_512KB
+
+choice ESPRESSIF_CACHE_L2_CACHE_LINE_SIZE_SELECT
+	prompt "L2 cache line size"
+	default ESPRESSIF_CACHE_L2_CACHE_LINE_64B if ESPRESSIF_CACHE_L2_CACHE_128KB
+	default ESPRESSIF_CACHE_L2_CACHE_LINE_64B if ESPRESSIF_CACHE_L2_CACHE_256KB
+	default ESPRESSIF_CACHE_L2_CACHE_LINE_128B if ESPRESSIF_CACHE_L2_CACHE_512KB
+	---help---
+		L2 cache line size to be set on application startup.
+
+config ESPRESSIF_CACHE_L2_CACHE_LINE_64B
+	bool "64 Bytes"
+	depends on ESPRESSIF_CACHE_L2_CACHE_128KB || ESPRESSIF_CACHE_L2_CACHE_256KB
+
+config ESPRESSIF_CACHE_L2_CACHE_LINE_128B
+	bool "128 Bytes"
+
+endchoice # ESPRESSIF_CACHE_L2_CACHE_LINE_SIZE_SELECT
+
+config ESPRESSIF_CACHE_L2_CACHE_LINE_SIZE
+	int
+	default 64 if ESPRESSIF_CACHE_L2_CACHE_LINE_64B
+	default 128 if ESPRESSIF_CACHE_L2_CACHE_LINE_128B
+
+config ESPRESSIF_CACHE_L1_CACHE_LINE_SIZE
+	int
+	default 64
+
+endmenu # Cache config
+
+choice ESPRESSIF_CPU_FREQ
+	prompt "CPU frequency"
+	default ESPRESSIF_CPU_FREQ_40 if ARCH_CHIP_ESP32P4 && ESPRESSIF_IDF_ENV_FPGA
+	default ESPRESSIF_CPU_FREQ_96 if ARCH_CHIP_ESP32H2
+	default ESPRESSIF_CPU_FREQ_160 if ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6
+	default ESPRESSIF_CPU_FREQ_360 if ARCH_CHIP_ESP32P4 && ESP32P4_SELECTS_REV_LESS_V3
+	default ESPRESSIF_CPU_FREQ_400 if ARCH_CHIP_ESP32P4 && !ESP32P4_SELECTS_REV_LESS_V3
+	---help---
+		CPU frequency to be set on application startup.
+
+config ESPRESSIF_CPU_FREQ_40
+	bool "40 MHz"
+	depends on ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32P4
+	---help---
+		Set the CPU frequency to 40 MHz.
+
+config ESPRESSIF_CPU_FREQ_48
+	bool "48 MHz"
+	depends on ARCH_CHIP_ESP32H2
+	---help---
+		Set the CPU frequency to 48 MHz.
+
+config ESPRESSIF_CPU_FREQ_64
+	bool "64 MHz"
+	depends on ARCH_CHIP_ESP32H2
+	---help---
+		Set the CPU frequency to 64 MHz.
+
+config ESPRESSIF_CPU_FREQ_80
+	bool "80 MHz"
+	depends on ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6
+	---help---
+		Set the CPU frequency to 80 MHz.
+
+config ESPRESSIF_CPU_FREQ_96
+	bool "96 MHz"
+	depends on ARCH_CHIP_ESP32H2
+	---help---
+		Set the CPU frequency to 96 MHz.
+
+config ESPRESSIF_CPU_FREQ_160
+	bool "160 MHz"
+	depends on ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6
+	---help---
+		Set the CPU frequency to 160 MHz.
+
+config ESPRESSIF_CPU_FREQ_360
+	bool "360 MHz"
+	depends on ARCH_CHIP_ESP32P4 && ESP32P4_SELECTS_REV_LESS_V3
+	---help---
+		Set the CPU frequency to 360 MHz.
+
+config ESPRESSIF_CPU_FREQ_400
+	bool "400 MHz"
+	depends on ARCH_CHIP_ESP32P4 && !ESP32P4_SELECTS_REV_LESS_V3
+	---help---
+		Set the CPU frequency to 400 MHz.
+
+endchoice # ESPRESSIF_CPU_FREQ
+
+config ESPRESSIF_CPU_FREQ_MHZ
+	int
+	default 40 if ESPRESSIF_CPU_FREQ_40
+	default 48 if ESPRESSIF_CPU_FREQ_48
+	default 64 if ESPRESSIF_CPU_FREQ_64
+	default 80 if ESPRESSIF_CPU_FREQ_80
+	default 96 if ESPRESSIF_CPU_FREQ_96
+	default 160 if ESPRESSIF_CPU_FREQ_160
+	default 360 if ESPRESSIF_CPU_FREQ_360
+	default 400 if ESPRESSIF_CPU_FREQ_400
+
+
+menu "Espressif Log Level"
+	visible if DEBUG_FEATURES
+
+config ESPRESSIF_LOG_LEVEL_NONE
+	bool "NONE"
+	depends on !DEBUG_FEATURES && !DEBUG_ERROR && !DEBUG_WARN && !DEBUG_INFO
+	default y
+	---help---
+		No log output from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_ERROR
+	bool "ERROR"
+	depends on DEBUG_ERROR
+	default y
+	---help---
+		Display critical errors from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_WARN
+	bool "WARN"
+	depends on DEBUG_WARN
+	default y
+	---help---
+		Display warning messages from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_INFO
+	bool "INFO"
+	depends on DEBUG_INFO
+	default y
+	---help---
+		Display information messages from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_DEBUG
+	bool "DEBUG"
+	depends on DEBUG_INFO
+	default n
+	---help---
+		Display extra information from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_VERBOSE
+	bool "VERBOSE"
+	depends on DEBUG_INFO
+	default n
+	---help---
+		Display bigger chunks of debugging information, or frequent messages
+		which can potentially flood the output from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL
+	int
+	default 5 if ESPRESSIF_LOG_LEVEL_VERBOSE
+	default 4 if ESPRESSIF_LOG_LEVEL_DEBUG
+	default 3 if ESPRESSIF_LOG_LEVEL_INFO
+	default 2 if ESPRESSIF_LOG_LEVEL_WARN
+	default 1 if ESPRESSIF_LOG_LEVEL_ERROR
+	default 0 if ESPRESSIF_LOG_LEVEL_NONE
+
+endmenu # Espressif Log Level
+
+config ESPRESSIF_DONT_USE_ROM_LIBC
+	bool "Don't use ROM libc functions"
+	default n
+	---help---
+		If enabled, NuttX libc will be used instead of ROM newlib
+		functions (strdup, strndup, atoi, etc.).
+
+		This prevents cross-heap allocation issues when ROM newlib
+		allocators are not mapped to the same heap as NuttX libc.
+
+menuconfig ESPRESSIF_SPIRAM
+	bool "External SPI RAM (SPIRAM)"
+	default n
+	---help---
+		Enable external PSRAM support through the ESP HAL component.
+
+if ESPRESSIF_SPIRAM
+
+config ESPRESSIF_SPIRAM_BOOT_INIT
+	bool "Initialize SPIRAM during early boot"
+	default y
+	---help---
+		Initialize and map external PSRAM before heap region registration.
+
+config ESPRESSIF_SPIRAM_IGNORE_NOTFOUND
+	bool "Ignore SPIRAM not found"
+	depends on !ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+	default n
+	---help---
+		Keep booting even if PSRAM detection fails.
+
+config ESPRESSIF_SPIRAM_MEMTEST
+	bool "Run SPIRAM memory test at boot"
+	default y
+	---help---
+		Run a basic memory test before adding PSRAM to the allocator.
+
+config ESPRESSIF_SPIRAM_USE_8LINE_MODE
+	bool "Use x8 line mode"
+	default n
+	---help---
+		Enable x8 line mode instead of x16 line mode.
+
+config ESPRESSIF_SPIRAM_ECC
+	bool "Enable SPIRAM ECC"
+	default n
+	---help---
+		Enable ECC for external PSRAM accesses.
+
+choice ESPRESSIF_SPIRAM_SPEED
+	prompt "SPIRAM speed"
+	default ESPRESSIF_SPIRAM_SPEED_200M if !ESP32P4_REV_MIN_0
+	default ESPRESSIF_SPIRAM_SPEED_80M
+
+config ESPRESSIF_SPIRAM_SPEED_20M
+	bool "20 MHz"
+
+config ESPRESSIF_SPIRAM_SPEED_80M
+	bool "80 MHz"
+
+config ESPRESSIF_SPIRAM_SPEED_200M
+	bool "200 MHz"
+	depends on !ESP32P4_REV_MIN_0
+
+config ESPRESSIF_SPIRAM_SPEED_250M
+	bool "250 MHz"
+	depends on !ESP32P4_REV_MIN_0
+
+endchoice # ESPRESSIF_SPIRAM_SPEED
+
+config ESPRESSIF_SPIRAM_SPEED
+	int
+	default 20 if ESPRESSIF_SPIRAM_SPEED_20M
+	default 80 if ESPRESSIF_SPIRAM_SPEED_80M
+	default 200 if ESPRESSIF_SPIRAM_SPEED_200M
+	default 250 if ESPRESSIF_SPIRAM_SPEED_250M
+
+config ESPRESSIF_SPIRAM_USER_HEAP
+	bool "Add SPIRAM to user heap"
+	default y
+	select ESPRESSIF_DONT_USE_ROM_LIBC
+	---help---
+		Add SPIRAM as an additional NuttX heap region.
+
+config ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+	bool "Allow .bss segment placed in external memory"
+	default n
+	---help---
+		If enabled, variables with EXT_RAM_BSS_ATTR attribute will be
+		placed in SPIRAM instead of internal DRAM.
+
+		BSS sections from esp-hal-3rdparty components can also be placed
+		in SPIRAM through linker fragment mappings when enabled.
+
+		Note that variables placed in SPIRAM this way are still
+		zero-initialized at startup.
+
+endif # ESPRESSIF_SPIRAM
+
+# Aggregate I2C controller mode gates consumed by the driver layer
+# (espressif/Make.defs and the board glue).  The P4 port currently
+# supports master mode only; the controllers themselves (ESPRESSIF_I2C0/1)
+# are defined in the sourced common Kconfig.
+
+config ESPRESSIF_I2C0_MASTER_MODE
+	bool
+	default y if ESPRESSIF_I2C0
+
+config ESPRESSIF_I2C1_MASTER_MODE
+	bool
+	default y if ESPRESSIF_I2C1
+
+config ESPRESSIF_I2C_PERIPH_MASTER_MODE
+	bool
+	default y if ESPRESSIF_I2C0_MASTER_MODE || ESPRESSIF_I2C1_MASTER_MODE
+
+config ESPRESSIF_I2C_PERIPH_SLAVE_MODE
+	bool
+	default n
+
+config ESPRESSIF_MIPI_DSI
+	bool "MIPI DSI display support"
+	default n
+	select FB_UPDATE if VIDEO_FB
+	---help---
+		Enable the MIPI DSI host/bridge driver used to drive DSI panels
+		in DPI video mode, continuously streaming an RGB565 framebuffer
+		through a dedicated DW-GDMA channel.
+
+config ESPRESSIF_MIPI_CSI
+	bool "MIPI CSI camera support"
+	default n
+	select DRIVERS_VIDEO
+	---help---
+		Enable the MIPI CSI-2 camera capture driver.  The pipeline is
+		CSI D-PHY -> DWC CSI-2 host -> ISP (inline RAW8 Bayer to
+		RGB565 conversion) -> CSI bridge -> DW-GDMA into a frame
+		buffer in memory.  The driver is exposed as a NuttX imgdata
+		lower half for the video capture (V4L2) framework and is
+		paired with an image sensor driver by the board logic.
+
+config ESPRESSIF_MIPI_CSI_RAW_PASSTHROUGH
+	bool "MIPI CSI RAW passthrough (bypass ISP conversion)"
+	depends on ESPRESSIF_MIPI_CSI
+	default n
+	---help---
+		Debug aid: keep the ISP in bypass mode so the captured buffer
+		contains the RAW8 Bayer data exactly as received from the
+		sensor instead of ISP-demosaiced RGB565.  The format is
+		still advertised as RGB565 to the framework, but a RAW8
+		frame is half the size and the driver reports the real byte
+		count, so the rendered image will look wrong.  Use only to
+		verify the CSI link and DMA path independently of the ISP
+		programming.
+
+menu "SD/MMC Configuration"
+
+config ESP32P4_SDMMC
+	bool "SD/MMC (SDIO host) driver"
+	default n
+	select ARCH_HAVE_SDIO
+	select SDIO_BLOCKSETUP
+	select MMCSD
+	select MMCSD_SDIO
+	select SCHED_WORKQUEUE
+	select SCHED_HPWORK
+	select ESP32P4_SDMMC_DMA
+	---help---
+		Enable the ESP32-P4 SDMMC host (Synopsys DesignWare IP),
+		exposing a NuttX struct sdio_dev_s.  Stage 1 of the esp-hosted
+		bring-up uses it to enumerate the on-board ESP32-C6 as an SDIO
+		card.
+
+		NOTE: the SDIO pin numbers below (ESP32P4_SDMMC_*) overlap the
+		ESPRESSIF_ESP_HOSTED_SDIO_* symbols.  The arch driver reads the
+		ESP32P4_SDMMC_* symbols; the ESP_HOSTED pin symbols should be
+		reconciled to select ESP32P4_SDMMC and drop the duplicates.
+
+if ESP32P4_SDMMC
+
+config ESP32P4_SDMMC_DMA
+	bool "Support DMA for SD/MMC"
+	default y
+	select SDIO_DMA
+	---help---
+		Use the SDMMC internal DMA (IDMAC) for data transfers.
+
+config ESP32P4_SDMMC_SLOT
+	int "SDMMC slot"
+	default 1
+	range 0 1
+	---help---
+		SDMMC slot.  The on-board ESP32-C6 is wired to slot 1 and is
+		routed through the GPIO matrix.
+
+config ESP32P4_SDMMC_WIDTH
+	int "SDIO bus width"
+	default 4
+	---help---
+		SDIO data bus width to ramp to after ID mode (1 or 4).
+
+config ESP32P4_SDMMC_FREQ
+	int "SDIO clock frequency (kHz)"
+	default 40000
+	---help---
+		Target card clock frequency after ID mode.
+
+config ESP32P4_SDMMC_CLK
+	int "CLK GPIO"
+	default 18
+
+config ESP32P4_SDMMC_CMD
+	int "CMD GPIO"
+	default 19
+
+config ESP32P4_SDMMC_D0
+	int "D0 GPIO"
+	default 14
+
+config ESP32P4_SDMMC_D1
+	int "D1 GPIO"
+	default 15
+
+config ESP32P4_SDMMC_D2
+	int "D2 GPIO"
+	default 16
+
+config ESP32P4_SDMMC_D3
+	int "D3 GPIO"
+	default 17
+
+endif # ESP32P4_SDMMC
+
+endmenu # SD/MMC Configuration
+
+menuconfig ESPRESSIF_ESP_HOSTED
+	bool "Wi-Fi via ESP32-C6 co-processor (esp-hosted over SDIO)"
+	default n
+	---help---
+		Use the on-board ESP32-C6 as a Wi-Fi co-processor through the
+		Espressif esp-hosted architecture: the ESP32-P4 host drives the
+		C6 over a 4-bit SDIO link and forwards Wi-Fi operations to it as
+		RPC commands.  The co-processor ships pre-flashed with the
+		esp-hosted slave firmware.
+
+if ESPRESSIF_ESP_HOSTED
+
+config ESPRESSIF_ESP_HOSTED_SDIO_CLK
+	int "SDIO CLK GPIO"
+	default 18
+
+config ESPRESSIF_ESP_HOSTED_SDIO_CMD
+	int "SDIO CMD GPIO"
+	default 19
+
+config ESPRESSIF_ESP_HOSTED_SDIO_D0
+	int "SDIO D0 GPIO"
+	default 14
+
+config ESPRESSIF_ESP_HOSTED_SDIO_D1
+	int "SDIO D1 GPIO"
+	default 15
+
+config ESPRESSIF_ESP_HOSTED_SDIO_D2
+	int "SDIO D2 GPIO"
+	default 16
+
+config ESPRESSIF_ESP_HOSTED_SDIO_D3
+	int "SDIO D3 GPIO"
+	default 17
+
+config ESPRESSIF_ESP_HOSTED_SDIO_RESET
+	int "ESP32-C6 reset GPIO"
+	default 54
+
+config ESPRESSIF_ESP_HOSTED_SDIO_FREQ_KHZ
+	int "SDIO clock frequency (kHz)"
+	default 40000
+
+endif # ESPRESSIF_ESP_HOSTED
+
+config ESPRESSIF_I2S
+	bool
+	default n
+
+config ESPRESSIF_I2S0
+	bool "I2S 0"
+	default n
+	select ESPRESSIF_I2S
+	select I2S
+	select ESPRESSIF_DMA
+	select ESPRESSIF_GPIO_IRQ
+	select SCHED_HPWORK
+
+menu "I2S Configuration"
+	depends on ESPRESSIF_I2S
+
+config ESPRESSIF_I2S_MAXINFLIGHT
+	int "I2S queue size"
+	default 4
+	---help---
+		This is the total number of transfers, both RX and TX, that can be
+		enqueued before the caller is required to wait.  This setting
+		determines the number certain queue data structures that will be
+		pre-allocated.
+
+if ESPRESSIF_I2S0
+
+config ESPRESSIF_I2S0_RX
+	bool "Enable I2S receiver"
+	default y
+	---help---
+		Enable I2S receiver (port 0)
+
+config ESPRESSIF_I2S0_TX
+	bool "Enable I2S transmitter"
+	default y
+	---help---
+		Enable I2S transmitter (port 0)
+
+choice ESPRESSIF_I2S0_ROLE
+	prompt "I2S0 role"
+	default ESPRESSIF_I2S0_ROLE_MASTER
+	---help---
+		Selects the operation role of the I2S0.
+
+config ESPRESSIF_I2S0_ROLE_MASTER
+	bool "Master"
+
+config ESPRESSIF_I2S0_ROLE_SLAVE
+	bool "Slave"
+
+endchoice # I2S0 role
+
+choice ESPRESSIF_I2S0_DATA_BIT_WIDTH
+	prompt "Bit width"
+	default ESPRESSIF_I2S0_DATA_BIT_WIDTH_16BIT
+	---help---
+		Selects the valid data bits per sample.
+		Note that this option may be overwritten by the audio
+		according to the bit width of the file being played
+
+config ESPRESSIF_I2S0_DATA_BIT_WIDTH_8BIT
+	bool "8 bits"
+
+config ESPRESSIF_I2S0_DATA_BIT_WIDTH_16BIT
+	bool "16 bits"
+
+config ESPRESSIF_I2S0_DATA_BIT_WIDTH_24BIT
+	bool "24 bits"
+
+config ESPRESSIF_I2S0_DATA_BIT_WIDTH_32BIT
+	bool "32 bits"
+
+endchoice # Bit width
+
+config ESPRESSIF_I2S0_SAMPLE_RATE
+	int "I2S0 sample rate"
+	default 44100
+	range 8000 48000
+	---help---
+		Selects the sample rate.
+		Note that this option may be overwritten by the audio
+		according to the bit width of the file being played
+
+config ESPRESSIF_I2S0_BCLKPIN
+	int "I2S0 BCLK pin"
+	default 12
+	range 0 54
+
+config ESPRESSIF_I2S0_WSPIN
+	int "I2S0 WS pin"
+	default 10
+	range 0 54
+
+config ESPRESSIF_I2S0_DINPIN
+	int "I2S0 DIN pin"
+	depends on ESPRESSIF_I2S0_RX
+	default 11
+	range 0 54
+
+config ESPRESSIF_I2S0_DOUTPIN
+	int "I2S0 DOUT pin"
+	depends on ESPRESSIF_I2S0_TX
+	default 9
+	range 0 54
+
+config ESPRESSIF_I2S0_MCLK
+	bool "Enable I2S Master Clock"
+	depends on ESPRESSIF_I2S0_ROLE_MASTER
+	default n
+	---help---
+		Enable I2S master clock
+
+config ESPRESSIF_I2S0_MCLKPIN
+	int "I2S MCLK pin"
+	depends on ESPRESSIF_I2S0_MCLK
+	default 13
+	range 0 54
+
+endif # ESPRESSIF_I2S0
+
+config I2S_DMADESC_NUM
+	int "I2S DMA maximum number of descriptors"
+	default 2
+	---help---
+		Configure the maximum number of out-link/in-link descriptors to
+		be chained for an I2S DMA transfer.
+
+endmenu # I2S configuration
+
+endif # ARCH_CHIP_ESP32P4
+
+config P4_REV3_MSPI_CRASH_AFTER_POWER_UP_WORKAROUND
+	bool
+	default y if ESP32P4_REV_MIN_300
+
+config P4_REV3_MSPI_WORKAROUND_SIZE
+	hex
+	default 0x100 if ESP32P4_REV_MIN_300
+	default 0
+
+config ESPRESSIF_MIPI_DSI_LANES
+	int "MIPI DSI data lanes"
+	default 2
+	depends on ESPRESSIF_MIPI_DSI
+
+config ESPRESSIF_MIPI_DSI_LANE_BITRATE_MBPS
+	int "MIPI DSI lane bitrate (Mbps)"
+	default 1000
+	depends on ESPRESSIF_MIPI_DSI
+
+config ESPRESSIF_MIPI_DSI_BUS
+	int "MIPI DSI bus id"
+	default 1
+	depends on ESPRESSIF_MIPI_DSI

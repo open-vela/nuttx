@@ -44,6 +44,10 @@ ifeq ($(CONFIG_VIDEO_ISX019),y)
   CSRCS += isx019.c
 endif
 
+ifeq ($(CONFIG_VIDEO_SC2336),y)
+  CSRCS += sc2336.c
+endif
+
 ifeq ($(CONFIG_VIDEO_OV2640),y)
   CSRCS += ov2640.c
 endif

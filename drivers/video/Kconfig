@@ -260,6 +260,18 @@ config VIDEO_ISX019_REGDEBUG
 
 endif
 
+config VIDEO_SC2336
+	bool "SC2336 Image sensor"
+	default n
+	select I2C
+	---help---
+		Support for the SmartSens SC2336 2MP MIPI CSI-2 image sensor.
+		The sensor is controlled via SCCB (I2C compatible, 7-bit
+		address 0x30) and outputs RAW8 Bayer (BGGR) data.  The
+		receiving CSI hardware is expected to convert the RAW stream
+		to RGB565 inline, so the driver advertises RGB565 to the
+		video framework.
+
 config VIDEO_OV2640
 	bool "OV2640 camera chip"
 	default n

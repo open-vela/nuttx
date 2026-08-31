@@ -68,7 +68,9 @@ struct gt9xx_board_s
  * Input Parameters:
  *   devpath      - Device Path (e.g. "/dev/input0")
  *   dev          - I2C Bus
- *   i2c_devaddr  - I2C Address of Touch Panel
+ *   i2c_devaddr  - Preferred 7-bit I2C address (0x5d or 0x14).  On
+ *                  first open the driver probes this address and
+ *                  falls back to the other if it NACKs.
  *   board_config - Callback for Board-Specific Operations
  *
  * Returned Value:
