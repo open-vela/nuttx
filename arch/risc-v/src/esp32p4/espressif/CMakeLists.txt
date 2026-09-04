@@ -295,9 +295,9 @@ if(NOT IS_DIRECTORY "${ESP_HAL_3RDPARTY_REPO}")
   endif()
 
   # Apply openvela compatibility patches (mirrors the Make build: adapt the
-  # HAL's NuttX OS layer to this kernel's task/spawn APIs).  All-or-nothing:
-  # on failure remove the tree so the next configure starts from a clean
-  # clone instead of silently reusing an unpatched checkout.
+  # HAL's NuttX OS layer to this kernel's task/spawn APIs).  All-or-nothing: on
+  # failure remove the tree so the next configure starts from a clean clone
+  # instead of silently reusing an unpatched checkout.
   file(
     GLOB ESP_HAL_PATCHES
     LIST_DIRECTORIES false

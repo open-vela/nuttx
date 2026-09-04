@@ -700,8 +700,8 @@ endif()
 
 # Get linker script(s) to use.  Some architectures (e.g. espressif) chain
 # multiple linker scripts (aliases + memory layout + sections); each must be
-# preprocessed and passed as a separate -T option, in the same order as the
-# Make build's ARCHSCRIPT list.
+# preprocessed and passed as a separate -T option, in the same order as the Make
+# build's ARCHSCRIPT list.
 get_property(ldscript GLOBAL PROPERTY LD_SCRIPT)
 
 # Pre-compile linker script(s)
