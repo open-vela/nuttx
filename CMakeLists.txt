@@ -698,21 +698,29 @@ if(NOT DEFINED LINK_OPTION_FLAG)
   set(LINK_OPTION_FLAG "-T")
 endif()
 
-# Get linker script to use
+# Get linker script(s) to use.  Some architectures (e.g. espressif) chain
+# multiple linker scripts (aliases + memory layout + sections); each must be
+# preprocessed and passed as a separate -T option, in the same order as the Make
+# build's ARCHSCRIPT list.
 get_property(ldscript GLOBAL PROPERTY LD_SCRIPT)
 
-# Pre-compile linker script
+# Pre-compile linker script(s)
 if(NOT CONFIG_ARCH_SIM AND NOT CONFIG_ARCH_TOOLCHAIN_TASKING)
-  get_filename_component(LD_SCRIPT_NAME ${ldscript} NAME)
-  set(LD_SCRIPT_TMP "${CMAKE_BINARY_DIR}/${LD_SCRIPT_NAME}.tmp")
+  set(_ldscript_pre "")
+  foreach(_ld ${ldscript})
+    get_filename_component(_ld_name ${_ld} NAME)
+    set(_ld_tmp "${CMAKE_BINARY_DIR}/${_ld_name}.tmp")
 
-  nuttx_generate_preprocess_target(SOURCE_FILE ${ldscript} TARGET_FILE
-                                   ${LD_SCRIPT_TMP})
+    nuttx_generate_preprocess_target(SOURCE_FILE ${_ld} TARGET_FILE ${_ld_tmp})
 
-  add_custom_target(ldscript_tmp DEPENDS ${LD_SCRIPT_TMP})
-  add_dependencies(nuttx ldscript_tmp)
+    add_custom_target(ldscript_tmp_${_ld_name} DEPENDS ${_ld_tmp})
+    add_dependencies(nuttx ldscript_tmp_${_ld_name})
 
-  set(ldscript ${LD_SCRIPT_TMP})
+    list(APPEND _ldscript_pre ${_ld_tmp})
+  endforeach()
+
+  set(ldscript ${_ldscript_pre})
+  unset(_ldscript_pre)
 endif()
 
 # Perform link
@@ -756,8 +764,14 @@ if(NOT CONFIG_ARCH_SIM)
 
   else()
     get_property(NUTTX_EXTRA_FLAGS GLOBAL PROPERTY NUTTX_EXTRA_FLAGS)
-    target_link_options(nuttx PRIVATE ${NUTTX_EXTRA_FLAGS}
-                        ${LINK_OPTION_FLAG}${ldscript})
+    # Expand each linker script into its own -T option (LD_SCRIPT may chain
+    # multiple scripts on espressif-style ports)
+    set(_ld_options "")
+    foreach(_ld ${ldscript})
+      list(APPEND _ld_options "${LINK_OPTION_FLAG}${_ld}")
+    endforeach()
+    target_link_options(nuttx PRIVATE ${NUTTX_EXTRA_FLAGS} ${_ld_options})
+    unset(_ld_options)
     target_link_libraries(
       nuttx
       PRIVATE $<$<NOT:$<BOOL:${DISABLE_LINK_GROUP}>>:-Wl,--start-group>

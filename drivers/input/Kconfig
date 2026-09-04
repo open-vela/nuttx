@@ -624,6 +624,44 @@ config INPUT_GT9XX
 
 if INPUT_GT9XX
 
+choice
+	prompt "Preferred GT9xx I2C 7-bit address"
+	default INPUT_GT9XX_ADDR_5D
+	---help---
+		GT911 latches its address when RESET is released: INT low
+		selects 0x5d, INT high selects 0x14.  This is the address
+		probed first.  The driver then tries the other address if
+		the preferred one NACKs.
+
+config INPUT_GT9XX_ADDR_5D
+	bool "0x5d (INT low at reset)"
+
+config INPUT_GT9XX_ADDR_14
+	bool "0x14 (INT high at reset)"
+
+endchoice
+
+config INPUT_GT9XX_I2C_ADDR
+	hex
+	default 0x5d if INPUT_GT9XX_ADDR_5D
+	default 0x14 if INPUT_GT9XX_ADDR_14
+
+config INPUT_GT9XX_X_INVERT_MAX
+	int "Mirror X coordinates against this panel width (0 = disabled)"
+	default 0
+	---help---
+		When the touch panel origin is opposite to the display origin,
+		set this to the panel width so the driver reports
+		(width - 1 - x) instead of the raw x coordinate.
+
+config INPUT_GT9XX_Y_INVERT_MAX
+	int "Mirror Y coordinates against this panel height (0 = disabled)"
+	default 0
+	---help---
+		When the touch panel origin is opposite to the display origin,
+		set this to the panel height so the driver reports
+		(height - 1 - y) instead of the raw y coordinate.
+
 config INPUT_GT9XX_NPOLLWAITERS
 	int "Number of waiters to poll"
 	default 1

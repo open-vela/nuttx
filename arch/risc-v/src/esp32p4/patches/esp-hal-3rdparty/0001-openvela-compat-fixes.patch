@@ -1,0 +1,223 @@
+diff --git a/components/esp_hw_support/esp_gpio_reserve.c b/components/esp_hw_support/esp_gpio_reserve.c
+index c2e5ec71c08..5794608287d 100644
+--- a/components/esp_hw_support/esp_gpio_reserve.c
++++ b/components/esp_hw_support/esp_gpio_reserve.c
+@@ -4,27 +4,47 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+-#include <stdatomic.h>
++/* openvela: rv32 has no native 64-bit atomics and the toolchain builtins
++ * (__atomic_fetch_or_8 etc.) are not provided by the OS libc, so guard the
++ * reservation mask with a critical section instead of C11 atomics.
++ */
++
++
++#include <nuttx/spinlock.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <nuttx/irq.h>
+ #include "soc/soc_caps.h"
+ #include "esp_types.h"
+ #include "esp_bit_defs.h"
+ #include "esp_private/esp_gpio_reserve.h"
+ 
+-static _Atomic uint64_t s_reserved_pin_mask = ATOMIC_VAR_INIT(~(SOC_GPIO_VALID_GPIO_MASK));
++static uint64_t s_reserved_pin_mask = ~(SOC_GPIO_VALID_GPIO_MASK);
+ 
+ uint64_t esp_gpio_reserve(uint64_t gpio_mask)
+ {
+-    return atomic_fetch_or(&s_reserved_pin_mask, gpio_mask);
++    irqstate_t flags = enter_critical_section();
++    uint64_t prev = s_reserved_pin_mask;
++    s_reserved_pin_mask |= gpio_mask;
++    leave_critical_section(flags);
++    return prev;
+ }
+ 
+ uint64_t esp_gpio_revoke(uint64_t gpio_mask)
+ {
+-    return atomic_fetch_and(&s_reserved_pin_mask, ~gpio_mask);
++    irqstate_t flags = enter_critical_section();
++    uint64_t prev = s_reserved_pin_mask;
++    s_reserved_pin_mask &= ~gpio_mask;
++    leave_critical_section(flags);
++    return prev;
+ }
+ 
+ bool esp_gpio_is_reserved(uint64_t gpio_mask)
+ {
+-    return atomic_load(&s_reserved_pin_mask) & gpio_mask;
++    irqstate_t flags = enter_critical_section();
++    bool reserved = (s_reserved_pin_mask & gpio_mask) != 0;
++    leave_critical_section(flags);
++    return reserved;
+ }
+ 
+ // TODO: IDF-6968 reserve the pins that not fanned out regarding the SiP version
+diff --git a/components/upper_hal_dma/src/dw_gdma.c b/components/upper_hal_dma/src/dw_gdma.c
+index d1304e160fa..d3a55ae7017 100644
+--- a/components/upper_hal_dma/src/dw_gdma.c
++++ b/components/upper_hal_dma/src/dw_gdma.c
+@@ -15,8 +15,7 @@
+ // Set the maximum log level for this source file
+ #define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
+ #endif
+-#include "freertos/FreeRTOS.h"
+-#include "freertos/task.h"
++#include "platform/os.h"
+ #include "soc/soc_caps.h"
+ #include "soc/interrupts.h"
+ #include "esp_log.h"
+@@ -77,14 +76,14 @@ struct dw_gdma_group_t {
+     int group_id;              // Group ID, index from 0
+     dw_gdma_hal_context_t hal; // HAL instance is at group level
+     int intr_priority;         // all channels in the same group should share the same interrupt priority
+-    portMUX_TYPE spinlock;     // group level spinlock, protect group level stuffs, e.g. hal object, pair handle slots and reference count of each pair
++    DECLARE_CRIT_SECTION_LOCK_IN_STRUCT(spinlock)     // group level spinlock, protect group level stuffs, e.g. hal object, pair handle slots and reference count of each pair
+     dw_gdma_channel_t *channels[DW_GDMA_LL_CHANNELS_PER_GROUP]; // handles of DMA channels
+ };
+ 
+ struct dw_gdma_channel_t {
+     int chan_id;            // channel ID, index from 0
+     intr_handle_t intr;     // per-channel interrupt handle
+-    portMUX_TYPE spinlock;  // channel level spinlock
++    DECLARE_CRIT_SECTION_LOCK_IN_STRUCT(spinlock)  // channel level spinlock
+     dw_gdma_group_t *group; // pointer to the group which the channel belongs to
+     void *user_data;        // user registered DMA event data
+     dw_gdma_event_callbacks_t cbs; // Event callbacks
+@@ -128,7 +127,7 @@ static dw_gdma_group_t *dw_gdma_acquire_group_handle(int group_id)
+     _lock_release(&s_platform.mutex);
+ 
+     if (new_group) {
+-        portMUX_INITIALIZE(&group->spinlock);
++        INIT_CRIT_SECTION_LOCK_RUNTIME(&group->spinlock);
+         group->group_id = group_id;
+         group->intr_priority = -1; // interrupt priority not assigned yet
+         ESP_LOGD(TAG, "new group (%d) at %p", group_id, group);
+@@ -254,7 +253,7 @@ esp_err_t dw_gdma_new_channel(const dw_gdma_channel_alloc_config_t *config, dw_g
+     ESP_GOTO_ON_FALSE(!intr_priority_conflict, ESP_ERR_INVALID_STATE, err, TAG, "intr_priority conflict, already is %d but attempt to %d", group->intr_priority, config->intr_priority);
+ 
+     // basic initialization
+-    portMUX_INITIALIZE(&chan->spinlock);
++    INIT_CRIT_SECTION_LOCK_RUNTIME(&chan->spinlock);
+     chan->src_transfer_type = config->src.block_transfer_type;
+     chan->dst_transfer_type = config->dst.block_transfer_type;
+     // set transfer flow type
+@@ -611,9 +610,9 @@ void dw_gdma_channel_default_isr(void *args)
+         }
+     }
+ 
+-    if (need_yield) {
+-        portYIELD_FROM_ISR();
+-    }
++    // On NuttX any pending context switch is performed automatically on
++    // interrupt return, so the yield hint is not needed here.
++    (void)need_yield;
+ }
+ 
+ static esp_err_t dw_gdma_install_channel_interrupt(dw_gdma_channel_t *chan)
+diff --git a/nuttx/include/platform/os.h b/nuttx/include/platform/os.h
+index 118b35570f4..f93cd1e4428 100644
+--- a/nuttx/include/platform/os.h
++++ b/nuttx/include/platform/os.h
+@@ -21,6 +21,7 @@
+ #include <semaphore.h>
+ #include <nuttx/clock.h>
+ #include <nuttx/sched.h>
++#include <nuttx/signal.h>
+ #include <nuttx/init.h>
+ #include <sched/sched.h>
+ 
+@@ -354,7 +355,10 @@ static inline void esp_os_task_delay_adapter(uint32_t ticks)
+   if (OSINIT_OS_READY())
+     {
+       useconds_t us = TICK2USEC(ticks);
+-      nxsched_usleep(us);
++
++      /* openvela provides nxsig_usleep() (there is no nxsched_usleep()) */
++
++      nxsig_usleep(us);
+     }
+ }
+ 
+diff --git a/nuttx/src/components/esp_system/esp_ipc.c b/nuttx/src/components/esp_system/esp_ipc.c
+index e084205b1fb..296c6f88774 100644
+--- a/nuttx/src/components/esp_system/esp_ipc.c
++++ b/nuttx/src/components/esp_system/esp_ipc.c
+@@ -11,6 +11,8 @@
+ #include "sdkconfig.h"
+ 
+ #include <nuttx/config.h>
++#include <nuttx/kmalloc.h>
++
+ #include <nuttx/arch.h>
+ #include <nuttx/init.h>
+ #include <nuttx/mutex.h>
+diff --git a/nuttx/src/platform/nimble/src/npl_os.c b/nuttx/src/platform/nimble/src/npl_os.c
+index 85a2f6ba30f..328892b29b5 100644
+--- a/nuttx/src/platform/nimble/src/npl_os.c
++++ b/nuttx/src/platform/nimble/src/npl_os.c
+@@ -10,6 +10,8 @@
+ #include <errno.h>
+ 
+ #include <nuttx/config.h>
++#include <nuttx/mutex.h>
++
+ #include <nuttx/arch.h>
+ #include <nuttx/mqueue.h>
+ #include <nuttx/semaphore.h>
+diff --git a/nuttx/src/platform/os.c b/nuttx/src/platform/os.c
+index 99470d7e7c0..f2e3cea8332 100644
+--- a/nuttx/src/platform/os.c
++++ b/nuttx/src/platform/os.c
+@@ -13,12 +13,16 @@
+ 
+ #include <debug.h>
+ #include <errno.h>
++#include <fcntl.h>
++#include <spawn.h>
++#include <string.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <clock/clock.h>
+ 
+ #include <nuttx/config.h>
++#include <nuttx/clock.h>
+ #include <nuttx/mutex.h>
+ #include <nuttx/spinlock.h>
+ #include <nuttx/irq.h>
+@@ -1335,9 +1339,15 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+ 
+   tcb->flags = TCB_FLAG_TTYPE_KERNEL | TCB_FLAG_FREE_TCB;
+ 
+-  ret = nxtask_init(tcb, name, priority,
+-                    NULL, stack_size,
+-                    task_wrapper_entry, argv, NULL, NULL);
++  /* openvela's nxtask_init() takes priority/stacksize via spawn attributes */
++
++  posix_spawnattr_t attr;
++  posix_spawnattr_init(&attr);
++  posix_spawnattr_setpriority(&attr, priority);
++  posix_spawnattr_setstacksize(&attr, stack_size);
++
++  ret = nxtask_init(tcb, name, task_wrapper_entry,
++                    NULL, &attr, argv, NULL);
+   if (ret < 0)
+     {
+       kmm_free(wrapper_args);
+@@ -1520,7 +1530,10 @@ void esp_os_task_delay_ms(uint32_t ms)
+ 
+ uint32_t esp_os_task_get_tick_count(void)
+ {
+-  struct timespec ts;
+-  clock_gettime(CLOCK_REALTIME, &ts);
+-  return (uint32_t)((ts.tv_sec * 1000) + (ts.tv_nsec / 1000000));
++  /* Callers use this as a FreeRTOS-style tick counter and mix it with
++   * values converted by MSEC2TICK(), so it must return monotonic system
++   * ticks, not wall-clock milliseconds.
++   */
++
++  return (uint32_t)clock_systime_ticks();
+ }
