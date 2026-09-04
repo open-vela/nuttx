@@ -1,12 +1,17 @@
 /****************************************************************************
- * arch/risc-v/src/chip/espressif/esp32p4_mipi_csi.h
+ * arch/risc-v/src/esp32p4/espressif/esp32p4_mipi_csi.h
  *
  * 原生 NuttX MIPI-CSI 驱动（无 FreeRTOS 依赖）。
- * 复用 in-tree esp-hal-3rdparty 的 mipi_csi_hal + dw_gdma 实现连续取帧。
+ * 复用 in-tree esp-hal-3rdparty 的 mipi_csi_hal 与 dw_gdma 实现
+ * 连续取帧。
  ****************************************************************************/
 
-#ifndef __ARCH_RISCV_SRC_CHIP_ESPRESSIF_ESP32P4_MIPI_CSI_H
-#define __ARCH_RISCV_SRC_CHIP_ESPRESSIF_ESP32P4_MIPI_CSI_H
+#ifndef __ARCH_RISCV_SRC_ESP32P4_ESPRESSIF_ESP32P4_MIPI_CSI_H
+#define __ARCH_RISCV_SRC_ESP32P4_ESPRESSIF_ESP32P4_MIPI_CSI_H
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
 
 #include <stdint.h>
 #include <stddef.h>
@@ -25,7 +30,9 @@ struct esp32p4_mipi_csi_config_s
 };
 
 /* 取帧回调（ISR 上下文，只应做轻量标志/信号量操作） */
-typedef void (*esp32p4_mipi_csi_frame_cb_t)(void *buf, size_t len, void *arg);
+
+typedef void (*esp32p4_mipi_csi_frame_cb_t)(void *buf, size_t len,
+                                            void *arg);
 
 /****************************************************************************
  * Public Function Prototypes
@@ -36,8 +43,9 @@ int esp32p4_mipi_csi_start(esp32p4_mipi_csi_frame_cb_t frame_cb, void *arg);
 int esp32p4_mipi_csi_stop(void);
 
 /* 最新已完成帧缓冲（与 DMA 写入缓冲轮换，可直接读） */
+
 void *esp32p4_mipi_csi_get_frame(void);
 uint32_t esp32p4_mipi_csi_frame_count(void);
 size_t esp32p4_mipi_csi_framelen(void);
 
-#endif /* __ARCH_RISCV_SRC_CHIP_ESPRESSIF_ESP32P4_MIPI_CSI_H */
+#endif /* __ARCH_RISCV_SRC_ESP32P4_ESPRESSIF_ESP32P4_MIPI_CSI_H */

@@ -1256,9 +1256,11 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
         i2cinfo("Message %" PRIu8 " transfer complete.\n", priv->msgid);
     }
 
-  /* 传输失败时复位状态机并清总线：SC2336 等从机可能长时间拉低 SCL（时钟拉伸）
-   * 或 SDA，导致传输超时。清总线（多个 SCL 脉冲）可释放被卡住的线路，
-   * 避免后续传输（如触屏）永久阻塞。 */
+  /* 传输失败时复位状态机并清总线：SC2336 等从机可能
+   * 长时间拉低 SCL（时钟拉伸）或 SDA，导致传输超时。
+   * 清总线（多个 SCL 脉冲）可释放被卡住的线路，避免
+   * 后续传输（如触屏）永久阻塞。
+   */
 
   if (ret < 0)
     {

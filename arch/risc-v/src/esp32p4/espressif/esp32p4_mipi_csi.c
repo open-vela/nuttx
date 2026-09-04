@@ -1,13 +1,18 @@
 /****************************************************************************
- * arch/risc-v/src/chip/espressif/esp32p4_mipi_csi.c
+ * arch/risc-v/src/esp32p4/espressif/esp32p4_mipi_csi.c
  *
  * 原生 NuttX MIPI-CSI 驱动（无 FreeRTOS 依赖）。
  *
- * 参考官方 esp-hal-3rdparty upper_hal_cam/csi 的寄存器序列，复用 in-tree 的
- * mipi_csi_hal 与 dw_gdma 实现连续取帧：DMA 完成一帧后在 ISR 中轮换缓冲，
- * 由 frame_cb 通知上层（ISR 上下文，只应做轻量信号量/标志操作）。
+ * 参考官方 esp-hal-3rdparty upper_hal_cam/csi 的寄存器序列，
+ * 复用 in-tree 的 mipi_csi_hal 与 dw_gdma 实现连续取帧：
+ * DMA 完成一帧后在 ISR 中轮换缓冲，由 frame_cb 通知上层
+ * （ISR 上下文，只应做轻量信号量/标志操作）。
  *
  * SPDX-License-Identifier: Apache-2.0
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
@@ -75,6 +80,7 @@ uint32_t esp32p4_mipi_csi_frame_count(void)
 }
 
 /* 返回最近已完成、可安全读取的帧缓冲 */
+
 void *esp32p4_mipi_csi_get_frame(void)
 {
   return g_csi.fb[g_csi.cur_fb ^ 1];
@@ -83,12 +89,13 @@ void *esp32p4_mipi_csi_get_frame(void)
 /****************************************************************************
  * Name: csi_dma_done_cb
  *
- * 每帧 DMA 传输完成回调（ISR 上下文）：轮换缓冲、重挂 DMA、通知上层。
+ * 每帧 DMA 传输完成回调（ISR 上下文）：轮换缓冲、重挂
+ * DMA、通知上层。
  ****************************************************************************/
 
 static bool csi_dma_done_cb(dw_gdma_channel_handle_t chan,
-                            const dw_gdma_trans_done_event_data_t *event_data,
-                            void *user_data)
+                            const dw_gdma_trans_done_event_data_t *
+                            event_data, void *user_data)
 {
   struct esp32p4_mipi_csi_dev_s *csi = user_data;
   dw_gdma_block_transfer_config_t t;
@@ -100,6 +107,7 @@ static bool csi_dma_done_cb(dw_gdma_channel_handle_t chan,
   csi->cur_fb ^= 1;
 
   /* 让 DMA 写入 PSRAM 的帧对 CPU cache 可见 */
+
   esp_cache_msync(done, csi->frame_bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 
   memset(&t, 0, sizeof(t));
@@ -144,9 +152,10 @@ int esp32p4_mipi_csi_initialize(const struct esp32p4_mipi_csi_config_s *cfg)
       return -EINVAL;
     }
 
-  /* 0. MIPI CSI D-PHY 需要 LDO 供电（ESP32-P4：LDO channel 3 @ 2.5V），
-   *    必须先于时钟/HAL 配置，否则 D-PHY 无法工作。
+  /* 0. MIPI CSI D-PHY 需要 LDO 供电（ESP32-P4：LDO 通道 3、
+   * 2.5V），必须先于时钟/HAL 配置，否则 D-PHY 无法工作。
    */
+
   memset(&ldo_cfg, 0, sizeof(ldo_cfg));
   ldo_cfg.chan_id    = 3;    /* LDO_VO3，按 TRM/官方示例 */
   ldo_cfg.voltage_mv = 2500; /* CSI PHY 供电 2.5V */
@@ -160,11 +169,15 @@ int esp32p4_mipi_csi_initialize(const struct esp32p4_mipi_csi_config_s *cfg)
   g_csi.h_res  = cfg->h_res;
   g_csi.v_res  = cfg->v_res;
   g_csi.in_bpp = cfg->in_bpp;
-  g_csi.frame_bytes       = (size_t)cfg->h_res * cfg->v_res * cfg->in_bpp / 8;
-  g_csi.csi_transfer_size = (size_t)cfg->h_res * cfg->v_res * cfg->in_bpp / 64;
+  g_csi.frame_bytes =
+    (size_t)cfg->h_res * cfg->v_res * cfg->in_bpp / 8;
+  g_csi.csi_transfer_size =
+    (size_t)cfg->h_res * cfg->v_res * cfg->in_bpp / 64;
 
   /* 1. 时钟：使能 CSI D-PHY/Host/Bridge 时钟源并复位 */
-  esp_clk_tree_enable_src((soc_module_clk_t)MIPI_CSI_PHY_CLK_SRC_DEFAULT, true);
+
+  esp_clk_tree_enable_src((soc_module_clk_t)MIPI_CSI_PHY_CLK_SRC_DEFAULT,
+                          true);
   PERIPH_RCC_ATOMIC()
     {
       mipi_csi_ll_set_phy_clock_source(0, MIPI_CSI_PHY_CLK_SRC_DEFAULT);
@@ -177,6 +190,7 @@ int esp32p4_mipi_csi_initialize(const struct esp32p4_mipi_csi_config_s *cfg)
     }
 
   /* 2. HAL 初始化（DPHY 频段、lane、bridge 尺寸/数据类型） */
+
   memset(&hc, 0, sizeof(hc));
   hc.lanes_num         = cfg->lanes_num;
   hc.frame_width       = cfg->v_res;
@@ -189,10 +203,12 @@ int esp32p4_mipi_csi_initialize(const struct esp32p4_mipi_csi_config_s *cfg)
   mipi_csi_brg_ll_set_burst_len(g_csi.hal.bridge_dev, 512);
 
   /* 3. 颜色格式：输入==输出（RAW），走 bridge 旁路 */
+
   mipi_csi_brg_ll_enable_color_conversion(g_csi.hal.bridge_dev, true);
   mipi_csi_brg_ll_set_color_mode_bypass(g_csi.hal.bridge_dev, true);
 
   /* 4. DW-GDMA 通道（src=CSI bridge FIFO，dst=内存） */
+
   memset(&ac, 0, sizeof(ac));
   ac.src.block_transfer_type  = DW_GDMA_BLOCK_TRANSFER_CONTIGUOUS;
   ac.src.role                 = DW_GDMA_ROLE_PERIPH_CSI;
@@ -214,7 +230,8 @@ int esp32p4_mipi_csi_initialize(const struct esp32p4_mipi_csi_config_s *cfg)
 
   memset(&cbs, 0, sizeof(cbs));
   cbs.on_full_trans_done = csi_dma_done_cb;
-  if (dw_gdma_channel_register_event_callbacks(g_csi.dma_chan, &cbs, &g_csi) != ESP_OK)
+  if (dw_gdma_channel_register_event_callbacks(g_csi.dma_chan, &cbs,
+                                               &g_csi) != ESP_OK)
     {
       _err("CSI: failed to register dwgdma callback\n");
       return -ENODEV;
@@ -239,10 +256,12 @@ int esp32p4_mipi_csi_start(esp32p4_mipi_csi_frame_cb_t frame_cb, void *arg)
 
   if (g_csi.fb[0] == NULL)
     {
-      g_csi.fb[0] = heap_caps_aligned_alloc(align, g_csi.frame_bytes,
-                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-      g_csi.fb[1] = heap_caps_aligned_alloc(align, g_csi.frame_bytes,
-                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+      g_csi.fb[0] =
+        heap_caps_aligned_alloc(align, g_csi.frame_bytes,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+      g_csi.fb[1] =
+        heap_caps_aligned_alloc(align, g_csi.frame_bytes,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
       if (g_csi.fb[0] == NULL || g_csi.fb[1] == NULL)
         {
           _err("CSI: no mem for frame buffers (need %zu bytes each)\n",
@@ -280,6 +299,7 @@ int esp32p4_mipi_csi_start(esp32p4_mipi_csi_frame_cb_t frame_cb, void *arg)
     }
 
   /* 最后使能 CSI bridge，数据开始流入 DMA */
+
   mipi_csi_brg_ll_enable(g_csi.hal.bridge_dev, true);
 
   g_csi.started = true;
