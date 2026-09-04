@@ -889,18 +889,19 @@ fat_read_restart:
           if (ret < 0)
             {
 #ifdef CONFIG_FAT_DIRECT_RETRY
-              /* The low-level driver may return -EFAULT in the case where
-               * the transfer cannot be performed due to buffer memory
-               * constraints.  It is probable that the buffer is completely
-               * un-DMA-able or improperly aligned.  In this case, force
-               * indirect transfers via the sector buffer and restart the
-               * operation (unless we have already tried that).
+              /* The low-level driver may return -EFAULT or -ENOMEM in the
+               * case where the transfer cannot be performed due to buffer
+               * memory constraints.  It is probable that the buffer is
+               * completely un-DMA-able, improperly aligned, or the DMA
+               * bounce buffer is too small.  In this case, force indirect
+               * transfers via the sector buffer and restart the operation
+               * (unless we have already tried that).
                */
 
-              if (ret == -EFAULT && !force_indirect)
+              if ((ret == -EFAULT || ret == -ENOMEM) && !force_indirect)
                 {
-                  ferr("ERROR: DMA read alignment error,"
-                       " restarting indirect\n");
+                  ferr("ERROR: DMA read fallback, ret=%d restarting indirect\n",
+                       ret);
                   force_indirect = true;
                   goto fat_read_restart;
                 }
@@ -1088,18 +1089,19 @@ fat_write_restart:
           if (ret < 0)
             {
 #ifdef CONFIG_FAT_DIRECT_RETRY
-              /* The low-level driver may return -EFAULT in the case where
-               * the transfer cannot be performed due to buffer memory
-               * constraints.  It is probable that the buffer is completely
-               * un-DMA-able or improperly aligned.  In this case, force
-               * indirect transfers via the sector buffer and restart the
-               * operation (unless we have already tried that).
+              /* The low-level driver may return -EFAULT or -ENOMEM in the
+               * case where the transfer cannot be performed due to buffer
+               * memory constraints.  It is probable that the buffer is
+               * completely un-DMA-able, improperly aligned, or the DMA
+               * bounce buffer is too small.  In this case, force indirect
+               * transfers via the sector buffer and restart the operation
+               * (unless we have already tried that).
                */
 
-              if (ret == -EFAULT && !force_indirect)
+              if ((ret == -EFAULT || ret == -ENOMEM) && !force_indirect)
                 {
-                  ferr("ERROR: DMA write alignment error,"
-                        " restarting indirect\n");
+                  ferr("ERROR: DMA write fallback, ret=%d restarting indirect\n",
+                        ret);
                   force_indirect = true;
                   goto fat_write_restart;
                 }

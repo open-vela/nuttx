@@ -43,8 +43,14 @@
 /* Display */
 
 #define ESP32S3_EYE_DISPLAY_SPI         2
-#define ESP32S3_EYE_DISPLAY_DC          43
-#define ESP32S3_EYE_DISPLAY_BCKL        48
+#define ESP32S3_EYE_DISPLAY_DC          6
+#define ESP32S3_EYE_DISPLAY_RST         8
+#define ESP32S3_EYE_DISPLAY_BCKL        7
+
+/* Touch panel */
+
+#define ESP32S3_EYE_TOUCH_RST           9
+#define ESP32S3_EYE_TOUCH_I2C           0
 
 /****************************************************************************
  * Public Types
@@ -104,6 +110,10 @@ int esp32s3_gpio_init(void);
 int board_spiflash_init(void);
 #endif
 
+#ifdef CONFIG_TESTING_MTD_CONFIG_NVS
+int board_mtdconfig_test_initialize(void);
+#endif
+
 /****************************************************************************
  * Name: board_lcd_initialize
  *
@@ -129,6 +139,10 @@ int board_lcd_initialize(void);
 
 #ifdef CONFIG_ESP32S3_EYE_LCD
 struct lcd_dev_s *board_lcd_getdev(int lcddev);
+#endif
+
+#ifdef CONFIG_ESP32S3_EYE_TOUCHSCREEN
+int board_touchscreen_initialize(void);
 #endif
 
 /****************************************************************************
@@ -157,6 +171,19 @@ void board_lcd_uninitialize(void);
 
 #ifdef CONFIG_I2C_DRIVER
 int board_i2c_init(void);
+#endif
+
+/****************************************************************************
+ * Name: esp32s3_es8311_initialize
+ *
+ * Description:
+ *   Configure and register the ES8311 audio devices.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_AUDIO_ES8311
+int esp32s3_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
+                              int i2s_port);
 #endif
 
 #endif /* __ASSEMBLY__ */

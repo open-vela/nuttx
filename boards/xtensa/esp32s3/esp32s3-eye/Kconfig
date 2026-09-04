@@ -16,4 +16,37 @@ config ESP32S3_EYE_LCD
 	---help---
 		Enable board LCD support, IC is LCD_ST7789V.
 
+config ESP32S3_EYE_TOUCHSCREEN
+	bool "Enable ESP32-S3 touchscreen"
+	default n
+	select ESP32S3_I2C0
+	select INPUT
+	select INPUT_FT5X06
+	---help---
+		Enable the board FT5X06 touchscreen on I2C0.
+
+config ESP32S3_EYE_QMI8658
+	bool "Enable ESP32-S3 QMI8658 IMU"
+	default n
+	select ESP32S3_I2C0
+	select SENSORS
+	select SENSORS_QMI8658
+	---help---
+		Enable the board QMI8658 accelerometer and gyroscope on I2C0.
+
+config ESP32S3_EYE_AUDIO
+	bool "Enable ESP32-S3 audio"
+	default n
+	select DRIVERS_AUDIO
+	select AUDIO
+	select AUDIO_I2S
+	select AUDIO_ES8311
+	select AUDIO_ES7210
+	select AUDIO_DRIVER_SPECIFIC_BUFFERS
+	select ESP32S3_I2C0
+	select ESP32S3_I2S
+	select ESP32S3_I2S0
+	---help---
+		Enable board audio playback and capture support using ES8311 and ES7210.
+
 endif # ARCH_BOARD_ESP32S3_EYE

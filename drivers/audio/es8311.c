@@ -51,6 +51,7 @@
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/mqueue.h>
+#include <nuttx/mutex.h>
 #include <nuttx/queue.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/spinlock.h>
@@ -248,7 +249,7 @@ uint8_t es8311_readreg(FAR struct es8311_dev_s *priv, uint8_t regaddr)
       msg[1].addr      = priv->lower->address;
       msg[1].flags     = I2C_M_READ;
       msg[1].buffer    = &data;
-      msg[1].length    = 12;
+      msg[1].length    = 1;
 
       /* Read the register data. The returned value is the number messages
        * completed.
@@ -1042,13 +1043,22 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
         priv->samprate  = caps->ac_controls.hw[0];
         priv->bpsamp    = caps->ac_controls.b[2];
 
-        ret = es8311_setsamplerate(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setsamplerate(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
+
         if (ret < 0)
           {
             break;
           }
 
-        ret = es8311_setbitspersample(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setbitspersample(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
       }
       break;
 
@@ -1089,13 +1099,22 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
         priv->samprate  = caps->ac_controls.hw[0];
         priv->bpsamp    = caps->ac_controls.b[2];
 
-        ret = es8311_setsamplerate(priv) == -ENOTTY ? OK : ret;
-        if (ret != OK)
+        ret = es8311_setsamplerate(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
+
+        if (ret < 0)
           {
             break;
           }
 
-        ret = es8311_setbitspersample(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setbitspersample(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
       }
       break;
 
@@ -1301,7 +1320,7 @@ static int es8311_processbegin(FAR struct es8311_dev_s *priv)
   FAR struct ap_buffer_s *apb;
   irqstate_t flags;
   uint32_t timeout;
-  int ret;
+  int ret = OK;
 
   /* Loop while there are audio buffers to be sent and we have few than
    * CONFIG_ES8311_INFLIGHT then "in-flight"
@@ -1376,7 +1395,23 @@ static int es8311_processbegin(FAR struct es8311_dev_s *priv)
       if (ret < 0)
         {
           auderr("I2S transfer failed: %d\n", ret);
-          break;
+
+          flags = enter_critical_section();
+          DEBUGASSERT(priv->inflight > 0);
+          priv->inflight--;
+          leave_critical_section(flags);
+
+          nxmutex_unlock(&priv->pendlock);
+          apb_free(apb);
+
+#ifdef CONFIG_AUDIO_MULTI_SESSION
+          priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_DEQUEUE,
+                          apb, ret, NULL);
+#else
+          priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_DEQUEUE,
+                          apb, ret);
+#endif
+          return ret;
         }
     }
 
@@ -2202,6 +2237,13 @@ static void es8311_reset(FAR struct es8311_dev_s *priv)
   es8311_writereg(priv, ES8311_ADC_REG1C, 0x6a);
   es8311_setvolume(priv, ES_MODULE_ADC, CONFIG_ES8311_INPUT_INITVOLUME);
   es8311_setvolume(priv, ES_MODULE_DAC, CONFIG_ES8311_OUTPUT_INITVOLUME);
+
+  if (priv->audio_mode == ES_MODULE_DAC)
+    {
+      regconfig = es8311_readreg(priv, ES8311_SDPOUT_REG0A) | 0x40;
+      es8311_writereg(priv, ES8311_SDPOUT_REG0A, regconfig);
+      es8311_writereg(priv, ES8311_ADC_REG17, 0x00);
+    }
 
   es8311_dump_registers(&priv->dev, "After reset");
   audinfo("ES8311 reset complete.\n");

@@ -143,6 +143,8 @@ struct es8311_dev_s
   pthread_t                           threadid;         /* ID of our thread */
   mutex_t                             pendlock;         /* Protect pendq */
   uint32_t                            samprate;         /* Configured samprate (samples/sec) */
+  uint32_t                            buffer_size;      /* Preferred AP buffer size */
+  uint8_t                             buffer_num;       /* Preferred AP buffer count */
 #ifndef CONFIG_AUDIO_EXCLUDE_VOLUME
   uint16_t                            volume_out;       /* Current output volume level {0..1000} */
   uint16_t                            volume_in;        /* Current input volume level {0..1000} */

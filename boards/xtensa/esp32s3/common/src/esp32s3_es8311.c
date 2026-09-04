@@ -28,6 +28,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <syslog.h>
 #include <debug.h>
 #include <assert.h>
 #include <errno.h>
@@ -36,6 +37,9 @@
 #include <nuttx/audio/i2s.h>
 #include <nuttx/audio/pcm.h>
 #include <nuttx/audio/es8311.h>
+#ifdef CONFIG_AUDIO_ES7210
+#  include <nuttx/audio/es7210.h>
+#endif
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/kmalloc.h>
 
@@ -43,6 +47,7 @@
 
 #include "esp32s3_i2c.h"
 #include "esp32s3_i2s.h"
+#include "esp32s3_gpio.h"
 
 #if defined(CONFIG_ESP32S3_I2S) && defined(CONFIG_AUDIO_ES8311)
 
@@ -51,6 +56,10 @@
  ****************************************************************************/
 
 static struct es8311_lower_s g_es8311_lower[2];
+
+#ifdef CONFIG_AUDIO_ES7210
+static struct es7210_lower_s g_es7210_lower;
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -80,9 +89,11 @@ int esp32s3_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
                             int i2s_port)
 {
   struct audio_lowerhalf_s *es8311;
+  struct audio_lowerhalf_s *playback = NULL;
   struct i2s_dev_s *i2s;
   struct i2c_master_s *i2c;
   static bool initialized = false;
+  bool playback_registered = false;
   int ret;
 
   audinfo("i2c_port %d, i2c_addr %d, i2c_freq %d\n",
@@ -153,31 +164,55 @@ int esp32s3_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
        * output buffer. In such a case, we bypass the PCM decode.
        */
 
-      ret = audio_register("pcm0", es8311);
+      playback = es8311;
 #else
       /* Now we can embed the ES8311/I2S conglomerate into a PCM decoder
        * instance so that we will have a PCM front end for the the ES8311
        * driver.
        */
 
-      struct audio_lowerhalf_s *pcm = pcm_decode_initialize(es8311);
-      if (pcm == NULL)
+      playback = pcm_decode_initialize(es8311);
+      if (playback == NULL)
         {
           auderr("ERROR: Failed create the PCM decoder\n");
           ret = -ENODEV;
           goto errout;
         }
+#endif
 
       /* Finally, we can register the PCM/ES8311/I2S audio device. */
 
-      ret = audio_register("pcm0", pcm);
-#endif
+      ret = audio_register("pcm0p", playback);
       if (ret < 0)
         {
-          auderr("ERROR: Failed to register /dev/pcm0 device: %d\n", ret);
+          auderr("ERROR: Failed to register /dev/audio/pcm0p: %d\n", ret);
           goto errout;
         }
 
+      playback_registered = true;
+
+#if defined(CONFIG_ESP32S3_I2S0_RX) || defined(CONFIG_ESP32S3_I2S1_RX)
+#ifdef CONFIG_AUDIO_ES7210
+      /* Record from ES7210 while ES8311 is used for playback. */
+
+      struct audio_lowerhalf_s *es7210;
+      g_es7210_lower.address   = ES7210_I2C_ADDR;
+      g_es7210_lower.frequency = ES7210_I2C_FREQ;
+      es7210 = es7210_initialize(i2c, i2s, &g_es7210_lower);
+      if (es7210 == NULL)
+        {
+          auderr("ERROR: Failed to initialize ES7210\n");
+          ret = -ENODEV;
+          goto errout;
+        }
+
+      ret = audio_register("pcm0c", es7210);
+      if (ret < 0)
+        {
+          auderr("ERROR: Failed to register /dev/audio/pcm0c: %d\n", ret);
+          goto errout;
+        }
+#else
       /* Now we can use this I2S interface to initialize the ES8311 input
        * which will return an audio interface.
        */
@@ -195,12 +230,14 @@ int esp32s3_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
 
       /* Finally, we can register the PCM/ES8311/I2S audio device. */
 
-      ret = audio_register("pcm_in0", es8311);
+      ret = audio_register("pcm0c", es8311);
       if (ret < 0)
         {
-          auderr("ERROR: Failed to register /dev/pcm_in0 device: %d\n", ret);
+          auderr("ERROR: Failed to register /dev/audio/pcm0c: %d\n", ret);
           goto errout;
         }
+#endif
+#endif
 
       /* Now we are initialized */
 
@@ -210,6 +247,11 @@ int esp32s3_es8311_initialize(int i2c_port, uint8_t i2c_addr, int i2c_freq,
   return OK;
 
 errout:
+  if (playback_registered)
+    {
+      audio_unregister("pcm0p", playback);
+    }
+
   return ret;
 }
 

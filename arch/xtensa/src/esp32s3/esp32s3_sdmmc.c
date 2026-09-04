@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <syslog.h>
 #include <assert.h>
 #include <debug.h>
 #include <errno.h>
@@ -47,6 +48,7 @@
 #include "xtensa.h"
 #include "esp32s3_gpio.h"
 #include "esp32s3_irq.h"
+#include "hardware/esp32s3_gpio.h"
 #include "hardware/esp32s3_sdmmc.h"
 #include "hardware/esp32s3_system.h"
 #include "hardware/esp32s3_gpio_sigmap.h"
@@ -107,7 +109,8 @@
 /* Number of DMA Descriptors */
 
 #define ESP32S3_MULTIBLOCK_LIMIT  128
-#define NUM_DMA_DESCRIPTORS       (1 + (ESP32S3_MULTIBLOCK_LIMIT * 512 / MCI_DMADES1_MAXTR))
+#define ESP32S3_DMA_TRANSFER_MAX  (CONFIG_MMCSD_MULTIBLOCK_LIMIT * 512)
+#define NUM_DMA_DESCRIPTORS       (1 + (ESP32S3_DMA_TRANSFER_MAX / MCI_DMADES1_MAXTR))
 
 #if (CONFIG_MMCSD_MULTIBLOCK_LIMIT == 0 || \
      CONFIG_MMCSD_MULTIBLOCK_LIMIT > ESP32S3_MULTIBLOCK_LIMIT)
@@ -245,7 +248,7 @@ struct esp32s3_dev_s
   volatile struct sdmmc_dma_s dma_desc[NUM_DMA_DESCRIPTORS];
 #ifdef CONFIG_ESP32S3_SPIRAM
   uint8_t           *dma_buf;
-  size_t            dma_buf_size;
+  size_t             dma_buf_size;
 #endif
 #endif
   bool               wrdir;           /* True: Writing False: Reading */
@@ -548,7 +551,14 @@ static int esp32s3_ciu_sendcmd(uint32_t cmd, uint32_t arg)
 static void configure_pin(uint8_t gpio_pin, uint8_t sdio_pin,
                           gpio_pinattr_t attr)
 {
-  esp32s3_configgpio(gpio_pin, attr);
+  gpio_pinattr_t pad_attr = attr;
+
+  if ((attr & INPUT) != 0 && (attr & OUTPUT) != 0)
+    {
+      pad_attr |= OPEN_DRAIN;
+    }
+
+  esp32s3_configgpio(gpio_pin, pad_attr);
 
   if (attr & INPUT)
     {
@@ -557,7 +567,16 @@ static void configure_pin(uint8_t gpio_pin, uint8_t sdio_pin,
 
   if (attr & OUTPUT)
     {
+      uint32_t regaddr = GPIO_FUNC0_OUT_SEL_CFG_REG + gpio_pin * 4;
+      uint32_t regval;
+
       esp32s3_gpio_matrix_out(gpio_pin, sdio_pin, false, false);
+
+      regval = esp32s3_getreg(regaddr);
+
+      regval |= GPIO_FUNC0_OEN_SEL;
+
+      esp32s3_putreg(regval, regaddr);
     }
 }
 
@@ -1515,7 +1534,7 @@ static void esp32s3_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
       /* Enable in initial ID mode clocking (<400KHz) */
 
       case CLOCK_IDMODE:
-        freq_khz = 400;
+        freq_khz = 200;
         break;
 
       /* Enable in MMC normal operation clocking */
@@ -1534,7 +1553,7 @@ static void esp32s3_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
       /* SD normal operation clocking (wide 4-bit mode) */
 
       case CLOCK_SD_TRANSFER_4BIT:
-#ifndef CONFIG_ESP32S3_SDMMC_WIDTH_D1_ONLY
+#ifndef CONFIG_SDIO_WIDTH_D1_ONLY
         /* TODO: Use higher frequency */
 
         freq_khz = 20 * 1000;
@@ -1548,7 +1567,7 @@ static void esp32s3_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
 
         /* TODO: Use higher frequency */
 
-        freq_khz = 20 * 1000;
+        freq_khz = 400;
         esp32s3_widebus(dev, false);
         break;
     }
@@ -1686,6 +1705,9 @@ static int esp32s3_sendcmd(struct sdio_dev_s *dev, uint32_t cmd,
   uint32_t regval = 0;
 
   mcinfo("cmd=%04x arg=%04x\n", cmd, arg);
+
+  esp32s3_putreg(SDCARD_RESPDONE_CLEAR | SDCARD_CMDDONE_CLEAR,
+                 ESP32S3_SDMMC_RINTSTS);
 
   if (cmd == MMCSD_CMD12)
     {
@@ -2034,9 +2056,18 @@ static int esp32s3_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
 
   if (esp32s3_getreg(ESP32S3_SDMMC_RINTSTS) & SDCARD_INT_RESPERR)
     {
-      mcerr("ERROR: SDMMC failure cmd: %04x STA: %08x RINTSTS: %08x\n",
-            cmd, esp32s3_getreg(ESP32S3_SDMMC_STATUS),
-            esp32s3_getreg(ESP32S3_SDMMC_RINTSTS));
+      uint32_t cmdidx = (cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT;
+
+      if (cmdidx != 1 && cmdidx != 55)
+        {
+          syslog(LOG_ERR,
+                 "SDMMC err c=%02" PRIx32 " i=%08" PRIx32
+                 " r=%08" PRIx32 "\n",
+                 cmdidx,
+                 esp32s3_getreg(ESP32S3_SDMMC_RINTSTS),
+                 esp32s3_getreg(ESP32S3_SDMMC_RESP0));
+        }
+
       ret = -EIO;
     }
 
@@ -2665,6 +2696,7 @@ static int esp32s3_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
 {
   struct esp32s3_dev_s *priv = (struct esp32s3_dev_s *)dev;
   uint32_t regval;
+  int ret;
 
   /* Don't bother with DMA if the entire transfer will fit in the RX FIFO or
    * if we do not have a 4-bit wide bus.
@@ -2684,9 +2716,10 @@ static int esp32s3_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
 
   /* Setup DMA list */
 
-  if (esp32s3_fill_dma_desc(priv))
+  ret = esp32s3_fill_dma_desc(priv);
+  if (ret < 0)
     {
-      return -ENOMEM;
+      return ret;
     }
 
   /* Flush ints before we start */
@@ -2736,6 +2769,7 @@ static int esp32s3_dmasendsetup(struct sdio_dev_s *dev,
 {
   struct esp32s3_dev_s *priv = (struct esp32s3_dev_s *)dev;
   uint32_t regval;
+  int ret;
 
   /* Don't bother with DMA if the entire transfer will fit in the TX FIFO or
    * if we do not have a 4-bit wide bus.
@@ -2756,9 +2790,10 @@ static int esp32s3_dmasendsetup(struct sdio_dev_s *dev,
 
   /* Setup DMA descriptor list */
 
-  if (esp32s3_fill_dma_desc(priv))
+  ret = esp32s3_fill_dma_desc(priv);
+  if (ret < 0)
     {
-      return -ENOMEM;
+      return ret;
     }
 
   /* Flush ints before we start */
@@ -2960,6 +2995,10 @@ struct sdio_dev_s *sdio_initialize(int slotno)
                 INPUT | OUTPUT | PULLUP);
   configure_pin(CONFIG_ESP32S3_SDMMC_D0, priv->sdio_pins->d0,
                 INPUT | OUTPUT | PULLUP);
+
+  syslog(LOG_INFO, "SDMMC gpio cmd=%d d0=%d\n",
+         esp32s3_gpioread(CONFIG_ESP32S3_SDMMC_CMD),
+         esp32s3_gpioread(CONFIG_ESP32S3_SDMMC_D0));
 
   esp32s3_gpio_matrix_in(GPIO_MATRIX_CONST_ONE_INPUT,
                          priv->slot_info->card_int, false);
