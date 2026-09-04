@@ -445,6 +445,14 @@ config ARCH_BOARD_ESP32S3_EYE
 		featuring the ESP32-S3 CPU with a 2-Megapixel camera, an LCD display,
 		a microphone, an 8 MB Octal PSRAM and an 8 MB flash.
 
+config ARCH_BOARD_ESP32S3_R8
+	bool "ESP32-S3-R8 Board"
+	depends on ARCH_CHIP_ESP32S3WROOM2N32R8V
+	select ARCH_HAVE_BUTTONS
+	select ARCH_HAVE_IRQBUTTONS if ESP32S3_GPIO_IRQ
+	---help---
+		ESP32-S3-R8 board with a WROOM-2-N32R8V module and ST7789V LCD.
+
 config ARCH_BOARD_ESP32S3_LCD_EV
 	bool "Espressif ESP32-S3-LCD-EV Board"
 	depends on ARCH_CHIP_ESP32S3WROOM2N16R8V || ARCH_CHIP_ESP32S3WROOM2N32R8V || ARCH_CHIP_ESP32S3CUSTOM
@@ -3341,6 +3349,7 @@ config ARCH_BOARD
 	default "franzininho-wifi"          if ARCH_BOARD_FRANZININHO_WIFI
 	default "esp32s3-devkit"            if ARCH_BOARD_ESP32S3_DEVKIT
 	default "esp32s3-eye"               if ARCH_BOARD_ESP32S3_EYE
+	default "esp32s3-r8"                if ARCH_BOARD_ESP32S3_R8
 	default "esp32s3-meadow"            if ARCH_BOARD_ESP32S3_MEADOW
 	default "esp32s3-lcd-ev"            if ARCH_BOARD_ESP32S3_LCD_EV
 	default "esp32s3-lhcbit"            if ARCH_BOARD_ESP32S3_LHCBIT
@@ -4529,6 +4538,9 @@ source "boards/xtensa/esp32s3/esp32s3-devkit/Kconfig"
 endif
 if ARCH_BOARD_ESP32S3_EYE
 source "boards/xtensa/esp32s3/esp32s3-eye/Kconfig"
+endif
+if ARCH_BOARD_ESP32S3_R8
+source "boards/xtensa/esp32s3/esp32s3-r8/Kconfig"
 endif
 if ARCH_BOARD_ESP32S3_MEADOW
 source "boards/xtensa/esp32s3/esp32s3-meadow/Kconfig"
