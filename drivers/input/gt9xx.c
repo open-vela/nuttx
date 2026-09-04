@@ -35,9 +35,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <poll.h>
+#include <fcntl.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
+#include <syslog.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
@@ -57,6 +59,12 @@
 #ifndef CONFIG_INPUT_GT9XX_I2C_FREQUENCY
 #  define CONFIG_INPUT_GT9XX_I2C_FREQUENCY 400000
 #endif
+
+#ifndef CONFIG_INPUT_GT9XX_I2C_ADDR
+#  define CONFIG_INPUT_GT9XX_I2C_ADDR 0x5d
+#endif
+
+#define GT9XX_ADDR_ALT(a)  (((a) == 0x5d) ? 0x14 : 0x5d)
 
 /* Default Number of Poll Waiters is 1 */
 
@@ -109,6 +117,7 @@ static int gt9xx_open(FAR struct file *filep);
 static int gt9xx_close(FAR struct file *filep);
 static ssize_t gt9xx_read(FAR struct file *filep, FAR char *buffer,
                           size_t buflen);
+static int gt9xx_ioctl(FAR struct file *filep, int cmd, unsigned long arg);
 static int gt9xx_poll(FAR struct file *filep, FAR struct pollfd *fds,
                       bool setup);
 
@@ -125,7 +134,7 @@ static const struct file_operations g_gt9xx_fileops =
   gt9xx_read,   /* read */
   NULL,         /* write */
   NULL,         /* seek */
-  NULL,         /* ioctl */
+  gt9xx_ioctl,  /* ioctl */
   NULL,         /* truncate */
   NULL,         /* mmap */
   gt9xx_poll,   /* poll */
@@ -139,6 +148,13 @@ static const struct file_operations g_gt9xx_fileops =
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/* I2C failure accounting: total read failures (for rate-limited logging)
+ * and the current unbroken failure streak (drives bus recovery).
+ */
+
+static unsigned int g_gt9xx_rdfail;
+static unsigned int g_gt9xx_fail_streak;
 
 /****************************************************************************
  * Name: gt9xx_i2c_read
@@ -201,14 +217,63 @@ static int gt9xx_i2c_read(FAR struct gt9xx_dev_s *dev,
   iinfo("reg=0x%x, buflen=%ld\n", reg, buflen);
   DEBUGASSERT(dev && dev->i2c && buf);
 
-  /* Execute the I2C Transfer */
+  /* Execute the I2C Transfer.  The first access after reset is often
+   * NACKed on this panel; retry before giving up.
+   */
 
-  ret = I2C_TRANSFER(dev->i2c, msgv, msgv_len);
+    {
+      int tries;
+
+      ret = -EIO;
+      for (tries = 0; tries < 4; tries++)
+        {
+          ret = I2C_TRANSFER(dev->i2c, msgv, msgv_len);
+          if (ret >= 0)
+            {
+              break;
+            }
+
+          nxsig_usleep(5000);
+        }
+    }
+
   if (ret < 0)
     {
+      g_gt9xx_rdfail++;
+      g_gt9xx_fail_streak++;
+
+      /* An error storm (one line per 20 ms poll) floods the log and
+       * throttles the poll loop, so only the first few failures and
+       * every 100th afterwards are reported.
+       */
+
       ierr("I2C Read failed: %d\n", ret);
+      if (g_gt9xx_rdfail <= 5 || (g_gt9xx_rdfail % 100) == 0)
+        {
+          syslog(LOG_ERR, "gt9xx: I2C read 0x%04x failed: %d (fail #%u)\n",
+                 (unsigned)reg, ret, g_gt9xx_rdfail);
+        }
+
+#ifdef CONFIG_I2C_RESET
+      /* A long unbroken failure streak means the bus or the slave is
+       * stuck in a way no per-transfer retry can clear (e.g. SDA held
+       * low mid-bit).  Clock out a bus recovery, repeated at most once
+       * per 25 further failures (~0.5 s of polling).
+       */
+
+      if ((g_gt9xx_fail_streak % 25) == 0)
+        {
+          int rst = I2C_RESET(dev->i2c);
+          syslog(LOG_ERR, "gt9xx: I2C bus reset after %u failures: %d\n",
+                 g_gt9xx_fail_streak, rst);
+        }
+
+#endif
+
       return ret;
     }
+
+  g_gt9xx_fail_streak = 0;
 
 #ifdef CONFIG_DEBUG_INPUT_INFO
   iinfodumpbuffer("gt9xx_i2c_read", buf, buflen);
@@ -239,40 +304,28 @@ static int gt9xx_i2c_write(FAR struct gt9xx_dev_s *dev,
 {
   int ret;
 
-  /* Send the Register Address, MSB first */
+  /* Send the Register Address (MSB first) immediately followed by the
+   * Register Value in a single I2C message.  Splitting them with an
+   * I2C_M_NOSTART continuation is not supported by every I2C master.
+   */
 
-  uint8_t regbuf[2] =
+  uint8_t buf[3] =
   {
-    reg >> 8,   /* First Byte: MSB */
-    reg & 0xff  /* Second Byte: LSB */
+    reg >> 8,   /* First Byte: Register MSB */
+    reg & 0xff, /* Second Byte: Register LSB */
+    val         /* Third Byte: Value to be written */
   };
 
-  /* Send the Register Value */
+  /* Compose the I2C Message */
 
-  uint8_t buf[1] =
-  {
-    val  /* Value to be written */
-  };
-
-  /* Compose the I2C Messages */
-
-  struct i2c_msg_s msgv[2] =
+  struct i2c_msg_s msgv[1] =
   {
     {
-      /* Send the I2C Register Address */
+      /* Send the I2C Register Address and Value */
 
       .frequency = CONFIG_INPUT_GT9XX_I2C_FREQUENCY,
       .addr      = dev->addr,
       .flags     = 0,
-      .buffer    = regbuf,
-      .length    = sizeof(regbuf)
-    },
-    {
-      /* Send the I2C Register Value */
-
-      .frequency = CONFIG_INPUT_GT9XX_I2C_FREQUENCY,
-      .addr      = dev->addr,
-      .flags     = I2C_M_NOSTART,
       .buffer    = buf,
       .length    = sizeof(buf)
     }
@@ -283,12 +336,38 @@ static int gt9xx_i2c_write(FAR struct gt9xx_dev_s *dev,
   iinfo("reg=0x%x, val=%d\n", reg, val);
   DEBUGASSERT(dev && dev->i2c);
 
-  /* Execute the I2C Transfer */
+  /* Execute the I2C Transfer.  Retry: this panel NACKs the first
+   * access after reset often enough to drop a status-clear write.
+   */
 
-  ret = I2C_TRANSFER(dev->i2c, msgv, msgv_len);
+    {
+      int tries;
+
+      ret = -EIO;
+      for (tries = 0; tries < 4; tries++)
+        {
+          ret = I2C_TRANSFER(dev->i2c, msgv, msgv_len);
+          if (ret >= 0)
+            {
+              break;
+            }
+
+          nxsig_usleep(5000);
+        }
+    }
+
   if (ret < 0)
     {
+      static unsigned int s_wrfail;
+
+      s_wrfail++;
       ierr("I2C Write failed: %d\n", ret);
+      if (s_wrfail <= 5 || (s_wrfail % 100) == 0)
+        {
+          syslog(LOG_ERR, "gt9xx: I2C write 0x%04x failed: %d (fail #%u)\n",
+                 (unsigned)reg, ret, s_wrfail);
+        }
+
       return ret;
     }
 
@@ -382,17 +461,96 @@ static int gt9xx_set_status(FAR struct gt9xx_dev_s *dev, uint8_t status)
  *
  ****************************************************************************/
 
+/* Cumulative instrumentation for the touch path.  Counters rather than
+ * per-event logging: the log itself throttles the poll loop over the USB
+ * console, and a counter can be read long after the finger has gone.
+ */
+
+static unsigned int g_gt9xx_down;
+static unsigned int g_gt9xx_move;
+static unsigned int g_gt9xx_up;
+static unsigned int g_gt9xx_drop;
+static unsigned int g_gt9xx_ack_fail;
+static unsigned int g_gt9xx_ack1_ok;
+static unsigned int g_gt9xx_stale;
+static int g_gt9xx_unacked_x = -1;
+static int g_gt9xx_unacked_y = -1;
+
+static int g_gt9xx_lastx = -1;
+static int g_gt9xx_lasty = -1;
+
+/****************************************************************************
+ * Name: gt9xx_ack_frame
+ *
+ * Description:
+ *   Retire the frame the controller is holding by clearing the status
+ *   register (0x814E): one attempt, and on failure let go.
+ *
+ *   Measured on this kit: a transient NACK on this write is normal, and
+ *   the next 20 ms poll cycle retires the frame naturally.  What must
+ *   NOT happen is a rapid-fire retry burst in the same window -- every
+ *   firmware that retried the acknowledge back-to-back (4x blind
+ *   retries, or immediate/+5ms/+20ms tiers) drove the controller into a
+ *   permanent state where every data write is NACKed while reads keep
+ *   working, and only a power cycle recovers it.  The one driver that
+ *   never wedged in hours of testing is the one that tries once and
+ *   moves on.
+ *
+ * Returned Value:
+ *   Zero (OK) if the frame was retired; a negated errno if the single
+ *   attempt failed (the caller records the frame as unretired).
+ *
+ ****************************************************************************/
+
+static int gt9xx_ack_frame(FAR struct gt9xx_dev_s *dev)
+{
+  uint8_t cmd[3] =
+  {
+    GTP_READ_COOR_ADDR >> 8,
+    GTP_READ_COOR_ADDR & 0xff,
+    0
+  };
+
+  int ret;
+
+  struct i2c_msg_s onemsg[1] =
+  {
+    {
+      .frequency = CONFIG_INPUT_GT9XX_I2C_FREQUENCY,
+      .addr      = dev->addr,
+      .flags     = 0,
+      .buffer    = cmd,
+      .length    = sizeof(cmd)
+    }
+  };
+
+  ret = I2C_TRANSFER(dev->i2c, onemsg, 1);
+  if (ret >= 0)
+    {
+      g_gt9xx_ack1_ok++;
+      return 0;
+    }
+
+  g_gt9xx_ack_fail++;
+  return ret;
+}
+
 static int gt9xx_read_touch_data(FAR struct gt9xx_dev_s *dev,
                                  FAR struct touch_sample_s *sample)
 {
   uint8_t status[1];
+  uint8_t touch[8];
   uint8_t status_code;
   uint8_t touched_points;
-  uint8_t touch[6];
-  uint16_t x;
-  uint16_t y;
+  uint16_t x = 0;
+  uint16_t y = 0;
   uint8_t flags;
   int ret;
+  static unsigned int s_polls;
+  static unsigned int s_ready;
+  static unsigned int s_maxpts;
+  static uint8_t s_lastnz;
+  static bool s_dumped;
 
   /* Erase the Touch Sample and Touch Point */
 
@@ -400,7 +558,10 @@ static int gt9xx_read_touch_data(FAR struct gt9xx_dev_s *dev,
   DEBUGASSERT(dev && sample);
   memset(sample, 0, sizeof(*sample));
 
-  /* Read the Touch Panel Status */
+  /* Official esp_lcd_touch_gt911: 1-byte 0x814E, then 8 bytes from
+   * 0x814F (track, xL, xH, yL, yH, sizeL, sizeH, reserved).  A single
+   * 8-byte burst starting at 0x814E NACKs on this I2C master.
+   */
 
   ret = gt9xx_i2c_read(dev, GTP_READ_COOR_ADDR, status, sizeof(status));
   if (ret < 0)
@@ -409,30 +570,109 @@ static int gt9xx_read_touch_data(FAR struct gt9xx_dev_s *dev,
       return ret;
     }
 
-  /* Decode the Status Code and the Touched Points */
-
   status_code = status[0] & 0x80;
   touched_points = status[0] & 0x0f;
 
-  /* If Touch Panel Status is OK and Touched Points is 1 or more */
+  /* Cumulative counters: a touch that happens outside a log window still
+   * shows up on the next periodic line, so the report does not depend on
+   * catching the user's finger inside a capture.
+   */
 
-  if (status_code != 0 && touched_points >= 1)
+  s_polls++;
+  if (status[0] != 0)
     {
-      /* Read the First Touch Point (6 bytes) */
+      s_lastnz = status[0];
+    }
 
-      ret = gt9xx_i2c_read(dev, GTP_POINT1, touch, sizeof(touch));
+  if (status_code != 0)
+    {
+      s_ready++;
+    }
+
+  if (touched_points > s_maxpts)
+    {
+      s_maxpts = touched_points;
+    }
+
+  if ((s_polls % 100) == 1)
+    {
+      syslog(LOG_INFO,
+             "Touch: polls=%u ready=%u maxpts=%u lastnz=0x%02x | "
+             "dn=%u mv=%u up=%u drop=%u | ack=%u fail=%u stale=%u "
+             "last=(%d,%d)\n",
+             s_polls, s_ready, s_maxpts, s_lastnz,
+             g_gt9xx_down, g_gt9xx_move, g_gt9xx_up, g_gt9xx_drop,
+             g_gt9xx_ack1_ok, g_gt9xx_ack_fail, g_gt9xx_stale,
+             g_gt9xx_lastx, g_gt9xx_lasty);
+    }
+
+  if (status_code == 0)
+    {
+      /* Bit 7 clear means the controller has not latched a new frame, so
+       * there is nothing to acknowledge.  Writing 0 to 0x814E here is a
+       * race: the controller can set bit 7 between this read and that
+       * write, and the write then retires a frame that was never read.
+       * At ~33 polls/s against a ~60 Hz scan rate that silently drops
+       * most press reports, which looks exactly like a dead panel.
+       */
+
+      return -EAGAIN;
+    }
+
+  if (touched_points >= 1 && touched_points <= 5)
+    {
+      ret = gt9xx_i2c_read(dev, 0x814f, touch, sizeof(touch));
       if (ret < 0)
         {
-          ierr("Read Touch Point failed: %d\n", ret);
-          return ret;
+          /* Fallback: 6-byte point payload at 0x8150 */
+
+          ret = gt9xx_i2c_read(dev, GTP_POINT1, touch + 1, 6);
+          if (ret < 0)
+            {
+              ierr("Read Touch Point failed: %d\n", ret);
+              gt9xx_ack_frame(dev);
+              return ret;
+            }
+
+          touch[0] = 0;
         }
 
-      /* Decode the Touch Coordinates */
+      x = touch[1] + (touch[2] << 8);
+      y = touch[3] + (touch[4] << 8);
 
-      x = touch[0] + (touch[1] << 8);
-      y = touch[2] + (touch[3] << 8);
+      /* A frame we already delivered but could not retire is not a new
+       * contact: the controller is just re-presenting it.  Report no
+       * contact (the caller turns that into one Touch Up, so the UI is
+       * not pinned at the stale point) and keep trying to retire it.
+       */
 
-      /* Return the Touch Coordinates as Touch Down */
+      if ((int)x == g_gt9xx_unacked_x && (int)y == g_gt9xx_unacked_y)
+        {
+          g_gt9xx_stale++;
+          if (gt9xx_ack_frame(dev) >= 0)
+            {
+              g_gt9xx_unacked_x = -1;
+              g_gt9xx_unacked_y = -1;
+            }
+
+          return OK;
+        }
+
+      if (!s_dumped)
+        {
+          /* First frame that actually carries a contact: dump it raw once
+           * so a decode bug is distinguishable from a silent panel.
+           * Logging every frame throttles the poll loop to ~2 Hz over the
+           * USB console, which on its own looks like broken touch.
+           */
+
+          s_dumped = true;
+          syslog(LOG_INFO,
+                 "Touch: raw st=0x%02x %02x %02x %02x %02x %02x %02x "
+                 "%02x %02x\n",
+                 status[0], touch[0], touch[1], touch[2], touch[3],
+                 touch[4], touch[5], touch[6], touch[7]);
+        }
 
       flags = TOUCH_DOWN | TOUCH_ID_VALID | TOUCH_POS_VALID;
       sample->npoints = 1;
@@ -440,16 +680,27 @@ static int gt9xx_read_touch_data(FAR struct gt9xx_dev_s *dev,
       sample->point[0].x = x;
       sample->point[0].y = y;
       sample->point[0].flags = flags;
-      iinfo("touch down x=%d, y=%d\n", x, y);
     }
 
-  /* Set the Touch Panel Status to 0 */
+  /* Acknowledge the frame.  A failure here must not discard the sample we
+   * already decoded: letting the acknowledge decide the fate of the
+   * report drops real touches.  An unretired coordinate frame is recorded
+   * so its re-presentations are not mistaken for new contacts.
+   */
 
-  ret = gt9xx_set_status(dev, 0);
-  if (ret < 0)
+  ret = gt9xx_ack_frame(dev);
+  if (touched_points >= 1 && touched_points <= 5)
     {
-      ierr("Set Touch Panel Status failed: %d\n", ret);
-      return ret;
+      if (ret < 0)
+        {
+          g_gt9xx_unacked_x = x;
+          g_gt9xx_unacked_y = y;
+        }
+      else
+        {
+          g_gt9xx_unacked_x = -1;
+          g_gt9xx_unacked_y = -1;
+        }
     }
 
   return OK;
@@ -471,6 +722,46 @@ static int gt9xx_read_touch_data(FAR struct gt9xx_dev_s *dev,
  *   Zero (OK) on success; a negated errno value is returned on any failure.
  *
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: gt9xx_ioctl
+ *
+ * Description:
+ *   Handle Touch Panel ioctl commands.  Currently only
+ *   TSIOC_GETMAXPOINTS is supported, which reports the maximum number of
+ *   simultaneous touch points of the GT9xx family.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value is returned on any failure.
+ *
+ ****************************************************************************/
+
+static int gt9xx_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
+{
+  switch (cmd)
+    {
+      case TSIOC_GETMAXPOINTS:
+        {
+          FAR uint8_t *maxpoints = (FAR uint8_t *)((uintptr_t)arg);
+
+          if (maxpoints == NULL)
+            {
+              return -EINVAL;
+            }
+
+          /* This driver reports a single touch point per sample (readers
+           * size their buffers from this value, so it must describe the
+           * sample format rather than the silicon capability).
+           */
+
+          *maxpoints = 1;
+          return OK;
+        }
+
+      default:
+        return -ENOTTY;
+    }
+}
 
 static ssize_t gt9xx_read(FAR struct file *filep, FAR char *buffer,
                           size_t buflen)
@@ -508,75 +799,119 @@ static ssize_t gt9xx_read(FAR struct file *filep, FAR char *buffer,
 
   ret = -EINVAL;
 
-  /* If waiting for Touch Up, return the Last Touch Point as Touch Up */
+  /* Contact tracking: TOUCH_DOWN or TOUCH_MOVE in the last reported
+   * flags means the finger is still on the glass.
+   */
 
-  if (priv->flags & TOUCH_DOWN)
+  bool contact = (priv->flags & (TOUCH_DOWN | TOUCH_MOVE)) != 0;
+
+  /* LVGL opens O_NONBLOCK and never calls poll().  Do not require
+   * int_pending: that flag is only set by the 20 ms board wdog /
+   * GPIO ISR, and skipping I2C here makes the panel look completely
+   * dead.  Official IDF also polls 0x814E on every read.
+   */
+
+  /* Read the Touch Report over I2C */
+
+  ret = gt9xx_read_touch_data(priv, &sample);
+
+  /* Begin Critical Section: clear the Interrupt Pending Flag */
+
+  flags = enter_critical_section();
+  priv->int_pending = false;
+  leave_critical_section(flags);
+
+  if (ret == -EAGAIN)
     {
-      /* Begin Critical Section */
+      /* The controller has no new report: keep the current state */
 
-      flags = enter_critical_section();
+      if ((filep->f_oflags & O_NONBLOCK) != 0)
+        {
+          nxmutex_unlock(&priv->devlock);
+          return -EAGAIN;
+        }
 
-      /* Mark the Last Touch Point as Touch Up */
-
-      priv->flags = TOUCH_UP | TOUCH_ID_VALID | TOUCH_POS_VALID;
-
-      /* End Critical Section */
-
-      leave_critical_section(flags);
-
-      /* Return the Last Touch Point, changed to Touch Up */
+      /* Blocking readers get an immediately returned empty sample,
+       * matching the historical behavior of this driver: they are
+       * expected to use poll() to wait for new data instead of
+       * spinning on read().
+       */
 
       memset(&sample, 0, sizeof(sample));
-      sample.npoints = 1;
-      sample.point[0].id = 0;
-      sample.point[0].x = priv->x;
-      sample.point[0].y = priv->y;
-      sample.point[0].flags = priv->flags;
       memcpy(buffer, &sample, sizeof(sample));
       ret = OK;
-      iinfo("touch up x=%d, y=%d\n", priv->x, priv->y);
+    }
+  else if (ret < 0)
+    {
+      g_gt9xx_drop++;
+      nxmutex_unlock(&priv->devlock);
+      return ret;
+    }
+  else if (sample.npoints >= 1)
+    {
+      /* Mirror the coordinates when the panel origin is opposite to
+       * the display origin.
+       */
+
+#if CONFIG_INPUT_GT9XX_X_INVERT_MAX > 0
+      sample.point[0].x = CONFIG_INPUT_GT9XX_X_INVERT_MAX - 1 -
+                          sample.point[0].x;
+#endif
+#if CONFIG_INPUT_GT9XX_Y_INVERT_MAX > 0
+      sample.point[0].y = CONFIG_INPUT_GT9XX_Y_INVERT_MAX - 1 -
+                          sample.point[0].y;
+#endif
+
+      /* Finger on the glass: the first report is Touch Down, any
+       * further report while in contact is Touch Move.
+       */
+
+      sample.point[0].flags = contact ?
+          (TOUCH_MOVE | TOUCH_ID_VALID | TOUCH_POS_VALID) :
+          (TOUCH_DOWN | TOUCH_ID_VALID | TOUCH_POS_VALID);
+      priv->x = sample.point[0].x;
+      priv->y = sample.point[0].y;
+      priv->flags = sample.point[0].flags;
+      memcpy(buffer, &sample, sizeof(sample));
+      iinfo("touch %s x=%d, y=%d\n", contact ? "move" : "down",
+            priv->x, priv->y);
+      g_gt9xx_lastx = priv->x;
+      g_gt9xx_lasty = priv->y;
+      if (contact)
+        {
+          g_gt9xx_move++;
+        }
+      else
+        {
+          g_gt9xx_down++;
+        }
     }
   else
     {
-      /* Otherwise read the Touch Point over I2C */
+      /* Zero-point report from the controller: the finger was lifted */
 
-      ret = gt9xx_read_touch_data(priv, &sample);
-
-      /* Skip duplicates */
-
-      if (sample.npoints >= 1 &&
-          priv->x == sample.point[0].x &&
-          priv->y == sample.point[0].y)
+      if (contact)
         {
+          priv->flags = TOUCH_UP | TOUCH_ID_VALID | TOUCH_POS_VALID;
           memset(&sample, 0, sizeof(sample));
-          sample.npoints = 0;
-          iinfo("skip duplicate x=%d, y=%d\n", priv->x, priv->y);
+          sample.npoints = 1;
+          sample.point[0].id = 0;
+          sample.point[0].x = priv->x;
+          sample.point[0].y = priv->y;
+          sample.point[0].flags = priv->flags;
+          memcpy(buffer, &sample, sizeof(sample));
+          iinfo("touch up x=%d, y=%d\n", priv->x, priv->y);
+          g_gt9xx_up++;
         }
-
-      /* Return the Touch Point */
-
-      memcpy(buffer, &sample, sizeof(sample));
-
-      /* Begin Critical Section */
-
-      flags = enter_critical_section();
-
-      /* Clear the Interrupt Pending Flag */
-
-      priv->int_pending = false;
-
-      /* Remember the Last Touch Point */
-
-      if (sample.npoints >= 1)
+      else if ((filep->f_oflags & O_NONBLOCK) != 0)
         {
-          priv->x = sample.point[0].x;
-          priv->y = sample.point[0].y;
-          priv->flags = sample.point[0].flags;
+          nxmutex_unlock(&priv->devlock);
+          return -EAGAIN;
         }
-
-      /* End Critical Section */
-
-      leave_critical_section(flags);
+      else
+        {
+          memcpy(buffer, &sample, sizeof(sample));
+        }
     }
 
   /* End Mutex: Unlock to allow next read */
@@ -645,7 +980,31 @@ static int gt9xx_open(FAR struct file *filep)
 
       /* Check that Touch Panel exists on I2C */
 
-      ret = gt9xx_probe_device(priv);
+        {
+          int tries;
+
+          ret = -ENODEV;
+          for (tries = 0; tries < 5; tries++)
+            {
+              ret = gt9xx_probe_device(priv);
+              if (ret == OK)
+                {
+                  break;
+                }
+
+              if (tries == 2)
+                {
+                  priv->addr = GT9XX_ADDR_ALT(priv->addr);
+                  syslog(LOG_INFO,
+                         "gt9xx: preferred 0x%02x NACKed, retry 0x%02x\n",
+                         (unsigned)CONFIG_INPUT_GT9XX_I2C_ADDR,
+                         priv->addr);
+                }
+
+              nxsig_usleep(50 * 1000);
+            }
+        }
+
       if (ret < 0)
         {
           /* No such device, power off the Touch Panel */
@@ -653,6 +1012,11 @@ static int gt9xx_open(FAR struct file *filep)
           priv->board->set_power(priv->board, false);
           goto out_lock;
         }
+
+      syslog(LOG_INFO, "Touch: probe ok addr=0x%02x\n", priv->addr);
+
+      gt9xx_set_status(priv, 0);
+      ret = OK;
 
       /* Enable Touch Panel Interrupts */
 
