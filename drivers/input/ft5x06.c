@@ -43,6 +43,7 @@
 #include <sys/types.h>
 
 #include <stdbool.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -126,7 +127,6 @@ struct ft5x06_dev_s
   struct wdog_s polltimer;                  /* Poll timer */
 #endif
   uint8_t touchbuf[FT5X06_TOUCH_DATA_LEN];  /* Raw touch data */
-
   /* The following is a list if poll structures of threads waiting for
    * driver events. The 'struct pollfd' reference for each open is also
    * retained in the f_priv field of the 'struct file'.
@@ -284,7 +284,6 @@ static void ft5x06_data_worker(FAR void *arg)
        */
 
       sample = (FAR struct ft5x06_touch_data_s *)priv->touchbuf;
-
       /* Notify waiters (only if we ready some valid data).
        *
        * REVISIT: For improved performance consider moving the duplicate
@@ -942,6 +941,18 @@ static int ft5x06_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
           FAR uint32_t *ptr = (FAR uint32_t *)((uintptr_t)arg);
           DEBUGASSERT(priv->config != NULL && ptr != NULL);
           *ptr = priv->frequency;
+        }
+        break;
+
+      case TSIOC_GETMAXPOINTS:  /* arg: Pointer to uint8_t max point value */
+        {
+          FAR uint8_t *ptr = (FAR uint8_t *)((uintptr_t)arg);
+          DEBUGASSERT(ptr != NULL);
+#ifdef CONFIG_FT5X06_SINGLEPOINT
+          *ptr = 1;
+#else
+          *ptr = FT5X06_MAX_TOUCHES;
+#endif
         }
         break;
 

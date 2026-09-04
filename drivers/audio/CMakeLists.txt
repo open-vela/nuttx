@@ -50,6 +50,10 @@ if(CONFIG_DRIVERS_AUDIO)
     endif()
   endif()
 
+  if(CONFIG_AUDIO_ES7210)
+    list(APPEND SRCS es7210.c)
+  endif()
+
   if(CONFIG_AUDIO_ES8388)
     list(APPEND SRCS es8388.c)
     if(CONFIG_ES8388_REGDUMP)
