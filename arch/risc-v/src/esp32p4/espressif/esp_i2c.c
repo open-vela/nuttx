@@ -1256,10 +1256,12 @@ static int esp_i2c_transfer(struct i2c_master_s *dev,
         i2cinfo("Message %" PRIu8 " transfer complete.\n", priv->msgid);
     }
 
-  /* 传输失败时复位状态机并清总线：SC2336 等从机可能
-   * 长时间拉低 SCL（时钟拉伸）或 SDA，导致传输超时。
-   * 清总线（多个 SCL 脉冲）可释放被卡住的线路，避免
-   * 后续传输（如触屏）永久阻塞。
+  /* On transfer failure, reset the state machine and clear
+   * the bus: slaves such as SC2336 can hold SCL (clock
+   * stretching) or SDA low for a long time and cause transfer
+   * timeouts. Clearing the bus (several SCL pulses) releases
+   * the stuck lines so later transfers (e.g. the touch panel)
+   * do not block forever.
    */
 
   if (ret < 0)
