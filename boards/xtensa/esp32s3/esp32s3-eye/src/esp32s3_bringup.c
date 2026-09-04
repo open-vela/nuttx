@@ -64,6 +64,10 @@
 #  include "esp32s3_i2c.h"
 #endif
 
+#ifdef CONFIG_SENSORS_QMA7981
+#  include <nuttx/sensors/qma7981.h>
+#endif
+
 #ifdef CONFIG_WATCHDOG
 #  include "esp32s3_board_wdt.h"
 #endif
@@ -130,6 +134,14 @@ int esp32s3_bringup(void)
     }
 #endif
 
+  /* Mount tmpfs at /data for ai_agent config store */
+
+  ret = nx_mount(NULL, "/data", "tmpfs", 0, NULL);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to mount tmpfs at /data: %d\n", ret);
+    }
+
 #ifdef CONFIG_ESP32S3_TIMER
   /* Configure general purpose timers */
 
@@ -165,6 +177,18 @@ int esp32s3_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize I2C driver: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_SENSORS_QMA7981
+  /* Register QMA7981 three-axis accelerometer on I2C1 (fall-detect) */
+
+  ret = qma7981_register("/dev/accel0",
+                         esp32s3_i2cbus_initialize(ESP32S3_I2C1),
+                         QMA7981_I2C_ADDR);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to register QMA7981: %d\n", ret);
     }
 #endif
 
