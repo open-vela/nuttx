@@ -31,6 +31,7 @@
 #include <stdint.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/clock.h>
 #include <nuttx/sched.h>
 #include <nuttx/sched_note.h>
 #include <nuttx/spinlock.h>
@@ -43,11 +44,16 @@
 #include "hardware/esp32s3_rtccntl.h"
 #include "hardware/esp32s3_system.h"
 
+#define APPCPU_START_TIMEOUT_MSEC 2000
+
+extern int ets_printf(const char *fmt, ...);
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
 static volatile bool g_appcpu_started;
+static volatile int g_appcpu_stage;
 static volatile spinlock_t g_appcpu_interlock;
 
 /****************************************************************************
@@ -106,12 +112,15 @@ static inline void xtensa_attach_fromcpu0_interrupt(void)
 
 void xtensa_appcpu_start(void)
 {
-  struct tcb_s *tcb = current_task(this_cpu());
+  struct tcb_s *tcb = this_task();
   register uint32_t sp;
+
+  g_appcpu_stage = 1;
 
   /* Init idle task to percpu reg */
 
   up_update_task(tcb);
+  g_appcpu_stage = 2;
 
   /* Move to the stack assigned to us by up_smp_start immediately.  Although
    * we were give a stack pointer at start-up, we don't know where that stack
@@ -122,8 +131,7 @@ void xtensa_appcpu_start(void)
   sp = (uint32_t)tcb->stack_base_ptr + tcb->adj_stack_size -
                  XCPTCONTEXT_SIZE;
   __asm__ __volatile__("mov sp, %0\n" : : "r"(sp));
-
-  sinfo("CPU%d Started\n", this_cpu());
+  g_appcpu_stage = 3;
 
 #ifdef CONFIG_SCHED_INSTRUMENTATION
   /* Notify that this CPU has started */
@@ -131,28 +139,25 @@ void xtensa_appcpu_start(void)
   sched_note_cpu_started(tcb);
 #endif
 
-  /* Release the spinlock to signal to the PRO CPU that the APP CPU has
-   * started.
-   */
-
-  g_appcpu_started = true;
-  spin_unlock(&g_appcpu_interlock);
-
   /* Move CPU0 exception vectors to IRAM */
 
   __asm__ __volatile__ ("wsr %0, vecbase\n"::"r" (_init_start));
+  g_appcpu_stage = 4;
 
   /* Make page 0 access raise an exception */
 
   esp32s3_region_protection();
+  g_appcpu_stage = 5;
 
   /* Initialize CPU interrupts */
 
   esp32s3_cpuint_initialize();
+  g_appcpu_stage = 6;
 
   /* Attach and enable the inter-CPU interrupt */
 
   xtensa_attach_fromcpu0_interrupt();
+  g_appcpu_stage = 7;
 
   /* Enable the software interrupt */
 
@@ -163,15 +168,26 @@ void xtensa_appcpu_start(void)
 
   up_irq_enable();
 #endif
+  g_appcpu_stage = 8;
 
 #if XCHAL_CP_NUM > 0
   xtensa_set_cpenable(CONFIG_XTENSA_CP_INITSET);
 #endif
+  g_appcpu_stage = 9;
+
+  /* Signal to the PRO CPU that the APP CPU has started. */
+
+  g_appcpu_started = true;
+  spin_unlock(&g_appcpu_interlock);
+  g_appcpu_stage = 10;
 
   /* Then switch contexts. This instantiates the exception context of the
    * tcb at the head of the assigned task list.  In this case, this should
    * be the CPUs NULL task.
    */
+
+  g_running_tasks[this_cpu()] = this_task();
+  g_appcpu_stage = 11;
 
   xtensa_context_restore();
 }
@@ -209,6 +225,7 @@ int up_cpu_start(int cpu)
 
   if (!g_appcpu_started)
     {
+      struct tcb_s *tcb;
       uint32_t regval;
 
       /* Start CPU1 */
@@ -228,6 +245,7 @@ int up_cpu_start(int cpu)
 
       spin_lock_init(&g_appcpu_interlock);
       spin_lock(&g_appcpu_interlock);
+      g_appcpu_stage = 0;
 
       /* OpenOCD might have already enabled clock gating and taken APP CPU
        * out of reset.  Don't reset the APP CPU if that's the case as this
@@ -266,13 +284,43 @@ int up_cpu_start(int cpu)
           putreg32(regval, SYSTEM_CORE_1_CONTROL_0_REG);
         }
 
+      /* Rebuild the secondary CPU idle context before booting the APP CPU.
+       * The first APP CPU restore depends on this frame already containing
+       * nx_idle_trampoline as REG_PC.
+       */
+
+      tcb = current_task(cpu);
+      up_initial_state(tcb);
+
       /* Set the CPU1 start address */
 
       ets_set_appcpu_boot_addr((uint32_t)xtensa_appcpu_start);
 
       /* And wait until the APP CPU starts and releases the spinlock. */
 
-      spin_lock(&g_appcpu_interlock);
+      for (int retry = 0; retry < APPCPU_START_TIMEOUT_MSEC; retry++)
+        {
+          if (spin_trylock(&g_appcpu_interlock))
+            {
+              break;
+            }
+
+          up_mdelay(1);
+        }
+
+      if (!g_appcpu_started)
+        {
+          ets_printf("SMP BOOT: CPU%d start timeout started=%d stage=%d\n",
+                     cpu, g_appcpu_started, g_appcpu_stage);
+          ets_printf("SMP BOOT: idle tcb=%p start=%p regs=%p pc=%p sp=%p\n",
+                     tcb, tcb ? tcb->start : NULL,
+                     tcb ? tcb->xcp.regs : NULL,
+                     tcb && tcb->xcp.regs ?
+                     (void *)tcb->xcp.regs[REG_PC] : NULL,
+                     tcb && tcb->xcp.regs ?
+                     (void *)tcb->xcp.regs[REG_A1] : NULL);
+          return -ETIMEDOUT;
+        }
 
       /* prev cpu boot done */
 
@@ -282,4 +330,3 @@ int up_cpu_start(int cpu)
 
   return OK;
 }
-
