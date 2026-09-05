@@ -769,6 +769,7 @@ config LCD_ST7789_BPP
 config LCD_ST7789_SWAP_BYTES
 	bool "ST7789 swap RGB565 data bytes"
 	default n
+	depends on ESP32S3_R8_LCD
 	depends on LCD_ST7789_BPP = 16 && !LCD_ST7789_3WIRE && !LCD_ST7789_DATA_ENDIAN_LITTLE
 	---help---
 		Swap the two bytes of each RGB565 pixel before sending it over
