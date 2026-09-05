@@ -140,6 +140,43 @@ config USBHOST_MSC_NOTIFIER
 		function on the low priority work queue when a mass storage device is
 		connected or disconnected.
 
+config USBHOST_UVC
+	bool "USB Video Class (UVC) Host Support"
+	default n
+	depends on USBHOST && !USBHOST_ISOC_DISABLE
+	select VIDEO_STREAM
+	---help---
+		Enable support for the USB Video Class (UVC) host driver, providing
+		V4L2 capture from USB cameras (e.g. MJPEG webcams).
+
+if USBHOST_UVC
+
+config USBHOST_UVC_BUFSIZE
+	int "UVC transfer buffer size"
+	default 32768
+	---help---
+		Size in bytes of the streaming transfer buffer.
+
+config USBHOST_UVC_NFRAMES
+	int "UVC number of frame buffers"
+	default 3
+	---help---
+		Number of V4L2 frame buffers used by the UVC driver.
+
+config USBHOST_UVC_DEFPRIO
+	int "UVC stream thread priority"
+	default 150
+	---help---
+		Priority of the UVC streaming thread.
+
+config USBHOST_UVC_STACKSIZE
+	int "UVC stream thread stack size"
+	default 4096
+	---help---
+		Stack size of the UVC streaming thread.
+
+endif # USBHOST_UVC
+
 config USBHOST_CDCACM
 	bool "CDC/ACM support"
 	default n

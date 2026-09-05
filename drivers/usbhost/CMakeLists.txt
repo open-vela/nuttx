@@ -43,6 +43,10 @@ if(CONFIG_USBHOST)
     list(APPEND SRCS usbhost_storage.c)
   endif()
 
+  if(CONFIG_USBHOST_UVC)
+    list(APPEND SRCS usbhost_uvc.c)
+  endif()
+
   if(CONFIG_USBHOST_CDCACM)
     list(APPEND SRCS usbhost_cdcacm.c)
   endif()
