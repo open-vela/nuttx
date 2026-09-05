@@ -409,6 +409,11 @@ static int ili9341_getrun(FAR struct lcd_dev_s *dev, fb_coord_t row,
                           size_t npixels);
 #endif
 
+static int ili9341_putarea(FAR struct lcd_dev_s *dev,
+                           fb_coord_t row_start, fb_coord_t row_end,
+                           fb_coord_t col_start, fb_coord_t col_end,
+                           FAR const uint8_t *buffer, fb_coord_t stride);
+
 /* lcd configuration */
 
 static int ili9341_getvideoinfo(FAR struct lcd_dev_s *dev,
@@ -680,6 +685,50 @@ static int ili9341_getrun(FAR struct lcd_dev_s *lcd_dev, fb_coord_t row,
 #endif
 
 /****************************************************************************
+ * Name: ili9341_putarea
+ *
+ * Description:
+ *   Write a rectangular area to the LCD.  Unlike the default putrun()-per-row
+ *   emulation in lcd_dev.c, this sets the address window ONCE and streams
+ *   all pixel data in a single SPI transaction (when the buffer is
+ *   contiguous), eliminating 240x per-row command overhead.
+ *
+ ****************************************************************************/
+
+static int ili9341_putarea(FAR struct lcd_dev_s *dev,
+                           fb_coord_t row_start, fb_coord_t row_end,
+                           fb_coord_t col_start, fb_coord_t col_end,
+                           FAR const uint8_t *buffer, fb_coord_t stride)
+{
+  FAR struct ili9341_dev_s *priv = (FAR struct ili9341_dev_s *)dev;
+  FAR struct ili9341_lcd_s *lcd = priv->lcd;
+  size_t cols = col_end - col_start + 1;
+  size_t rows = row_end - row_start + 1;
+  size_t pxlen = cols * 2;  /* RGB565: 2 bytes/pixel */
+  FAR const uint8_t *rowp = buffer;
+  size_t r;
+
+  /* Set address window ONCE, then stream all rows in a single CS
+   * assertion.  This eliminates 240x per-row select/deselect/address
+   * overhead while keeping per-row DMA transfers small enough for
+   * the SPI controller.
+   */
+
+  lcd->select(lcd);
+  ili9341_selectarea(lcd, col_start, row_start, col_end, row_end);
+  lcd->sendcmd(lcd, ILI9341_MEMORY_WRITE);
+
+  for (r = 0; r < rows; r++)
+    {
+      lcd->sendgram(lcd, (FAR const uint16_t *)rowp, cols);
+      rowp += stride;
+    }
+
+  lcd->deselect(lcd);
+  return OK;
+}
+
+/****************************************************************************
  * Name:  ili9341_hwinitialize
  *
  * Description:
@@ -841,7 +890,8 @@ static int ili9341_getplaneinfo(FAR struct lcd_dev_s *dev,
     {
       FAR struct ili9341_dev_s *priv = (FAR struct ili9341_dev_s *)dev;
 
-      pinfo->putrun = ili9341_putrun;
+      pinfo->putrun  = ili9341_putrun;
+      pinfo->putarea = ili9341_putarea;
 #ifndef CONFIG_LCD_NOGETRUN
       pinfo->getrun = ili9341_getrun;
 #endif
