@@ -229,8 +229,9 @@ static void config_psram_read_write_data(uint8_t *buf, uint32_t addr,
 static void get_psram_tuning_configs(tuning_config_s *config);
 static void config_psram_set_tuning_regs(const tuning_param_s *params);
 #endif
-static void sweep_for_success_sample_points(const uint8_t *reference_data,
-        const tuning_config_s *config, bool is_flash, uint8_t *out_array);
+static void sweep_for_success_sample_points(const tuning_config_s *config,
+                                            bool is_flash,
+                                            uint8_t *out_array);
 static void find_max_consecutive_success_points(uint8_t *array,
             uint32_t size, uint32_t *out_length, uint32_t *out_end_index);
 #if MSPI_TIMING_FLASH_STR_MODE || MSPI_TIMING_PSRAM_STR_MODE
@@ -242,12 +243,11 @@ static uint32_t select_best_tuning_config_dtr(tuning_config_s *config,
                            uint32_t consecutive_length, uint32_t end);
 #endif
 static void select_best_tuning_config(tuning_config_s *config,
-                    uint32_t consecutive_length, uint32_t end,
-                    const uint8_t *reference_data, bool is_flash);
+                                       uint32_t consecutive_length,
+                                       uint32_t end, bool is_flash);
 static void set_timing_tuning_regs(bool control_spi1);
 static void clear_timing_tuning_regs(bool control_spi1);
-static void do_tuning(const uint8_t *reference_data,
-                tuning_config_s *timing_config, bool is_flash);
+static void do_tuning(tuning_config_s *timing_config, bool is_flash);
 #endif
 
 /****************************************************************************
@@ -269,6 +269,19 @@ extern void psram_exec_cmd(int spi_num, int mode,
  ****************************************************************************/
 
 #if ESP32S3_SPI_TIMING_FLASH_TUNING || ESP32S3_SPI_TIMING_PSRAM_TUNING
+union mspi_timing_test_data_u
+{
+  uint8_t bytes[MSPI_TIMING_TEST_DATA_LEN];
+  uint32_t words[MSPI_TIMING_TEST_DATA_LEN / sizeof(uint32_t)];
+};
+
+static RTC_DATA_ATTR union mspi_timing_test_data_u g_mspi_timing_read_data;
+
+#if ESP32S3_SPI_TIMING_FLASH_TUNING
+static RTC_DATA_ATTR union mspi_timing_test_data_u
+  g_mspi_timing_reference_data;
+#endif
+
 #if CONFIG_ESP32S3_SPIRAM_MODE_QUAD
 static uint8_t g_psram_extra_dummy;
 #endif
@@ -982,21 +995,23 @@ static void config_psram_set_tuning_regs(const tuning_param_s *params)
  *
  ****************************************************************************/
 
-static void sweep_for_success_sample_points(const uint8_t *reference_data,
-            const tuning_config_s *config, bool is_flash, uint8_t *out_array)
+static void sweep_for_success_sample_points(const tuning_config_s *config,
+                                            bool is_flash,
+                                            uint8_t *out_array)
 {
   uint32_t config_idx = 0;
-  uint8_t read_data[MSPI_TIMING_TEST_DATA_LEN];
 
   for (config_idx = 0; config_idx < config->config_num; config_idx++)
     {
-      memset(read_data, 0, MSPI_TIMING_TEST_DATA_LEN);
+      memset(g_mspi_timing_read_data.bytes, 0,
+             sizeof(g_mspi_timing_read_data.bytes));
 #if ESP32S3_SPI_TIMING_FLASH_TUNING
       if (is_flash)
         {
           config_flash_set_tuning_regs(&(config->config_table[config_idx]));
-          config_flash_read_data(read_data, MSPI_TIMING_FLASH_TEST_DATA_ADDR,
-                                 sizeof(read_data));
+          config_flash_read_data(g_mspi_timing_read_data.bytes,
+                                 MSPI_TIMING_FLASH_TEST_DATA_ADDR,
+                                 sizeof(g_mspi_timing_read_data.bytes));
         }
 #endif
 
@@ -1004,13 +1019,39 @@ static void sweep_for_success_sample_points(const uint8_t *reference_data,
       if (!is_flash)
         {
           config_psram_set_tuning_regs(&(config->config_table[config_idx]));
-          config_psram_read_write_data(read_data,
+          config_psram_read_write_data(g_mspi_timing_read_data.bytes,
                                        MSPI_TIMING_PSRAM_TEST_DATA_ADDR,
                                        MSPI_TIMING_TEST_DATA_LEN, true);
         }
 
 #endif
-      if (memcmp(reference_data, read_data, sizeof(read_data)) == 0)
+      bool match = false;
+
+#if ESP32S3_SPI_TIMING_PSRAM_TUNING
+      if (!is_flash)
+        {
+          match = true;
+          for (int i = 0; i < MSPI_TIMING_TEST_DATA_LEN / 4; i++)
+            {
+              if (g_mspi_timing_read_data.words[i] != 0xa5ff005a)
+                {
+                  match = false;
+                  break;
+                }
+            }
+        }
+#endif
+
+#if ESP32S3_SPI_TIMING_FLASH_TUNING
+      if (is_flash)
+        {
+          match = memcmp(g_mspi_timing_reference_data.bytes,
+                         g_mspi_timing_read_data.bytes,
+                         sizeof(g_mspi_timing_read_data.bytes)) == 0;
+        }
+#endif
+
+      if (match)
         {
           out_array[config_idx] = 1;
           minfo("%d, good\n", config_idx);
@@ -1202,8 +1243,8 @@ static uint32_t select_best_tuning_config_dtr(tuning_config_s *config,
  ****************************************************************************/
 
 static void select_best_tuning_config(tuning_config_s *config,
-                    uint32_t consecutive_length, uint32_t end,
-                    const uint8_t *reference_data, bool is_flash)
+                                       uint32_t consecutive_length,
+                                       uint32_t end, bool is_flash)
 {
   uint32_t best_point = 0;
   if (is_flash)
@@ -1312,8 +1353,7 @@ static void clear_timing_tuning_regs(bool control_spi1)
  *
  ****************************************************************************/
 
-static void do_tuning(const uint8_t *reference_data,
-                tuning_config_s *timing_config, bool is_flash)
+static void do_tuning(tuning_config_s *timing_config, bool is_flash)
 {
   /* We use SPI1 to tune the timing:
    * 1. Get all SPI1 sampling results.
@@ -1329,12 +1369,11 @@ static void do_tuning(const uint8_t *reference_data,
     };
 
   init_spi1_for_tuning(is_flash);
-  sweep_for_success_sample_points(reference_data, timing_config, is_flash,
-                                  sample_result);
+  sweep_for_success_sample_points(timing_config, is_flash, sample_result);
   find_max_consecutive_success_points(sample_result,
   MSPI_TIMING_CONFIG_NUM_DEFAULT, &consecutive_length, &last_success_point);
   select_best_tuning_config(timing_config, consecutive_length,
-                            last_success_point, reference_data, is_flash);
+                            last_success_point, is_flash);
 }
 
 #endif
@@ -1505,14 +1544,14 @@ void IRAM_ATTR esp32s3_spi_timing_set_mspi_psram_tuning(void)
 
   /* write data into psram, used to do timing tuning test. */
 
-  uint8_t reference_data[MSPI_TIMING_TEST_DATA_LEN];
   for (int i = 0; i < MSPI_TIMING_TEST_DATA_LEN / 4; i++)
     {
-      ((uint32_t *)reference_data)[i] = 0xa5ff005a;
+      g_mspi_timing_read_data.words[i] = 0xa5ff005a;
     }
 
-  config_psram_read_write_data(reference_data,
-  MSPI_TIMING_PSRAM_TEST_DATA_ADDR, MSPI_TIMING_TEST_DATA_LEN, false);
+  config_psram_read_write_data(g_mspi_timing_read_data.bytes,
+                               MSPI_TIMING_PSRAM_TEST_DATA_ADDR,
+                               MSPI_TIMING_TEST_DATA_LEN, false);
 
   get_psram_tuning_configs(&timing_configs);
 
@@ -1522,7 +1561,7 @@ void IRAM_ATTR esp32s3_spi_timing_set_mspi_psram_tuning(void)
 
   /* Get required config, and set them to PSRAM related registers */
 
-  do_tuning(reference_data, &timing_configs, false);
+  do_tuning(&timing_configs, false);
   esp32s3_spi_timing_set_mspi_high_speed(true);
 #endif
 }
@@ -1558,15 +1597,13 @@ void IRAM_ATTR esp32s3_spi_timing_set_mspi_flash_tuning(void)
   /* Disable the variable dummy mode when doing timing tuning. */
 
   REG_SET_FIELD(SPI_MEM_DDR_REG(1), SPI_MEM_SPI_FMEM_VAR_DUMMY, false);
-  uint8_t reference_data[MSPI_TIMING_TEST_DATA_LEN] =
-    {
-      0
-    };
-
-  config_flash_read_data(reference_data, MSPI_TIMING_FLASH_TEST_DATA_ADDR,
-                         sizeof(reference_data));
+  memset(g_mspi_timing_reference_data.bytes, 0,
+         sizeof(g_mspi_timing_reference_data.bytes));
+  config_flash_read_data(g_mspi_timing_reference_data.bytes,
+                         MSPI_TIMING_FLASH_TEST_DATA_ADDR,
+                         sizeof(g_mspi_timing_reference_data.bytes));
   get_flash_tuning_configs(&timing_configs);
-  do_tuning(reference_data, &timing_configs, true);
+  do_tuning(&timing_configs, true);
   esp32s3_spi_timing_set_mspi_high_speed(true);
 #endif
 }

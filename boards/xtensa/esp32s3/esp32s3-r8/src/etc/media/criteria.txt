@@ -1,0 +1,4 @@
+ExclusiveCriterion Music : abufsrc@Music
+ExclusiveCriterion Capture cap : abufsink@Capture
+ExclusiveCriterion MusicParams : format=s16le:ch_layout=mono:sample_rate=44100:datqmax=128
+ExclusiveCriterion CaptureParams capParams : format=s16le:ch_layout=mono:sample_rate=44100
