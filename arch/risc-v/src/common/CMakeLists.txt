@@ -27,7 +27,11 @@ list(APPEND SRCS riscv_cpuinfo.c riscv_createstack.c riscv_doirq.c
      riscv_exception.c)
 list(APPEND SRCS riscv_exit.c riscv_getintstack.c riscv_getnewintctx.c)
 list(APPEND SRCS riscv_initialize.c riscv_initialstate.c riscv_modifyreg32.c)
-list(APPEND SRCS riscv_mtimer.c riscv_nputs.c riscv_registerdump.c)
+list(APPEND SRCS riscv_nputs.c riscv_registerdump.c)
+
+if(CONFIG_ONESHOT)
+  list(APPEND SRCS riscv_mtimer.c)
+endif()
 list(APPEND SRCS riscv_releasestack.c)
 list(APPEND SRCS riscv_stackframe.c riscv_tcbinfo.c riscv_swint.c)
 list(APPEND SRCS riscv_switchcontext.c riscv_usestack.c)

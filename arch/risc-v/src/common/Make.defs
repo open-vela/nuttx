@@ -25,7 +25,10 @@ CMN_ASRCS += riscv_vectors.S riscv_exception_common.S riscv_mhartid.S
 CMN_ASRCS += riscv_saveusercontext.S
 
 # Specify C code within the common directory to be included
-CMN_CSRCS += riscv_initialize.c riscv_swint.c riscv_mtimer.c
+CMN_CSRCS += riscv_initialize.c riscv_swint.c
+ifeq ($(CONFIG_ONESHOT),y)
+  CMN_CSRCS += riscv_mtimer.c
+endif
 CMN_CSRCS += riscv_allocateheap.c riscv_createstack.c riscv_cpuinfo.c
 CMN_CSRCS += riscv_cpuidlestack.c riscv_doirq.c riscv_exit.c riscv_exception.c
 CMN_CSRCS += riscv_getnewintctx.c riscv_getintstack.c riscv_initialstate.c

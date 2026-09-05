@@ -1,6 +1,8 @@
 ############################################################################
 # arch/risc-v/src/common/Toolchain.defs
 #
+# SPDX-License-Identifier: Apache-2.0
+#
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
 # this work for additional information regarding copyright ownership.  The
@@ -64,13 +66,13 @@ ifneq ($(CONFIG_DEBUG_NOOPT),y)
 endif
 
 ifeq ($(CONFIG_FRAME_POINTER),y)
-  ARCHOPTIMIZATION += -fno-omit-frame-pointer
+  ARCHOPTIMIZATION += -fno-omit-frame-pointer -fno-optimize-sibling-calls
 else
   ARCHOPTIMIZATION += -fomit-frame-pointer
 endif
 
 ifeq ($(CONFIG_STACK_CANARIES),y)
-  ARCHOPTIMIZATION += -fstack-protector-all
+  ARCHOPTIMIZATION += $(patsubst "%",%,$(CONFIG_STACK_CANARIES_LEVEL))
 endif
 
 ifeq ($(CONFIG_STACK_USAGE),y)
@@ -229,14 +231,6 @@ ifeq ($(CONFIG_RISCV_TOOLCHAIN),GNU_RVG)
       ARCHCPUEXTFLAGS := $(ARCHCPUEXTFLAGS)_$(ARCH_RV_ISA_VENDOR_EXTENSIONS)
   endif
 
-  ifeq ($(CONFIG_ARCH_RV_ISA_ZICFILP),y)
-    ARCHCPUEXTFLAGS := $(ARCHCPUEXTFLAGS)_zicfilp
-  endif
-
-  ifeq ($(CONFIG_ARCH_RV_ISA_ZICFISS),y)
-    ARCHCPUEXTFLAGS := $(ARCHCPUEXTFLAGS)_zicfiss
-  endif
-
   # Detect abi type
 
   ifeq ($(CONFIG_ARCH_RV32),y)
@@ -317,8 +311,8 @@ ifeq ($(CONFIG_MM_KASAN_INSTRUMENT_ALL),y)
     KASAN_PARAM += asan-instrument-writes=0
   endif
 
-  ifeq ($(CONFIG_ARCH_TOOLCHAIN_CLANG),y)
-    ARCHOPTIMIZATION += $(addprefix -mllvm ,$(addprefix -,$(KASAN_PARAM)))
+  ifeq ($(CONFIG_ARM_TOOLCHAIN_CLANG),y)
+    ARCHOPTIMIZATION += $(addprefix -mllvm ,$(KASAN_PARAM))
   else
     ARCHOPTIMIZATION += $(addprefix --param ,$(KASAN_PARAM))
   endif
@@ -336,12 +330,6 @@ endif
 
 ifeq ($(CONFIG_ARCH_INSTRUMENT_ALL),y)
   ARCHOPTIMIZATION += -finstrument-functions
-endif
-
-# Shadow Stack Protection
-
-ifeq ($(CONFIG_ARCH_RV_SHADOW_STACK_ALL),y)
-  ARCHOPTIMIZATION += -fcf-protection=return
 endif
 
 # Link Time Optimization
@@ -365,6 +353,7 @@ ifeq ($(CONFIG_ARCH_TOOLCHAIN_CLANG),y)
   LD      = $(CROSSDEV)clang
   STRIP   = $(CROSSDEV)llvm-strip --strip-unneeded
   AR      = $(CROSSDEV)llvm-ar rcs
+  UNAR    = $(CROSSDEV)llvm-ar x
   NM      = $(CROSSDEV)llvm-nm
   OBJCOPY = $(CROSSDEV)llvm-objcopy
   OBJDUMP = $(CROSSDEV)llvm-objdump
@@ -389,6 +378,7 @@ else
   OBJDUMP = $(CROSSDEV)objdump
   LD      = $(CROSSDEV)ld
   AR      = $(CROSSDEV)ar rcs
+  UNAR    = $(CROSSDEV)ar x
   NM      = $(CROSSDEV)nm
 
 # Link Time Optimization
@@ -441,6 +431,10 @@ ifeq ($(CONFIG_LIBSUPCXX_TOOLCHAIN),y)
   EXTRA_LIBS += $(wildcard $(shell $(CC) $(ARCHCPUFLAGS) --print-file-name=libsupc++.a))
 endif
 
+ifeq ($(CONFIG_LIBCXXTOOLCHAIN),y)
+  EXTRA_LIBS += $(wildcard $(shell $(CC) $(ARCHCPUFLAGS) --print-file-name=libstdc++.a))
+endif
+
 ifeq ($(CONFIG_COVERAGE_TOOLCHAIN),y)
   EXTRA_LIBS += $(wildcard $(shell $(CC) $(ARCHCPUFLAGS) --print-file-name=libgcov.a))
 endif
@@ -450,20 +444,12 @@ endif
 CMODULEFLAGS = $(CFLAGS) -fvisibility=hidden
 LDMODULEFLAGS = -r -T $(call CONVERT_PATH,$(TOPDIR)/libs/libc/elf/gnu-elf.ld)
 
-ifeq ($(CONFIG_ARCH_RV32),y)
-  LDMODULEFLAGS += --oformat elf32-littleriscv
-else ifeq ($(CONFIG_ARCH_RV64ILP32),y)
-  LDMODULEFLAGS += --oformat elf32-littleriscv
-else
-  LDMODULEFLAGS += --oformat elf64-littleriscv
-endif
-
 # ELF module definitions
 
 CELFFLAGS = $(CFLAGS) -fvisibility=hidden
 CXXELFFLAGS = $(CXXFLAGS) -fvisibility=hidden
 
-LDELFFLAGS = -e __start
+LDELFFLAGS = -e _start
 
 ifeq ($(CONFIG_BINFMT_ELF_RELOCATABLE),y)
   LDELFFLAGS += -r
@@ -475,15 +461,14 @@ else
   LDELFFLAGS += --oformat elf64-littleriscv
 endif
 
-LDELFFLAGS += -T $(call CONVERT_PATH,$(TOPDIR)/libs/libc/elf/gnu-elf.ld)
+ifneq ($(CONFIG_BUILD_KERNEL),y)
+  # Flat build and protected elf entry point use crt0,
+  # Kernel build will use apps/import/scripts/crt0
 
-ifneq ($(CONFIG_BINFMT_ELF_RELOCATABLE)$(CONFIG_LTO_FULL),)
-  # Lto not support in relocatable elf
-
-  CMODULEFLAGS += -fno-lto
-  CELFFLAGS += -fno-lto
-  CXXELFFLAGS += -fno-lto
+  LDELFFLAGS += $(TOPDIR)$(DELIM)arch$(DELIM)risc-v$(DELIM)src$(DELIM)crt0.o
 endif
+
+LDELFFLAGS += -T $(call CONVERT_PATH,$(TOPDIR)/libs/libc/elf/gnu-elf.ld)
 
 # Zig toolchain
 

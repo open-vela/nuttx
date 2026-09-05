@@ -304,7 +304,7 @@ static int init_storage_partition(void)
 #elif defined (CONFIG_ESP32S3_SPIFLASH_LITTLEFS)
 
   const char *path = "/dev/esp32s3flash";
-  ret = setup_littlefs(path, mtd, "/data", 0755);
+  ret = setup_littlefs(path, mtd, "/mnt/spif", 0755);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to setup littlefs\n");

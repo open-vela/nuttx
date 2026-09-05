@@ -1,0 +1,263 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_ESP32P4
+source "arch/risc-v/src/common/espressif/Kconfig"
+
+config ESP32P4_SELECTS_REV_LESS_V3
+	bool "Select ESP32-P4 revisions <3.0 (No >=3.x Support)"
+	default n
+	---help---
+		Select this option to support ESP32-P4 revisions 0.x and 1.x.
+		Revisions higher than 3.0 (included) and revisions less than 3.0
+		have huge hardware difference.
+		Revisions higher than 3.0 (included) is not compatible with 0.x and 1.x.
+
+choice ESP32P4_REV_MIN
+	prompt "Minimum Supported ESP32-P4 Revision"
+	default ESP32P4_REV_MIN_301
+	---help---
+		Required minimum chip revision. ESP-IDF will check for it and
+		reject to boot if the chip revision fails the check.
+		This ensures the chip used will have some modifications (features, or bugfixes).
+
+		The complied binary will only support chips above this revision,
+		this will also help to reduce binary size.
+
+config ESP32P4_REV_MIN_0
+	depends on ESP32P4_SELECTS_REV_LESS_V3
+	bool "Rev v0.0"
+
+config ESP32P4_REV_MIN_1
+	depends on ESP32P4_SELECTS_REV_LESS_V3
+	bool "Rev v0.1"
+
+config ESP32P4_REV_MIN_100
+	depends on ESP32P4_SELECTS_REV_LESS_V3
+	bool "Rev v1.0"
+
+config ESP32P4_REV_MIN_300
+	bool "Rev v3.0"
+	depends on !ESP32P4_SELECTS_REV_LESS_V3
+
+config ESP32P4_REV_MIN_301
+	bool "Rev v3.1"
+	depends on !ESP32P4_SELECTS_REV_LESS_V3
+
+endchoice # ESP32P4_REV_MIN
+
+config ESP32P4_REV_MIN_FULL
+	int
+	default 0 if ESP32P4_REV_MIN_0
+	default 1 if ESP32P4_REV_MIN_1
+	default 100 if ESP32P4_REV_MIN_100
+	default 300 if ESP32P4_REV_MIN_300
+	default 301 if ESP32P4_REV_MIN_301
+
+config ESP_REV_MIN_FULL
+	int
+	default ESP32P4_REV_MIN_FULL
+
+config ESP32P4_REV_MAX_FULL
+	int
+	default 399 if !ESP32P4_SELECTS_REV_LESS_V3
+	default 199 if ESP32P4_SELECTS_REV_LESS_V3
+
+# keep in sync the "Maximum Supported Revision" description with this value
+
+config ESP_REV_MAX_FULL
+	int
+	default ESP32P4_REV_MAX_FULL
+
+config ESP_EFUSE_BLOCK_REV_MIN_FULL
+	int "Minimum Supported ESP32-P4 eFuse Block Revision"
+	default 0
+	---help---
+		Required minimum eFuse Block revision. ESP-IDF will check it at the 2nd bootloader stage
+		whether the current image can work correctly for this eFuse Block revision.
+		So that to avoid running an incompatible image on a SoC that contains breaking change in the eFuse Block.
+		If you want to update this value to run the image that not compatible with the current eFuse Block revision,
+		please contact to Espressif's business team for details:
+		https://www.espressif.com.cn/en/contact-us/sales-questions
+
+config ESP_EFUSE_BLOCK_REV_MAX_FULL
+	int
+	default 199
+	comment "Maximum Supported ESP32-P4 eFuse Block Revision (eFuse Block Rev v0.99)"
+
+# The revision in the comment must correspond to the default value of ESP_EFUSE_BLOCK_REV_MAX_FULL
+
+menu "Cache config"
+
+choice ESPRESSIF_CACHE_L2_CACHE_SIZE_SELECT
+	prompt "L2 cache size"
+	default ESPRESSIF_CACHE_L2_CACHE_256KB
+	---help---
+		L2 cache size to be set on application startup.
+
+config ESPRESSIF_CACHE_L2_CACHE_128KB
+	bool "128KB"
+
+config ESPRESSIF_CACHE_L2_CACHE_256KB
+	bool "256KB"
+
+config ESPRESSIF_CACHE_L2_CACHE_512KB
+	bool "512KB"
+
+endchoice # ESPRESSIF_CACHE_L2_CACHE_SIZE_SELECT
+
+config ESPRESSIF_CACHE_L2_CACHE_SIZE
+	hex
+	default 0x20000 if ESPRESSIF_CACHE_L2_CACHE_128KB
+	default 0x40000 if ESPRESSIF_CACHE_L2_CACHE_256KB
+	default 0x80000 if ESPRESSIF_CACHE_L2_CACHE_512KB
+
+choice ESPRESSIF_CACHE_L2_CACHE_LINE_SIZE_SELECT
+	prompt "L2 cache line size"
+	default ESPRESSIF_CACHE_L2_CACHE_LINE_64B if ESPRESSIF_CACHE_L2_CACHE_128KB
+	default ESPRESSIF_CACHE_L2_CACHE_LINE_64B if ESPRESSIF_CACHE_L2_CACHE_256KB
+	default ESPRESSIF_CACHE_L2_CACHE_LINE_128B if ESPRESSIF_CACHE_L2_CACHE_512KB
+	---help---
+		L2 cache line size to be set on application startup.
+
+config ESPRESSIF_CACHE_L2_CACHE_LINE_64B
+	bool "64 Bytes"
+	depends on ESPRESSIF_CACHE_L2_CACHE_128KB || ESPRESSIF_CACHE_L2_CACHE_256KB
+
+config ESPRESSIF_CACHE_L2_CACHE_LINE_128B
+	bool "128 Bytes"
+
+endchoice # ESPRESSIF_CACHE_L2_CACHE_LINE_SIZE_SELECT
+
+config ESPRESSIF_CACHE_L2_CACHE_LINE_SIZE
+	int
+	default 64 if ESPRESSIF_CACHE_L2_CACHE_LINE_64B
+	default 128 if ESPRESSIF_CACHE_L2_CACHE_LINE_128B
+
+config ESPRESSIF_CACHE_L1_CACHE_LINE_SIZE
+	int
+	default 64
+
+endmenu # Cache config
+
+config ESP32P4_MIPI_DSI
+	bool "Enable MIPI-DSI display driver"
+	default n
+	---help---
+		Enable the MIPI-DSI display driver for ESP32-P4.
+		This initializes the DSI host, PHY, DPI bridge and
+		EK79007 panel for 1024x600 RGB565 output.
+
+config ESP32P4_CAMERA
+	bool "ESP32-P4 MIPI-CSI Camera (V4L2)"
+	default n
+	---help---
+		Enable the MIPI-CSI camera driver for ESP32-P4.
+		This registers a V4L2 capture device at /dev/video0
+		using the SC2336 sensor via MIPI-CSI 2-lane interface.
+		Native format: RAW8 1024x600 @ 30fps.
+
+if ESP32P4_CAMERA
+
+config ESP32P4_CAMERA_DMA_SELFTEST
+	bool "Camera CSI/DMA boot self-test"
+	default n
+	---help---
+		Run a display-independent bring-up test of the CSI + DW-GDMA
+		capture path at boot: bring up the sensor, arm the DMA into a
+		scratch buffer, stream briefly, and report the completed frame
+		count and captured bytes over syslog. Useful for validating
+		frame capture without the V4L2/display stack.
+
+endif # ESP32P4_CAMERA
+
+endif # ARCH_CHIP_ESP32P4
+
+config P4_REV3_MSPI_CRASH_AFTER_POWER_UP_WORKAROUND
+	bool
+	default y if ESP32P4_REV_MIN_300
+
+config P4_REV3_MSPI_WORKAROUND_SIZE
+	hex
+	default 0x100 if ESP32P4_REV_MIN_300
+	default 0
+config ESP32P4_SDMMC
+	bool "SD/MMC Host"
+	default n
+	select ESP32P4_GPIO
+	select ESPRESSIF_DMA
+	help
+		Enable SD/MMC Host controller support.
+
+if ESP32P4_SDMMC
+
+config ESP32P4_SDMMC_SLOT0
+	bool "Enable Slot 0 (SDIO 3.0, Fixed Pins)"
+	default y
+	help
+		Slot 0: fixed pins 39-48, SDIO 3.0 / UHS-I.
+		Requires LDO for VDD_IO_5.
+
+config ESP32P4_SDMMC_SLOT1
+	bool "Enable Slot 1 (SDIO 2.0, GPIO Matrix)"
+	default n
+	help
+		Slot 1: GPIO Matrix routing, SDIO 2.0 only.
+
+config ESP32P4_SDMMC_LDO
+	bool "Enable LDO for Slot 0"
+	default y if ESP32P4_SDMMC_SLOT0
+	select ESPRESSIF_LDO
+	help
+		Enable on-chip LDO for VDD_IO_5.
+
+config ESP32P4_SDMMC_LDO_CHAN
+	int "LDO Channel"
+	default 4
+	range 1 4
+	depends on ESP32P4_SDMMC_LDO
+
+config ESP32P4_SDMMC_LDO_VOLTAGE
+	int "LDO Voltage (mV)"
+	default 3300
+	range 500 3300
+	depends on ESP32P4_SDMMC_LDO
+
+config ESP32P4_SDMMC_SLOT1_CLK
+	int "Slot 1 CLK GPIO"
+	default 43
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_CMD
+	int "Slot 1 CMD GPIO"
+	default 44
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_D0
+	int "Slot 1 D0 GPIO"
+	default 39
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_D1
+	int "Slot 1 D1 GPIO"
+	default 40
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_D2
+	int "Slot 1 D2 GPIO"
+	default 41
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_SLOT1_D3
+	int "Slot 1 D3 GPIO"
+	default 42
+	depends on ESP32P4_SDMMC_SLOT1
+
+config ESP32P4_SDMMC_DMA_DESC_NUM
+	int "DMA Descriptor Number"
+	default 4
+	range 1 16
+
+endif # ESP32P4_SDMMC
