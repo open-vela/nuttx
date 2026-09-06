@@ -25,6 +25,14 @@ include common/espressif/Make.defs
 
 CHIP_CSRCS += esp_chip_rev.c
 
+# MIPI-DSI display path: the DSI host/bridge driver together with the
+# DW-GDMA channel manager it depends on. The framebuffer device itself
+# is registered by the board layer on top of esp_mipi_dsi.h.
+ifeq ($(CONFIG_ESP32P4_MIPI_DSI),y)
+  CHIP_CSRCS += esp_mipi_dsi.c
+  CHIP_CSRCS += esp_dw_gdma_idf.c
+endif
+
 CFLAGS += ${DEFINE_PREFIX}_RETARGETABLE_LOCKING
 
 # TODO: Remove these flags once ulp/lp_core/lp_core.c is updated.

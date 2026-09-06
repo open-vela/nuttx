@@ -14,6 +14,16 @@
  * so a CPU renderer's pixels reach memory before the half goes live.
  ****************************************************************************/
 
+/****************************************************************************
+ * /dev/fb0 for the ESP32-P4-Function-EV-Board MIPI-DSI display.
+ *
+ * Registers the NuttX framebuffer character device on top of the
+ * chip-level MIPI-DSI driver (esp_mipi_dsi.h). The panel is RGB565
+ * 1024x600; when the DSI driver owns two contiguous framebuffers the
+ * device exposes double buffering through pan display, otherwise it
+ * falls back to a single visible buffer.
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 #include <nuttx/video/fb.h>
 #include <nuttx/kmalloc.h>

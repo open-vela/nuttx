@@ -25,6 +25,13 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common/espressif espressif)
 
 set(SRCS esp_chip_rev.c)
 
+# MIPI-DSI display path: the DSI host/bridge driver together with the
+# DW-GDMA channel manager it depends on. The framebuffer device itself
+# is registered by the board layer on top of esp_mipi_dsi.h.
+if(CONFIG_ESP32P4_MIPI_DSI)
+  list(APPEND SRCS esp_mipi_dsi.c esp_dw_gdma_idf.c)
+endif()
+
 target_compile_definitions(arch PRIVATE _RETARGETABLE_LOCKING)
 target_compile_options(arch PRIVATE -Wno-array-bounds -Wno-stringop-overflow)
 

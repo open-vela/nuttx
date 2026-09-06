@@ -143,6 +143,16 @@ config ESPRESSIF_CACHE_L1_CACHE_LINE_SIZE
 
 endmenu # Cache config
 
+config ESP32P4_MIPI_DSI
+	bool "MIPI-DSI display"
+	default n
+	---help---
+		Enable the MIPI-DSI display pipeline for ESP32-P4: DSI host,
+		PHY, DPI bridge and the EK79007 panel (1024x600 RGB565).
+		The DSI driver owns two framebuffers in PSRAM and the board
+		layer registers /dev/fb0 on top of it. Enable together with
+		CONFIG_DRIVERS_VIDEO and CONFIG_VIDEO_FB.
+
 endif # ARCH_CHIP_ESP32P4
 
 config P4_REV3_MSPI_CRASH_AFTER_POWER_UP_WORKAROUND
