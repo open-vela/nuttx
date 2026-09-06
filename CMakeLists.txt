@@ -701,18 +701,22 @@ endif()
 # Get linker script to use
 get_property(ldscript GLOBAL PROPERTY LD_SCRIPT)
 
-# Pre-compile linker script
+# Pre-compile linker script (support multiple LD scripts for Espressif)
 if(NOT CONFIG_ARCH_SIM AND NOT CONFIG_ARCH_TOOLCHAIN_TASKING)
-  get_filename_component(LD_SCRIPT_NAME ${ldscript} NAME)
-  set(LD_SCRIPT_TMP "${CMAKE_BINARY_DIR}/${LD_SCRIPT_NAME}.tmp")
+  set(ldscript_tmp_list)
+  foreach(ld ${ldscript})
+    get_filename_component(LD_SCRIPT_NAME ${ld} NAME)
+    set(LD_SCRIPT_TMP "${CMAKE_BINARY_DIR}/${LD_SCRIPT_NAME}.tmp")
 
-  nuttx_generate_preprocess_target(SOURCE_FILE ${ldscript} TARGET_FILE
-                                   ${LD_SCRIPT_TMP})
+    nuttx_generate_preprocess_target(SOURCE_FILE ${ld} TARGET_FILE
+                                     ${LD_SCRIPT_TMP})
 
-  add_custom_target(ldscript_tmp DEPENDS ${LD_SCRIPT_TMP})
-  add_dependencies(nuttx ldscript_tmp)
+    add_custom_target(ldscript_tmp_${LD_SCRIPT_NAME} DEPENDS ${LD_SCRIPT_TMP})
+    add_dependencies(nuttx ldscript_tmp_${LD_SCRIPT_NAME})
 
-  set(ldscript ${LD_SCRIPT_TMP})
+    list(APPEND ldscript_tmp_list ${LINK_OPTION_FLAG} ${LD_SCRIPT_TMP})
+  endforeach()
+  set(ldscript ${ldscript_tmp_list})
 endif()
 
 # Perform link
@@ -757,7 +761,7 @@ if(NOT CONFIG_ARCH_SIM)
   else()
     get_property(NUTTX_EXTRA_FLAGS GLOBAL PROPERTY NUTTX_EXTRA_FLAGS)
     target_link_options(nuttx PRIVATE ${NUTTX_EXTRA_FLAGS}
-                        ${LINK_OPTION_FLAG}${ldscript})
+                        ${ldscript})
     target_link_libraries(
       nuttx
       PRIVATE $<$<NOT:$<BOOL:${DISABLE_LINK_GROUP}>>:-Wl,--start-group>
