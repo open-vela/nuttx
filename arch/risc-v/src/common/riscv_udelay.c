@@ -54,7 +54,7 @@
  *
  ****************************************************************************/
 
-void up_udelay(useconds_t microseconds)
+void __attribute__((section(".iram1"))) up_udelay(useconds_t microseconds)
 {
   volatile int i;
 

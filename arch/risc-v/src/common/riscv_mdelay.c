@@ -41,7 +41,7 @@
  *
  ****************************************************************************/
 
-void up_mdelay(unsigned int milliseconds)
+void __attribute__((section(".iram1"))) up_mdelay(unsigned int milliseconds)
 {
   volatile unsigned int i;
   volatile unsigned int j;
