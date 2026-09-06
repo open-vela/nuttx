@@ -692,12 +692,6 @@ process_all_directory_romfs()
 
 # Link step ##################################################################
 
-# Get linker option
-
-if(NOT DEFINED LINK_OPTION_FLAG)
-  set(LINK_OPTION_FLAG "-T")
-endif()
-
 # Get linker script to use
 get_property(ldscript GLOBAL PROPERTY LD_SCRIPT)
 
@@ -714,7 +708,9 @@ if(NOT CONFIG_ARCH_SIM AND NOT CONFIG_ARCH_TOOLCHAIN_TASKING)
     add_custom_target(ldscript_tmp_${LD_SCRIPT_NAME} DEPENDS ${LD_SCRIPT_TMP})
     add_dependencies(nuttx ldscript_tmp_${LD_SCRIPT_NAME})
 
-    list(APPEND ldscript_tmp_list ${LINK_OPTION_FLAG} ${LD_SCRIPT_TMP})
+    # Every script must be passed with its own -T; a bare path would be
+    # consumed as an input file and its memory layout would be ignored.
+    list(APPEND ldscript_tmp_list -T ${LD_SCRIPT_TMP})
   endforeach()
   set(ldscript ${ldscript_tmp_list})
 endif()
