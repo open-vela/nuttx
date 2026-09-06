@@ -275,6 +275,7 @@ begin_packed_struct struct usrsock_message_socket_event_s
 
 /* Global protection lock for usrsock socket */
 
+#ifdef CONFIG_NET_USRSOCK
 DECLARE_PER_CPU_BMP(rmutex_t, g_usrsock_lock);
 #define g_usrsock_lock this_cpu_var_bmp(g_usrsock_lock)
 
@@ -427,5 +428,7 @@ int usrsock_request(FAR struct iovec *iov, unsigned int iovcnt);
  ****************************************************************************/
 
 void usrsock_register(void);
+
+#endif /* CONFIG_NET_USRSOCK */
 
 #endif /* __INCLUDE_NUTTX_NET_USRSOCK_H */
