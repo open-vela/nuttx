@@ -331,6 +331,10 @@ static const struct mmcsd_cmdinfo_s g_cmd12  =
 {
   CMD12,  MMCSD_CMDRESP_R1, 0xff
 };
+static const struct mmcsd_cmdinfo_s g_cmd13  =
+{
+  CMD13,  MMCSD_CMDRESP_R2, 0xff
+};
 static const struct mmcsd_cmdinfo_s g_cmd16  =
 {
   CMD16,  MMCSD_CMDRESP_R1, 0xff
@@ -1176,6 +1180,7 @@ static ssize_t mmcsd_read(FAR struct inode *inode, FAR unsigned char *buffer,
   int retry_count = 0;
   size_t nbytes;
   off_t offset;
+  uint32_t status;
   uint8_t response;
   int i;
   int ret;
@@ -1521,9 +1526,30 @@ retry:
       SPI_SEND(spi, MMCSD_SPIDT_STOPTRANS);
     }
 
-  /* Wait until the card is no longer busy */
+  /* Wait until the card has completed internal programming.  A data
+   * response token only confirms that the block was received; programming
+   * can still fail while the card is busy.
+   */
 
-  mmcsd_waitready(slot);
+  ret = mmcsd_waitready(slot);
+  if (ret != OK)
+    {
+      ferr("ERROR: Card did not finish programming: %d\n", ret);
+      goto errout_with_lock;
+    }
+
+  /* Read the card status before reporting success so write-protect, ECC,
+   * controller and address errors are not silently treated as completed
+   * writes.
+   */
+
+  status = mmcsd_sendcmd(slot, &g_cmd13, 0);
+  if (status != 0)
+    {
+      ferr("ERROR: Card programming status: %04" PRIx32 "\n", status);
+      goto errout_with_lock;
+    }
+
   SPI_SELECT(spi, SPIDEV_MMCSD(0), false);
   SPI_SEND(spi, 0xff);
   mmcsd_unlock(slot);
