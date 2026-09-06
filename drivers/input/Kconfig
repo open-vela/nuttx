@@ -307,6 +307,12 @@ config FT5X06_NPOLLWAITERS
 	---help---
 		Maximum number of threads that can be waiting on poll()
 
+config FT5X06_SAMPLE_NBUFFER
+	int "Number of touch data buffer"
+	default 8
+	---help---
+		Number of touch sample buffers allocated for the driver.
+
 endif # INPUT_FT5X06
 
 config INPUT_ADS7843E
