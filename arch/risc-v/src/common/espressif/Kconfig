@@ -3,7 +3,7 @@
 # see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-if ARCH_CHIP_ESPRESSIF || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32C3_GENERIC
+if ARCH_CHIP_ESPRESSIF || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32C3_GENERIC || ARCH_CHIP_ESP32P4
 
 choice ESPRESSIF_CHIP_SERIES
 	prompt "Chip Series"
@@ -189,6 +189,63 @@ config ESPRESSIF_HAL_ASSERTIONS
 config ESPRESSIF_SOC_RTC_MEM_SUPPORTED
 	bool
 	default n
+
+menu "Espressif Log Level"
+	visible if DEBUG_FEATURES
+
+config ESPRESSIF_LOG_LEVEL_NONE
+	bool "NONE"
+	depends on !DEBUG_FEATURES && !DEBUG_ERROR && !DEBUG_WARN && !DEBUG_INFO
+	default y
+	---help---
+		No log output from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_ERROR
+	bool "ERROR"
+	depends on DEBUG_ERROR
+	default y
+	---help---
+		Display critical errors from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_WARN
+	bool "WARN"
+	depends on DEBUG_WARN
+	default y
+	---help---
+		Display warning messages from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_INFO
+	bool "INFO"
+	depends on DEBUG_INFO
+	default y
+	---help---
+		Display information messages from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_DEBUG
+	bool "DEBUG"
+	depends on DEBUG_INFO
+	default n
+	---help---
+		Display extra information from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL_VERBOSE
+	bool "VERBOSE"
+	depends on DEBUG_INFO
+	default n
+	---help---
+		Display bigger chunks of debugging information, or frequent messages
+		which can potentially flood the output from Espressif log messages.
+
+config ESPRESSIF_LOG_LEVEL
+	int
+	default 5 if ESPRESSIF_LOG_LEVEL_VERBOSE
+	default 4 if ESPRESSIF_LOG_LEVEL_DEBUG
+	default 3 if ESPRESSIF_LOG_LEVEL_INFO
+	default 2 if ESPRESSIF_LOG_LEVEL_WARN
+	default 1 if ESPRESSIF_LOG_LEVEL_ERROR
+	default 0 if ESPRESSIF_LOG_LEVEL_NONE
+
+endmenu # Espressif Log Level
 
 menu "Bootloader and Image Configuration"
 
@@ -1405,74 +1462,7 @@ config ESPRESSIF_FLASH_MODE_QOUT
 
 endchoice # ESPRESSIF_FLASH_MODE
 
-choice ESPRESSIF_FLASH_FREQ
-	prompt "SPI Flash frequency"
-	default ESPRESSIF_FLASH_FREQ_40M if ESP32P4_REV_MIN_0
-	default ESPRESSIF_FLASH_FREQ_40M if ARCH_CHIP_ESP32P4 && ESPRESSIF_IDF_ENV_FPGA
-	default ESPRESSIF_FLASH_FREQ_80M if ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32P4
-	default ESPRESSIF_FLASH_FREQ_64M if ARCH_CHIP_ESP32H2
-	---help---
-		SPI Flash frequency.
 
-config ESPRESSIF_FLASH_FREQ_80M
-	bool "80 MHz"
-	depends on ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32P4
-	depends on !ESP32P4_REV_MIN_0
-
-config ESPRESSIF_FLASH_FREQ_64M
-	bool "64 MHz"
-	depends on ARCH_CHIP_ESP32H2
-
-config ESPRESSIF_FLASH_FREQ_40M
-	bool "40 MHz"
-	depends on ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32P4
-
-config ESPRESSIF_FLASH_FREQ_26M
-	bool "26 MHz"
-	depends on ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6
-
-config ESPRESSIF_FLASH_FREQ_20M
-	bool "20 MHz"
-	depends on ARCH_CHIP_ESP32C3 || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32P4
-
-endchoice # ESPRESSIF_FLASH_FREQ
-
-config ESPRESSIF_FLASH_FREQ
-	string
-	# On some of the ESP chips, max boot frequency would be equal to (or even lower than) 80m.
-	# We currently define this to `80m`.
-	default '80m' if ESPRESSIF_FLASH_FREQ_120M
-	default '80m' if ESPRESSIF_FLASH_FREQ_80M
-	default '60m' if ESPRESSIF_FLASH_FREQ_60M
-	default '48m' if ESPRESSIF_FLASH_FREQ_64M
-	default '48m' if ESPRESSIF_FLASH_FREQ_48M
-	default '24m' if ESPRESSIF_FLASH_FREQ_32M
-	default '30m' if ESPRESSIF_FLASH_FREQ_30M
-	default '24m' if ESPRESSIF_FLASH_FREQ_24M
-	default '40m' if ESPRESSIF_FLASH_FREQ_40M
-	default '26m' if ESPRESSIF_FLASH_FREQ_26M
-	default '20m' if ESPRESSIF_FLASH_FREQ_20M
-	default '12m' if ESPRESSIF_FLASH_FREQ_16M
-	default '20m' # if no clock can match in bin headers, go with minimal.
-
-config ESPRESSIF_SPI_FLASH_USE_ROM_CODE
-	bool "Use SPI flash driver in ROM"
-	default n
-	depends on ARCH_CHIP_ESP32C3
-	---help---
-		Use functions in ROM for SPI flash driver instead of
-		source code.
-
-config ESPRESSIF_SPI_FLASH_USE_32BIT_ADDRESS
-	bool "SPI flash uses 32-bit address"
-	default n
-	---help---
-		SPI flash driver in ROM only support 24-bit address access,
-		if select the option, it will force to use source code instead
-		of functions in ROM, so that SPI flash driver can access full
-		32-bit address.
-
-endmenu # SPI Flash Configuration
 
 if ESPRESSIF_SPIFLASH
 comment "General storage MTD configuration"
@@ -1505,14 +1495,16 @@ endif # ESPRESSIF_SPIFLASH
 
 choice ESPRESSIF_FLASH_FREQ
 	prompt "SPI Flash frequency"
-	default ESPRESSIF_FLASH_FREQ_80M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	default ESPRESSIF_FLASH_FREQ_40M if ESPRESSIF_ESP32P4 && (ESP32P4_REV_MIN_0 || ESPRESSIF_IDF_ENV_FPGA)
+	default ESPRESSIF_FLASH_FREQ_80M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
 	default ESPRESSIF_FLASH_FREQ_48M if ESPRESSIF_ESP32H2
 	---help---
 		SPI Flash frequency.
 
 config ESPRESSIF_FLASH_FREQ_80M
 	bool "80 MHz"
-	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
+	depends on !ESP32P4_REV_MIN_0
 
 config ESPRESSIF_FLASH_FREQ_48M
 	bool "48 MHz"
@@ -1520,7 +1512,7 @@ config ESPRESSIF_FLASH_FREQ_48M
 
 config ESPRESSIF_FLASH_FREQ_40M
 	bool "40 MHz"
-	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
 
 config ESPRESSIF_FLASH_FREQ_26M
 	bool "26 MHz"
@@ -1528,7 +1520,7 @@ config ESPRESSIF_FLASH_FREQ_26M
 
 config ESPRESSIF_FLASH_FREQ_20M
 	bool "20 MHz"
-	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
 
 endchoice # ESPRESSIF_FLASH_FREQ
 
