@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_tickless.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -95,7 +97,7 @@ static int esp_tickless_isr(int irq, void *context, void *arg)
   systimer_ll_clear_alarm_int(systimer_hal.dev,
                               SYSTIMER_ALARM_OS_TICK_CORE0);
 
-  nxsched_timer_expiration();
+  nxsched_process_timer();
 
   return OK;
 }
@@ -115,7 +117,7 @@ static int esp_tickless_isr(int irq, void *context, void *arg)
  *
  * Returned Value:
  *   The time in system ticks remaining for idle.
- *   Zero means system is busy.
+ *   Zero means that the system is in idle mode without any timer running.
  *
  ****************************************************************************/
 
@@ -233,7 +235,7 @@ int IRAM_ATTR up_timer_gettime(struct timespec *ts)
  * Description:
  *   Cancel the interval timer and return the time remaining on the timer.
  *   These two steps need to be as nearly atomic as possible.
- *   nxsched_timer_expiration() will not be called unless the timer is
+ *   nxsched_process_timer() will not be called unless the timer is
  *   restarted with up_timer_start().
  *
  *   If, as a race condition, the timer has already expired when this
@@ -323,14 +325,14 @@ int IRAM_ATTR up_timer_cancel(struct timespec *ts)
  * Name: up_timer_start
  *
  * Description:
- *   Start the interval timer.  nxsched_timer_expiration() will be
+ *   Start the interval timer.  nxsched_process_timer() will be
  *   called at the completion of the timeout (unless up_timer_cancel
  *   is called to stop the timing.
  *
  *   Provided by platform-specific code and called from the RTOS base code.
  *
  * Input Parameters:
- *   ts - Provides the time interval until nxsched_timer_expiration() is
+ *   ts - Provides the time interval until nxsched_process_timer() is
  *        called.
  *
  * Returned Value:
@@ -357,8 +359,8 @@ int IRAM_ATTR up_timer_start(const struct timespec *ts)
       up_timer_cancel(NULL);
     }
 
-  target_us = (uint64_t)ts->tv_sec * USEC_PER_SEC +
-                (uint64_t)(ts->tv_nsec / NSEC_PER_USEC);
+  target_us = ts->tv_sec * USEC_PER_SEC +
+              (ts->tv_nsec / NSEC_PER_USEC);
 
   alarm_ticks  = systimer_hal_get_counter_value(&systimer_hal,
                                                 SYSTIMER_COUNTER_OS_TICK);
@@ -399,7 +401,15 @@ void up_timer_initialize(void)
 {
   g_timer_started = false;
 
-  periph_module_enable(PERIPH_SYSTIMER_MODULE);
+  PERIPH_RCC_ACQUIRE_ATOMIC(PERIPH_SYSTIMER_MODULE, ref_count)
+    {
+      if (ref_count == 0)
+        {
+          systimer_ll_enable_bus_clock(true);
+          systimer_ll_reset_register();
+        }
+    }
+
   systimer_hal_init(&systimer_hal);
   systimer_hal_tick_rate_ops_t ops =
     {
@@ -421,15 +431,13 @@ void up_timer_initialize(void)
                                         true);
   systimer_hal_enable_counter(&systimer_hal, SYSTIMER_COUNTER_OS_TICK);
 
-  esp_setup_irq(SYSTIMER_TARGET0_EDGE_INTR_SOURCE,
+  esp_setup_irq(ETS_SYSTIMER_TARGET0_INTR_SOURCE,
                 ESP_IRQ_PRIORITY_DEFAULT,
-                SYSTIMER_TRIGGER_TYPE);
-
-  /* Attach the timer interrupt. */
-
-  irq_attach(ESP_IRQ_SYSTIMER_TARGET0_EDGE, (xcpt_t)esp_tickless_isr, NULL);
+                SYSTIMER_TRIGGER_TYPE,
+                esp_tickless_isr,
+                NULL);
 
   /* Enable the allocated CPU interrupt. */
 
-  up_enable_irq(ESP_IRQ_SYSTIMER_TARGET0_EDGE);
+  up_enable_irq(ESP_SOURCE2IRQ(ETS_SYSTIMER_TARGET0_INTR_SOURCE));
 }

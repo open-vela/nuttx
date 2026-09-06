@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_ets_timer_legacy.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this args for additional information regarding copyright ownership.  The
@@ -29,13 +31,12 @@
  ****************************************************************************/
 
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 #include <string.h>
 #include <stdbool.h>
 
 #include "sdkconfig.h"
-#include "esp_timer.h"
 #include "rom/ets_sys.h"
 #include "esp_attr.h"
 
@@ -132,6 +133,8 @@ void ets_timer_setfn(ets_timer *ptimer,
 
       hr_timer_args.arg      = parg;
       hr_timer_args.callback = pfunction;
+      hr_timer_args.name     = "ets_timer";
+      hr_timer_args.skip_unhandled_events = false;
 
       ret = esp_hr_timer_create(&hr_timer_args, &hr_timers_p);
 
@@ -200,7 +203,7 @@ void IRAM_ATTR ets_timer_arm(ets_timer *ptimer,
                              uint32_t time_ms,
                              bool repeat_flag)
 {
-  uint64_t time_us = 1000LL * (uint64_t) time_ms;
+  uint64_t time_us = 1000LL * (uint64_t)time_ms;
 
   assert(timer_initialized(ptimer));
 

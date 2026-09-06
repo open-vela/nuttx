@@ -1,0 +1,962 @@
+/****************************************************************************
+ * arch/risc-v/src/common/espressif/esp_pm.c
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
+#include <nuttx/config.h>
+
+#include <nuttx/arch.h>
+#include <nuttx/irq.h>
+#include <nuttx/power/pm.h>
+
+#include <nuttx/debug.h>
+
+#include "include/esp_pm.h"
+#include "espressif/esp_pm.h"
+#include "esp_hr_timer.h"
+
+#ifdef CONFIG_SCHED_TICKLESS
+#  include "esp_tickless.h"
+#endif
+#include "esp_sleep.h"
+#include "soc/rtc.h"
+#include "esp_sleep_internal.h"
+#include "esp_pmu.h"
+#include "esp_attr.h"
+#include "esp_private/pm_impl.h"
+
+#ifdef CONFIG_PM_EXT1_WAKEUP
+#  include "driver/rtc_io.h"
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP
+#  include "driver/gpio.h"
+#  include "espressif/esp_gpio.h"
+#  include "hal/gpio_types.h"
+#  include "soc/soc_caps.h"
+#endif
+#ifdef CONFIG_PM_UART_WAKEUP
+#  include "driver/uart_wakeup.h"
+#  include "hal/uart_types.h"
+#  include "hal/uart_hal.h"
+#  include "hal/uart_ll.h"
+#endif
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#if defined(CONFIG_ARCH_CHIP_ESP32C3) || \
+    defined(CONFIG_ARCH_CHIP_ESP32C6)
+#  define CHECK_VDD_SPI 1
+#  if defined(CONFIG_ARCH_CHIP_ESP32C6)
+/* GPIO20 - GPIO26 are powered by VDD_SPI Powered */
+#    define CHECK_VDD_SPI_PIN_MASKS 133169152
+#  else
+/* GPIO19 - GPIO24 are powered by VDD_SPI Powered */
+#    define CHECK_VDD_SPI_PIN_MASKS 33030144
+#  endif /* CONFIG_ARCH_CHIP_ESP32C6 */
+#endif /* CONFIG_ARCH_CHIP_ESP32C3_GENERIC || CONFIG_ARCH_CHIP_ESP32C6 */
+
+#ifdef CONFIG_PM_EXT0_WAKEUP
+#  define EXT0_WAIT_TIME_US 5000000
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP
+#  define EXT1_WAIT_TIME_US 5000000
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP
+#  define GPIO_WAIT_TIME_US 5000000
+#endif
+#ifdef CONFIG_PM_UART_WAKEUP
+#  define UART_WAIT_TIME_US 5000000
+#endif
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+/* Wakeup reasons string. */
+
+const char *g_wakeup_reasons[] =
+{
+  "undefined",
+  "",
+  "",
+  "EXT1",
+  "Timer",
+  "",
+  "ULP",
+  "GPIO",
+  "UART",
+  "",
+  "",
+  "",
+  "",
+  "",
+  ""
+};
+
+static esp_sleep_wakeup_cause_t g_last_wakeup_reason =
+                                  ESP_SLEEP_WAKEUP_UNDEFINED;
+static uint64_t g_last_wakeup_time = 0;
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+#ifdef CONFIG_PM_EXT0_WAKEUP
+/****************************************************************************
+ * Name: esp_pm_ext0_wakeup_prepare
+ *
+ * Description:
+ *   Configure ext0 gpios to use as wakeup source.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void IRAM_ATTR esp_pm_ext0_wakeup_prepare(void)
+{
+  int pin = CONFIG_PM_EXT0_WAKEUP_GPIO;
+#  ifdef CONFIG_PM_EXT0_WAKEUP_TRIGGER_LOW
+  int level_mode = 0;
+#  else
+  int level_mode = 1;
+#  endif /* CONFIG_PM_EXT0_WAKEUP */
+  esp_sleep_enable_ext0_wakeup(pin, level_mode);
+}
+#endif /* CONFIG_PM_EXT0_WAKEUP */
+
+#ifdef CONFIG_PM_EXT1_WAKEUP
+/****************************************************************************
+ * Name: esp_pm_get_ext1_io_mask
+ *
+ * Description:
+ *   Get ext1 IO mask value from configured wakeup pins.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   A 64-bit unsigned integer where each bit corresponds to an RTC GPIO pin
+ *   that has been configured as an ext1 wakeup source.
+ *
+ ****************************************************************************/
+
+static uint64_t IRAM_ATTR esp_pm_get_ext1_io_mask(void)
+{
+  uint64_t io_mask = 0;
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO0
+  io_mask |= BIT(0);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO1
+  io_mask |= BIT(1);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO2
+  io_mask |= BIT(2);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO3
+  io_mask |= BIT(3);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO4
+  io_mask |= BIT(4);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO5
+  io_mask |= BIT(5);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO6
+  io_mask |= BIT(6);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO7
+  io_mask |= BIT(7);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO8
+  io_mask |= BIT(8);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO9
+  io_mask |= BIT(9);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO10
+  io_mask |= BIT(10);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO11
+  io_mask |= BIT(11);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO12
+  io_mask |= BIT(12);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO13
+  io_mask |= BIT(13);
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP_RTC_GPIO14
+  io_mask |= BIT(14);
+#endif
+
+  return io_mask;
+}
+
+/****************************************************************************
+ * Name: esp_pm_ext1_wakeup_prepare
+ *
+ * Description:
+ *   Configure ext1 gpios to use as wakeup source.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void IRAM_ATTR esp_pm_ext1_wakeup_prepare(void)
+{
+  int pin_mask;
+  uint64_t io_mask;
+#  ifdef CONFIG_PM_EXT1_WAKEUP_TRIGGER_ANY_LOW
+  esp_sleep_ext1_wakeup_mode_t level_mode = ESP_EXT1_WAKEUP_ANY_LOW;
+#  else
+  esp_sleep_ext1_wakeup_mode_t level_mode = ESP_EXT1_WAKEUP_ANY_HIGH;
+#  endif /* CONFIG_PM_EXT1_WAKEUP */
+  io_mask = esp_pm_get_ext1_io_mask();
+  for (int i = 0; i < CONFIG_SOC_GPIO_PIN_COUNT; i++)
+    {
+      pin_mask = BIT(i);
+      if ((io_mask & pin_mask) != 0)
+        {
+          esp_sleep_enable_ext1_wakeup_io(pin_mask, level_mode);
+        }
+    }
+
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+}
+#endif /* CONFIG_PM_EXT1_WAKEUP */
+
+#ifdef CONFIG_PM_GPIO_WAKEUP
+/****************************************************************************
+ * Name: esp_pm_get_gpio_mask
+ *
+ * Description:
+ *   Get GPIO mask value from configured wakeup pins.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   A 64-bit unsigned integer where each bit corresponds to an GPIO pin
+ *   that has been configured as an GPIO wakeup source.
+ *
+ ****************************************************************************/
+
+static uint64_t IRAM_ATTR esp_pm_get_gpio_mask(void)
+{
+  uint64_t io_mask = 0;
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO0
+  io_mask |= BIT64(0);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO1
+  io_mask |= BIT64(1);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO2
+  io_mask |= BIT64(2);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO3
+  io_mask |= BIT64(3);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO4
+  io_mask |= BIT64(4);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO5
+  io_mask |= BIT64(5);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO6
+  io_mask |= BIT64(6);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO7
+  io_mask |= BIT64(7);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO8
+  io_mask |= BIT64(8);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO9
+  io_mask |= BIT64(9);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO10
+  io_mask |= BIT64(10);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO11
+  io_mask |= BIT64(11);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO12
+  io_mask |= BIT64(12);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO13
+  io_mask |= BIT64(13);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO14
+  io_mask |= BIT64(14);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO15
+  io_mask |= BIT64(15);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO16
+  io_mask |= BIT64(16);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO17
+  io_mask |= BIT64(17);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO18
+  io_mask |= BIT64(18);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO19
+  io_mask |= BIT64(19);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO20
+  io_mask |= BIT64(20);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO21
+  io_mask |= BIT64(21);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO22
+  io_mask |= BIT64(22);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO23
+  io_mask |= BIT64(23);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO24
+  io_mask |= BIT64(24);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO25
+  io_mask |= BIT64(25);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO26
+  io_mask |= BIT64(26);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO27
+  io_mask |= BIT64(27);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO28
+  io_mask |= BIT64(28);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO29
+  io_mask |= BIT64(29);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO30
+  io_mask |= BIT64(30);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO31
+  io_mask |= BIT64(31);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO32
+  io_mask |= BIT64(32);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO33
+  io_mask |= BIT64(33);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO34
+  io_mask |= BIT64(34);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO35
+  io_mask |= BIT64(35);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO36
+  io_mask |= BIT64(36);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO37
+  io_mask |= BIT64(37);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO38
+  io_mask |= BIT64(38);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO39
+  io_mask |= BIT64(39);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO40
+  io_mask |= BIT64(40);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO41
+  io_mask |= BIT64(41);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO42
+  io_mask |= BIT64(42);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO43
+  io_mask |= BIT64(43);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO44
+  io_mask |= BIT64(44);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO45
+  io_mask |= BIT64(45);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO46
+  io_mask |= BIT64(46);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO47
+  io_mask |= BIT64(47);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO48
+  io_mask |= BIT64(48);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO49
+  io_mask |= BIT64(49);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO50
+  io_mask |= BIT64(50);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO51
+  io_mask |= BIT64(51);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO52
+  io_mask |= BIT64(52);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO53
+  io_mask |= BIT64(53);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO54
+  io_mask |= BIT64(54);
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP_GPIO55
+  io_mask |= BIT64(55);
+#endif
+
+  return io_mask;
+}
+
+/****************************************************************************
+ * Name: esp_pm_gpio_wakeup_prepare
+ *
+ * Description:
+ *   Configure gpios to use as gpio wakeup source.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void IRAM_ATTR esp_pm_gpio_wakeup_prepare(void)
+{
+  uint64_t mask_value = esp_pm_get_gpio_mask();
+  uint64_t pin_mask = 0;
+#  ifdef CONFIG_PM_GPIO_WAKEUP_TRIGGER_ANY_LOW
+  gpio_int_type_t level_mode = GPIO_INTR_LOW_LEVEL;
+#  else
+  gpio_int_type_t level_mode = GPIO_INTR_HIGH_LEVEL;
+#  endif /* CONFIG_PM_EXT1_WAKEUP */
+
+  for (int i = 0; i < CONFIG_SOC_GPIO_PIN_COUNT; i++)
+    {
+      pin_mask = BIT64(i);
+      if ((mask_value & pin_mask) != 0)
+        {
+          gpio_wakeup_enable(i, level_mode);
+        }
+    }
+
+#ifdef CHECK_VDD_SPI
+  if ((mask_value & CHECK_VDD_SPI_PIN_MASKS) != 0)
+    {
+      esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_ON);
+    }
+#endif /* CHECK_VDD_SPI */
+
+  esp_sleep_enable_gpio_wakeup();
+}
+#endif /* CONFIG_PM_GPIO_WAKEUP */
+
+#ifdef CONFIG_PM_UART_WAKEUP
+/****************************************************************************
+ * Name: esp_pm_uart_wakeup_prepare
+ *
+ * Description:
+ *   Configure UART wake-up mode
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static void IRAM_ATTR esp_pm_uart_wakeup_prepare(void)
+{
+#  if defined(CONFIG_PM_UART_WAKEUP_UART0)
+  int uart_num = 0;
+#  elif defined(CONFIG_PM_UART_WAKEUP_UART1)
+  int uart_num = 1;
+#  endif
+  uart_wakeup_cfg_t wake_up_cfg =
+    {
+#ifdef CONFIG_PM_UART_WAKEUP_ACTIVE_EDGE_THRESHOLD_MODE
+      .wakeup_mode = UART_WK_MODE_ACTIVE_THRESH,
+      .rx_edge_threshold = CONFIG_PM_UART_WAKEUP_ACTIVE_EDGE_THRESHOLD
+#endif
+#ifdef CONFIG_PM_UART_WAKEUP_FIFO_THRESHOLD_MODE
+      .wakeup_mode = UART_WK_MODE_FIFO_THRESH,
+      .rx_fifo_threshold = CONFIG_PM_UART_WAKEUP_FIFO_THRESHOLD
+#endif
+#ifdef CONFIG_PM_UART_WAKEUP_START_BIT_MODE
+      .wakeup_mode = UART_WK_MODE_START_BIT,
+#endif
+#ifdef CONFIG_PM_UART_WAKEUP_CHAR_SEQ_MODE
+      .wakeup_mode = UART_WK_MODE_CHAR_SEQ,
+      .wake_chars_seq = CONFIG_PM_UART_WAKEUP_CHAR_SEQ
+#endif
+    };
+
+  esp_sleep_set_console_uart_handling_mode(ESP_SLEEP_ALWAYS_FLUSH_UART);
+  uart_wakeup_setup(uart_num, &wake_up_cfg);
+  esp_sleep_enable_uart_wakeup(uart_num);
+}
+#endif /* CONFIG_PM_UART_WAKEUP */
+
+#ifdef CONFIG_ESPRESSIF_AUTO_SLEEP
+
+/****************************************************************************
+ * Name: esp_pm_skip_light_sleep
+ *
+ * Description:
+ *   Callback for the power manager's "skip light sleep" hook. This function
+ *   checks if the system should defer entering light sleep after waking up
+ *   from any supported wakeup source (EXT0, EXT1, GPIO, UART). It compares
+ *   the current time to the last wakeup time for each source. If the system
+ *   is still within the configured guard window for any wakeup source, it
+ *   returns true to skip light sleep and let peripheral activity finish. If
+ *   the guard window has elapsed or there was no wakeup, it returns false
+ *   and allows light sleep to proceed.
+ *
+ *   Placed in IRAM because it runs in timing-critical power management
+ *   decision paths.
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   true  - Skip light sleep (recent EXT0, EXT1, GPIO, or UART wakeup still
+ *           within the configured guard window).
+ *   false - Allow light sleep (no relevant wakeup or guard window elapsed).
+ *
+ ****************************************************************************/
+
+static bool IRAM_ATTR esp_pm_skip_light_sleep(void)
+{
+  bool skip = false;
+#if defined(CONFIG_PM_EXT0_WAKEUP) || \
+    defined(CONFIG_PM_EXT1_WAKEUP) || \
+    defined(CONFIG_PM_GPIO_WAKEUP) || \
+    defined(CONFIG_PM_UART_WAKEUP)
+  uint64_t current_time = esp_hr_timer_time_us();
+#endif
+
+#ifdef CONFIG_PM_EXT0_WAKEUP
+  if (g_last_wakeup_reason == ESP_SLEEP_WAKEUP_EXT0 &&
+      current_time < (g_last_wakeup_time + EXT0_WAIT_TIME_US))
+    {
+      pwrinfo("EXT0 wakeup still within guard window\n");
+      skip = true;
+    }
+#endif
+
+#ifdef CONFIG_PM_EXT1_WAKEUP
+  if (g_last_wakeup_reason == ESP_SLEEP_WAKEUP_EXT1 &&
+      current_time < (g_last_wakeup_time + EXT1_WAIT_TIME_US))
+    {
+      pwrinfo("EXT1 wakeup still within guard window\n");
+      skip = true;
+    }
+#endif
+
+#ifdef CONFIG_PM_GPIO_WAKEUP
+  if (g_last_wakeup_reason == ESP_SLEEP_WAKEUP_GPIO &&
+      current_time < (g_last_wakeup_time + GPIO_WAIT_TIME_US))
+    {
+      pwrinfo("GPIO wakeup still within guard window\n");
+      skip = true;
+    }
+#endif
+
+#ifdef CONFIG_PM_UART_WAKEUP
+  if (g_last_wakeup_reason == ESP_SLEEP_WAKEUP_UART &&
+      current_time < (g_last_wakeup_time + UART_WAIT_TIME_US))
+    {
+      pwrinfo("UART wakeup still within guard window\n");
+      skip = true;
+    }
+#endif
+
+  return skip;
+}
+
+/****************************************************************************
+ * Name: esp_pm_light_sleep_exit_cb
+ *
+ * Description:
+ *   Store wakeup reason and timestamp on light sleep exit.
+ *
+ * Input Parameters:
+ *   sleep_time_us - Actual sleep time in microseconds (unused).
+ *   arg           - User callback argument (unused).
+ *
+ * Returned Value:
+ *   ESP_OK
+ *
+ ****************************************************************************/
+
+static esp_err_t IRAM_ATTR esp_pm_light_sleep_exit_cb(int64_t sleep_time_us,
+                                                      void *arg)
+{
+  esp_sleep_wakeup_cause_t wc;
+  uint64_t tw;
+
+  UNUSED(sleep_time_us);
+  UNUSED(arg);
+
+  wc = esp_sleep_get_wakeup_cause();
+  tw = esp_hr_timer_time_us();
+
+  pwrinfo("Light sleep exit: %s, time: %lld\n", g_wakeup_reasons[wc], tw);
+
+  esp_pm_wakeup_set_last_reason((int32_t)wc);
+  esp_pm_wakeup_set_last_time(tw);
+
+  return ESP_OK;
+}
+#endif /* CONFIG_ESPRESSIF_AUTO_SLEEP */
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: esp_pm_wakeup_set_last_reason
+ *
+ * Description:
+ *   Store the sleep exit wakeup cause after light sleep.
+ *
+ * Input Parameters:
+ *   reason - Value from esp_sleep_get_wakeup_cause().
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void esp_pm_wakeup_set_last_reason(int32_t reason)
+{
+  g_last_wakeup_reason = reason;
+}
+
+/****************************************************************************
+ * Name: esp_pm_wakeup_set_last_time
+ *
+ * Description:
+ *   Store the high-resolution timestamp (microseconds) for the last light
+ *   sleep exit, together with the cause from
+ *   esp_pm_wakeup_set_last_reason().
+ *
+ * Input Parameters:
+ *   time_us - Time from esp_hr_timer_time_us() at exit from light sleep.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void esp_pm_wakeup_set_last_time(uint64_t time_us)
+{
+  g_last_wakeup_time = time_us;
+}
+
+/****************************************************************************
+ * Name: esp_pm_sleep_enable_timer_wakeup
+ *
+ * Description:
+ *   Configure wakeup interval
+ *
+ * Input Parameters:
+ *   time_in_us - Sleep duration in microseconds.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void esp_pm_sleep_enable_timer_wakeup(uint64_t time_in_us)
+{
+  esp_sleep_enable_timer_wakeup(time_in_us);
+}
+
+/****************************************************************************
+ * Name: esp_pm_light_sleep_start
+ *
+ * Description:
+ *   Enter light sleep mode
+ *
+ * Input Parameters:
+ *   sleep_time - Reference of uint64_t value to return actual sleep duration
+ *                in microseconds. Use NULL if not needed.
+ *
+ * Returned Value:
+ *   OK on success or a negated errno value if fails.
+ *
+ ****************************************************************************/
+
+int esp_pm_light_sleep_start(uint64_t *sleep_time)
+{
+  int ret = OK;
+  int sleep_start = rtc_time_get();
+  int sleep_return = 0;
+
+  ret = esp_light_sleep_start();
+  if (sleep_time != NULL)
+    {
+      sleep_return = rtc_time_get();
+      *sleep_time = sleep_return - sleep_start;
+    }
+
+  return ret;
+}
+
+/****************************************************************************
+ * Name:  esp_pm_deep_sleep_start
+ *
+ * Description:
+ *   Enter deep sleep mode
+ *
+ * Input Parameters:
+ *   None
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void esp_pm_deep_sleep_start(void)
+{
+  esp_deep_sleep_start();
+
+  /* Because RTC is in a slower clock domain than the CPU, it
+   * can take several CPU cycles for the sleep mode to start.
+   */
+
+  while (1);
+}
+
+/****************************************************************************
+ * Name: esp_pmstandby
+ *
+ * Description:
+ *   Enter pm standby (light sleep) mode.
+ *
+ * Input Parameters:
+ *   time_in_us - The maximum time to sleep in microseconds.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void esp_pmstandby(uint64_t time_in_us)
+{
+  uint64_t rtc_diff_us;
+  esp_sleep_wakeup_cause_t cause;
+#ifdef CONFIG_PM_GPIO_WAKEUP
+  int64_t gpio_mask;
+#endif
+#ifdef CONFIG_PM_EXT0_WAKEUP
+  esp_pm_ext0_wakeup_prepare();
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP
+  int64_t ext1_mask;
+  esp_pm_ext1_wakeup_prepare();
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP
+  esp_pm_gpio_wakeup_prepare();
+#endif
+#ifdef CONFIG_PM_ULP_WAKEUP
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+  esp_sleep_enable_ulp_wakeup();
+#endif
+#ifdef CONFIG_PM_UART_WAKEUP
+  esp_pm_uart_wakeup_prepare();
+#endif /* CONFIG_PM_UART_WAKEUP */
+
+  esp_pm_sleep_enable_timer_wakeup(time_in_us);
+
+  esp_pm_light_sleep_start(&rtc_diff_us);
+
+#ifdef CONFIG_SCHED_TICKLESS
+  up_step_idletime((uint32_t)time_in_us);
+#endif
+
+  cause = esp_sleep_get_wakeup_cause();
+  pwrinfo("Returned from light-sleep with: %s, slept for %" PRIu32 " ms\n",
+          g_wakeup_reasons[cause],
+          (uint32_t)(rtc_diff_us) / 1000);
+
+#ifdef CONFIG_PM_EXT1_WAKEUP
+  if (cause == ESP_SLEEP_WAKEUP_EXT1)
+    {
+      ext1_mask = esp_sleep_get_ext1_wakeup_status();
+      pwrinfo("EXT1 wakeup mask: %" PRIu64 "\n", ext1_mask);
+    }
+#endif
+
+#if defined(CONFIG_PM_GPIO_WAKEUP) && \
+    defined(SOC_GPIO_SUPPORT_HP_PERIPH_PD_SLEEP_WAKEUP)
+  if (cause == ESP_SLEEP_WAKEUP_GPIO)
+    {
+      gpio_mask = esp_sleep_get_gpio_wakeup_status();
+      pwrinfo("GPIO wakeup mask: %" PRIu64 "\n", gpio_mask);
+    }
+#endif
+}
+
+/****************************************************************************
+ * Name: esp_pmsleep
+ *
+ * Description:
+ *   Enter pm sleep (deep sleep) mode.
+ *
+ * Input Parameters:
+ *   time_in_us - The maximum time to sleep in microseconds.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+void esp_pmsleep(uint64_t time_in_us)
+{
+#ifdef CONFIG_PM_EXT1_WAKEUP
+  esp_pm_ext1_wakeup_prepare();
+#endif
+#ifdef CONFIG_PM_ULP_WAKEUP
+  esp_sleep_enable_ulp_wakeup();
+#endif
+  esp_pm_sleep_enable_timer_wakeup(time_in_us);
+  esp_pm_deep_sleep_start();
+}
+
+/****************************************************************************
+ * Name: esp_pmconfigure
+ *
+ * Description:
+ *   Configure power manager.
+ *
+ * Input Parameters:
+ *   None.
+ *
+ * Returned Value:
+ *   Returns OK on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+int esp_pmconfigure(void)
+{
+  int ret;
+  esp_err_t err = ESP_OK;
+#ifdef CONFIG_PM_EXT1_WAKEUP
+  int64_t ext1_mask;
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP
+  int64_t gpio_mask;
+#endif
+  esp_pm_config_t pm_config =
+    {
+      .max_freq_mhz = CONFIG_ESPRESSIF_CPU_FREQ_MHZ,
+#ifdef CONFIG_ESPRESSIF_DFS
+      .min_freq_mhz = CONFIG_ESPRESSIF_MIN_CPU_FREQ_MHZ,
+#else
+      .min_freq_mhz = CONFIG_ESPRESSIF_CPU_FREQ_MHZ,
+#endif
+#ifdef CONFIG_ESPRESSIF_AUTO_SLEEP
+      .light_sleep_enable = true
+#endif
+    };
+
+  ret = esp_pm_configure(&pm_config);
+  if (ret != OK)
+    {
+      return ret;
+    }
+
+#ifdef CONFIG_PM_EXT0_WAKEUP
+  esp_pm_ext0_wakeup_prepare();
+#endif
+#ifdef CONFIG_PM_EXT1_WAKEUP
+  esp_pm_ext1_wakeup_prepare();
+#endif
+#ifdef CONFIG_PM_GPIO_WAKEUP
+  esp_pm_gpio_wakeup_prepare();
+#endif
+#ifdef CONFIG_PM_UART_WAKEUP
+#  ifdef SOC_UART_SUPPORT_XTAL_CLK
+  esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_ON);
+#  endif
+  esp_pm_uart_wakeup_prepare();
+#endif /* CONFIG_PM_UART_WAKEUP */
+
+#ifdef CONFIG_ESPRESSIF_AUTO_SLEEP
+  err = esp_pm_register_skip_light_sleep_callback(
+          esp_pm_skip_light_sleep);
+  if (err != ESP_OK)
+    {
+      pwrerr("Failed to register skip light sleep callback: %d\n", err);
+      return -ENOMEM;
+    }
+
+  esp_pm_sleep_cbs_register_config_t sleep_cbs =
+    {
+      .enter_cb = NULL,
+      .exit_cb = esp_pm_light_sleep_exit_cb,
+      .enter_cb_user_arg = NULL,
+      .exit_cb_user_arg = NULL,
+      .enter_cb_prior = 0,
+      .exit_cb_prior = 0,
+    };
+
+  err = esp_pm_light_sleep_register_cbs(&sleep_cbs);
+  if (err != ESP_OK)
+    {
+      pwrerr("Failed to register light sleep callbacks: %d\n", err);
+      return -ENOMEM;
+    }
+
+  err =
+    esp_sleep_set_console_uart_handling_mode(ESP_SLEEP_ALWAYS_FLUSH_UART);
+  if (err != ESP_OK)
+    {
+      pwrerr("Failed to set console UART handling mode: %d\n", err);
+      return -ENOMEM;
+    }
+#endif
+
+  return ret;
+}
