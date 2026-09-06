@@ -3350,6 +3350,7 @@ config ARCH_BOARD
 	default "esp32c6-devkitc"           if ARCH_BOARD_ESP32C6_DEVKITC
 	default "esp32c6-devkitm"           if ARCH_BOARD_ESP32C6_DEVKITM
 	default "esp32h2-devkit"            if ARCH_BOARD_ESP32H2_DEVKIT
+	default "esp32p4-function-ev-board"    if ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
 	default "et-stm32-stamp"            if ARCH_BOARD_ET_STM32_STAMP
 	default "tlsr8278adk80d"            if ARCH_BOARD_TLSR8278ADK80D
 	default "ez80f910200kitg"           if ARCH_BOARD_EZ80F910200KITG
