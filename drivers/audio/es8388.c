@@ -227,7 +227,7 @@ uint8_t es8388_readreg(FAR struct es8388_dev_s *priv, uint8_t regaddr)
       msg[1].addr      = priv->lower->address;
       msg[1].flags     = I2C_M_READ;
       msg[1].buffer    = &data;
-      msg[1].length    = 12;
+      msg[1].length    = 1;
 
       /* Read the register data. The returned value is the number messages
        * completed.
