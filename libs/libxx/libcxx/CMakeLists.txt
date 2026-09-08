@@ -52,7 +52,9 @@ if(CONFIG_LIBCXX)
         -p1 -d ${CMAKE_CURRENT_LIST_DIR}/libcxx <
         ${CMAKE_CURRENT_LIST_DIR}/0001-libcxx-fix-ld-errors.patch && patch -p1
         -d ${CMAKE_CURRENT_LIST_DIR}/libcxx <
-        ${CMAKE_CURRENT_LIST_DIR}/0001-Fix-build-error-about-__GLIBC__.patch
+        ${CMAKE_CURRENT_LIST_DIR}/0001-Fix-build-error-about-__GLIBC__.patch &&
+        patch -p1 -d ${CMAKE_CURRENT_LIST_DIR}/libcxx <
+        ${CMAKE_CURRENT_LIST_DIR}/0001-libcxx-fix-string-constexpr-dtor-build-error.patch
       DOWNLOAD_NO_PROGRESS true
       TIMEOUT 30)
 
