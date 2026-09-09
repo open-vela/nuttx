@@ -85,8 +85,8 @@
  * polling rates.
  */
 
-#define POLL_MINDELAY  MSEC2TICK(50)
-#define POLL_MAXDELAY  MSEC2TICK(200)
+#define POLL_MINDELAY  MSEC2TICK(10)
+#define POLL_MAXDELAY  MSEC2TICK(20)
 #define POLL_INCREMENT MSEC2TICK(10)
 
 /****************************************************************************
@@ -471,22 +471,18 @@ static ssize_t ft5x06_sample(FAR struct ft5x06_dev_s *priv, FAR char *buffer,
               deltax = -deltax;
             }
 
-          if (deltax < CONFIG_FT5X06_THRESHX)
+          deltay = (y - priv->lasty);
+          if (deltay < 0)
             {
-              /* There as been no significant change in X, try Y */
+              deltay = -deltay;
+            }
 
-              deltay = (y - priv->lasty);
-              if (deltay < 0)
-                {
-                  deltay = -deltay;
-                }
+          if (deltax < CONFIG_FT5X06_THRESHX &&
+              deltay < CONFIG_FT5X06_THRESHY)
+            {
+              /* Ignore... no significant change in X or Y */
 
-              if (deltax < CONFIG_FT5X06_THRESHX)
-                {
-                  /* Ignore... no significant change in Y either */
-
-                  goto drop;
-                }
+              goto drop;
             }
         }
     }
@@ -694,6 +690,16 @@ static int ft5x06_bringup(FAR struct ft5x06_dev_s *priv)
     }
 
 #ifndef CONFIG_FT5X06_POLLMODE
+  /* Pulse INT on every contact/move so EXTI falling-edge keeps streaming. */
+
+  data[0] = FT5X06_GMODE_REG;
+  data[1] = FT5X06_G_MODE_INTERRUPT_TRIGGER;
+  ret = I2C_TRANSFER(priv->i2c, &msg, 1);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
   /* Enable FT5x06 interrupts */
 
   config->clear(config);

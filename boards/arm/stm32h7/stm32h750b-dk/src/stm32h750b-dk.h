@@ -114,7 +114,7 @@
 
 /* Touchscreen Interrupt line: PG2 */
 
-#define GPIO_FT5X06_INT    (GPIO_INPUT|GPIO_FLOAT|GPIO_SPEED_100MHz| \
+#define GPIO_FT5X06_INT    (GPIO_INPUT|GPIO_PULLUP|GPIO_SPEED_100MHz| \
                             GPIO_PUSHPULL|GPIO_PORTG|GPIO_PIN2)
 
 /* The reset line is active low: PB12 */
