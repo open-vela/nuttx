@@ -37,6 +37,7 @@
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/semaphore.h>
+#include <nuttx/spinlock.h>
 #include <nuttx/video/fb.h>
 
 #include <arch/board/board.h>
@@ -823,6 +824,10 @@ static sem_t g_lock;
 
 static sem_t g_semirq;
 
+#if defined(CONFIG_STM32H7_LTDC_FB_DOUBLE_BUFFER)
+static volatile bool g_flip_pending;
+#endif
+
 /* This structure provides irq handling */
 
 static struct stm32_interrupt_s g_interrupt =
@@ -1493,7 +1498,12 @@ static int stm32_ltdcirq(int irq, void *context, void *arg)
       priv->error = OK;
 
 #if defined(CONFIG_STM32H7_LTDC_FB_DOUBLE_BUFFER)
-      fb_remove_paninfo(&g_vtable.vtable, FB_NO_OVERLAY);
+      if (g_flip_pending)
+        {
+          g_flip_pending = false;
+          fb_remove_paninfo(&g_vtable.vtable, FB_NO_OVERLAY);
+          return OK;
+        }
 #endif
     }
   else if (regval & LTDC_IER_LIE)
@@ -2564,24 +2574,28 @@ static int stm32_waitforvsync(struct fb_vtable_s *vtable)
 static int stm32_pandisplay(struct fb_vtable_s *vtable,
                             struct fb_planeinfo_s *pinfo)
 {
-  int ret = 0;
+  irqstate_t flags;
+  uint32_t new_fb_start;
 
   DEBUGASSERT(vtable != NULL && vtable == &g_vtable.vtable);
   DEBUGASSERT(pinfo != NULL);
 
-  uint32_t new_fb_start = (uint32_t)pinfo->fbmem +
-                         pinfo->yoffset * pinfo->stride +
-                         pinfo->xoffset * (pinfo->bpp / 8);
+  new_fb_start = (uint32_t)pinfo->fbmem +
+                 pinfo->yoffset * pinfo->stride +
+                 pinfo->xoffset * (pinfo->bpp / 8);
 
-  putreg32(new_fb_start, stm32_cfbar_layer_t[0]);
-  ret = stm32_ltdc_reload(LTDC_SRCR_VBR, true);
-  if (ret < 0)
+  flags = enter_critical_section();
+  if (g_flip_pending)
     {
-      lcderr("ERROR: stm32_ltdc_reload failed: %d\n", ret);
-      return ret;
+      leave_critical_section(flags);
+      return -EBUSY;
     }
 
-  return ret;
+  g_flip_pending = true;
+  putreg32(new_fb_start, stm32_cfbar_layer_t[0]);
+  putreg32(LTDC_SRCR_VBR, STM32_LTDC_SRCR);
+  leave_critical_section(flags);
+  return OK;
 }
 #endif
 
