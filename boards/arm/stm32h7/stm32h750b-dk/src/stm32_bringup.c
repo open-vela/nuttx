@@ -372,7 +372,12 @@ int stm32_bringup(void)
 #endif
 
 #ifdef CONFIG_UART7_RS485
+#  if defined(CONFIG_STM32H7_USART2)
   ret = symlink("/dev/ttyS2", "/dev/rs485");
+#  else
+  /* No USART2: UART7 is the first aux UART -> ttyS1 (see board README). */
+  ret = symlink("/dev/ttyS1", "/dev/rs485");
+#  endif
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to create symlink for RS485: %d\n", ret);
