@@ -1,0 +1,301 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_CUSTOM
+
+comment "BK7258 Configuration Options"
+
+choice
+	prompt "BK7258 Chip Selection"
+	default ARCH_CHIP_BK7258
+
+config ARCH_CHIP_BK7258
+	bool "BK7258"
+	select ARCH_CORTEXM33
+	select ARCH_HAVE_CUSTOM_VECTORS
+	select ARCH_HAVE_FPU
+	select ARCH_HAVE_MPU
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARCH_HAVE_TRUSTZONE
+	select ARCH_IDLE_CUSTOM
+	select ARM_HAVE_MPU_UNIFIED
+
+endchoice
+
+config BK7258_MBOX_V2
+	bool "BK7258 Mailbox V2 transport"
+	default y
+	help
+		Enable the AP-to-CP mailbox transport used by the Armino app_ab
+		image.  The AP console is carried over this link because CP owns the
+		physical USB debug UART.
+
+config BK7258_CP_TRNG
+	bool "CP-owned hardware random source"
+	depends on BK7258_WIFI
+	select ARCH_HAVE_RNG
+	select DEV_RANDOM
+	default n
+	help
+		Expose /dev/random using the CP TRNG command (0x213, ABI 1).
+		Requires the matching CP firmware. No software entropy fallback.
+
+config BK7258_MB_UART0_CONSOLE
+	bool "Use CP UART0 through Mailbox V2 for the AP console"
+	default y
+	depends on SERIAL
+	depends on BK7258_MBOX_V2
+	select OTHER_UART_SERIALDRIVER
+	select SERIAL_IFLOWCONTROL
+	select SERIAL_IFLOWCONTROL_WATERMARKS
+
+config BK7258_MB_UART0_TXBUFSIZE
+	int "Mailbox UART0 transport TX ring size"
+	default 8192
+	range 1024 32767
+	depends on BK7258_MBOX_V2
+
+config BK7258_MB_UART0_RXBUFSIZE
+	int "Mailbox UART0 transport RX capacity"
+	default 256
+	range 256 4096
+	depends on BK7258_MBOX_V2
+
+config BK7258_MB_UART0_SERIAL_RXBUFSIZE
+	int "Mailbox UART0 NuttX serial RX buffer size"
+	default 256
+	depends on BK7258_MBOX_V2
+
+config BK7258_MB_UART0_SERIAL_TXBUFSIZE
+	int "Mailbox UART0 NuttX serial TX buffer size"
+	default 512
+	depends on BK7258_MBOX_V2
+
+config BK7258_WIFI
+	bool "BK7258 AP Wi-Fi IPC driver"
+	default n
+	depends on NET
+	select DRIVERS_WIRELESS
+	select DRIVERS_IEEE80211
+	select NETDEV_WIRELESS_IOCTL
+	select NETDEV_WIRELESS_HANDLER
+
+config BK7258_WIFI_IFNAME
+	string "BK7258 Wi-Fi interface name"
+	default "wlan0"
+	depends on BK7258_WIFI
+	---help---
+		Literal name of the single Wi-Fi interface, without a format suffix.
+
+config BK7258_WIFI_TX_SLOTS
+	int "BK7258 Wi-Fi direct-push TX slots"
+	default 8
+	range 2 16
+	depends on BK7258_WIFI
+
+config BK7258_WIFI_CP_EXTENSIONS
+	bool "CP supports OpenVela scan, country and SoftAP extensions"
+	default n
+	depends on BK7258_WIFI
+	---help---
+		Enable only with a CP implementing commands 0x20d through 0x212.
+		The R1 legacy CP supports station mode without these extensions.
+
+config BK7258_NR_IRQS
+	int "Interrupt Number"
+	default 80
+
+menuconfig BK7258_UART
+	bool "BK7258 UART chip support"
+	select ARCH_HAVE_SERIAL_TERMIOS
+	default y
+
+if BK7258_UART
+
+config BK7258_UART0
+	bool "BK7258 UART0"
+	default y
+
+if BK7258_UART0
+
+config BK7258_UART0_BAUD
+	int "BK7258 UART0 BAUD"
+	default 115200
+
+config BK7258_UART0_PARITY
+	int "BK7258 UART0 parity"
+	default 0
+	range 0 2
+	---help---
+		BK7258 UART0 parity.  0=None, 1=Odd, 2=Even.  Default: None
+
+config BK7258_UART0_BITS
+	int "BK7258 UART0 number of bits"
+	default 8
+	---help---
+		BK7258 UART0 number of bits.  Default: 8
+
+config BK7258_UART0_2STOP
+	int "BK7258 UART0 two stop bits"
+	default 0
+	---help---
+		0=1 stop bit, 1=Two stop bits.  Default: 1 stop bit
+
+config BK7258_UART0_RXBUFSIZE
+	int "BK7258 UART0 Rx buffer size"
+	default 256
+	---help---
+		BK7258 UART0 Rx buffer size.  Default: 256
+
+config BK7258_UART0_TXBUFSIZE
+	int "BK7258 UART0 Tx buffer size"
+	default 256
+	---help---
+		BK7258 UART0 Tx buffer size.  Default: 256
+
+endif # BK7258_UART0
+
+config BK7258_UART1
+	bool "BK7258 UART1"
+	default n
+
+if BK7258_UART1
+
+config BK7258_UART1_BAUD
+	int "BK7258 UART1 BAUD"
+	default 115200
+
+config BK7258_UART1_PARITY
+	int "BK7258 UART1 parity"
+	default 0
+	range 0 2
+	---help---
+		BK7258 UART1 parity.  0=None, 1=Odd, 2=Even.  Default: None
+
+config BK7258_UART1_BITS
+	int "BK7258 UART1 number of bits"
+	default 8
+	---help---
+		BK7258 UART1 number of bits.  Default: 8
+
+config BK7258_UART1_2STOP
+	int "BK7258 UART1 two stop bits"
+	default 0
+	---help---
+		0=1 stop bit, 1=Two stop bits.  Default: 1 stop bit
+
+config BK7258_UART1_RXBUFSIZE
+	int "BK7258 UART1 Rx buffer size"
+	default 256
+	---help---
+		BK7258 UART1 Rx buffer size.  Default: 256
+
+config BK7258_UART1_TXBUFSIZE
+	int "BK7258 UART1 Tx buffer size"
+	default 256
+	---help---
+		BK7258 UART1 Tx buffer size.  Default: 256
+
+endif # BK7258_UART1
+
+config BK7258_UART2
+	bool "BK7258 UART2"
+	default n
+
+if BK7258_UART2
+
+config BK7258_UART2_BAUD
+	int "BK7258 UART2 BAUD"
+	default 115200
+
+config BK7258_UART2_PARITY
+	int "BK7258 UART2 parity"
+	default 0
+	range 0 2
+	---help---
+		BK7258 UART2 parity.  0=None, 1=Odd, 2=Even.  Default: None
+
+config BK7258_UART2_BITS
+	int "BK7258 UART2 number of bits"
+	default 8
+	---help---
+		BK7258 UART2 number of bits.  Default: 8
+
+config BK7258_UART2_2STOP
+	int "BK7258 UART2 two stop bits"
+	default 0
+	---help---
+		0=1 stop bit, 1=Two stop bits.  Default: 1 stop bit
+
+config BK7258_UART2_RXBUFSIZE
+	int "BK7258 UART2 Rx buffer size"
+	default 256
+	---help---
+		BK7258 UART2 Rx buffer size.  Default: 256
+
+config BK7258_UART2_TXBUFSIZE
+	int "BK7258 UART2 Tx buffer size"
+	default 256
+	---help---
+		BK7258 UART2 Tx buffer size.  Default: 256
+
+endif # BK7258_UART2
+
+choice
+	prompt "BK7258 Serial Console"
+	default BK7258_UART0_SERIAL_CONSOLE
+	depends on DEV_CONSOLE
+
+config BK7258_UART0_SERIAL_CONSOLE
+	bool "BK7258 UART0 serial console"
+	depends on BK7258_UART0
+	select SERIAL_CONSOLE
+
+config BK7258_UART1_SERIAL_CONSOLE
+	bool "BK7258 UART1 serial console"
+	depends on BK7258_UART1
+	select SERIAL_CONSOLE
+
+config BK7258_UART2_SERIAL_CONSOLE
+	bool "BK7258 UART2 serial console"
+	depends on BK7258_UART2
+	select SERIAL_CONSOLE
+
+config BK7258_NO_SERIAL_CONSOLE
+	bool "No BK7258 serial console"
+
+endchoice # BK7258 Serial Console
+
+endif # BK7258_UART
+
+config BK7258_AUDIO
+	bool "BK7258 bounded analog audio diagnostics"
+	depends on BUILD_FLAT && !SMP
+	default n
+	help
+		Opt-in 16 kHz mono ADC/DAC diagnostics, powered through CP PWC.
+		No audio upper-half, automatic recording or cloud upload.
+
+config BK7258_PSRAM
+	bool "BK7258 CP-powered dedicated AP PSRAM heap"
+	depends on BUILD_FLAT && !SMP
+	default n
+
+config BK7258_PSRAM_SIZE
+	hex
+	default 0x01000000
+	depends on BK7258_PSRAM
+
+config BK7258_PCM
+	bool "BK7258 continuous half-duplex PCM transport"
+	depends on BK7258_AUDIO
+	default n
+	help
+		Explicit 16 kHz mono capture/playback sessions with an 8 KiB ring.
+		No automatic recording or /dev/audio registration. The application
+		must service the ring and stop every session on exit.
+
+endif # ARCH_CHIP_CUSTOM
