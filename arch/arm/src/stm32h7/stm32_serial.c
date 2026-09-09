@@ -3535,6 +3535,13 @@ static void up_txint(struct uart_dev_s *dev, bool enable)
 #  ifdef HAVE_RS485
       if (priv->rs485_dir_gpio != 0)
         {
+          /* Drive the transceiver before the first start bit.  Setting DIR
+           * only in up_send() races the USART shifter and shows up as
+           * 03→20 / truncated PDUs in Modbus Slave.
+           */
+
+          stm32_gpiowrite(priv->rs485_dir_gpio, priv->rs485_dir_polarity);
+
           /* Clear stale TC so enabling TCIE does not race the next frame. */
 
           up_serialout(priv, STM32_USART_ICR_OFFSET, USART_ICR_TCCF);
@@ -3609,6 +3616,13 @@ static bool up_txempty(struct uart_dev_s *dev)
           return false;
         }
 
+      /* TC means the stop bit has left the shifter.  Dropping DIR in the
+       * same instant lets A/B float; USB-RS485 then appends 0x7F/0xFF
+       * onto an otherwise valid CRC (Communication_log_4: D5 CA 7F).
+       * 9600 bit ≈ 104us; hold ~4 bit times.
+       */
+
+      up_udelay(400);
       stm32_gpiowrite(priv->rs485_dir_gpio, !priv->rs485_dir_polarity);
       return true;
     }
