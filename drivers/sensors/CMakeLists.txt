@@ -144,6 +144,14 @@ if(CONFIG_SENSORS)
       list(APPEND SRCS lsm6dsl.c)
     endif()
 
+    if(CONFIG_SENSORS_MMC5603)
+      list(APPEND SRCS mmc5603.c)
+    endif()
+
+    if(CONFIG_SENSORS_LTR303)
+      list(APPEND SRCS ltr303.c)
+    endif()
+
     if(CONFIG_SENSORS_LSM9DS1)
       list(APPEND SRCS lsm9ds1_base.c)
       if(CONFIG_SENSORS_LSM9DS1_UORB)

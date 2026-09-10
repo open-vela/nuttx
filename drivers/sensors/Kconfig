@@ -1763,6 +1763,32 @@ config SENSORS_LTR308_THREAD_STACKSIZE
 
 endif # SENSORS_LTR308
 
+config SENSORS_MMC5603
+	bool "MEMSIC MMC5603 magnetometer support"
+	default n
+	select I2C
+	---help---
+		Enable driver support for the MEMSIC MMC5603NJ magnetometer.
+
+config MMC5603_I2C_FREQUENCY
+	int "MMC5603 I2C frequency"
+	depends on SENSORS_MMC5603
+	default 400000
+	range 1 400000
+
+config SENSORS_LTR303
+	bool "LiteOn LTR-303 ambient light sensor"
+	default n
+	select I2C
+	---help---
+		Enable driver support for the LiteOn LTR-303ALS ambient light sensor.
+
+config LTR303_I2C_FREQUENCY
+	int "LTR303 I2C frequency"
+	depends on SENSORS_LTR303
+	default 400000
+	range 1 400000
+
 config SENSORS_AMG88XX
 	bool "AMG88xx infrared array sensor"
 	default n
