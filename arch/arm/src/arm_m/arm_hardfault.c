@@ -29,6 +29,7 @@
 #include <string.h>
 #include <assert.h>
 #include <debug.h>
+#include <syslog.h>
 
 #include <nuttx/userspace.h>
 #include <arch/irq.h>
@@ -181,6 +182,23 @@ int arm_hardfault(int irq, void *context, void *arg)
       return OK;
     }
 #endif
+
+  /* Surface the SCB fault status and the stacked PC/LR unconditionally:
+   * this image executes from QSPI XIP and intermittent hard faults carry
+   * no other evidence of the failing access. */
+
+  syslog(LOG_ALERT,
+         "HARDFAULT: CFSR=%08" PRIx32 " HFSR=%08" PRIx32
+         " BFAR=%08" PRIx32 " MMFAR=%08" PRIx32 "\n",
+         cfsr, hfsr, getreg32(NVIC_BFAULT_ADDR),
+         getreg32(NVIC_MEMMANAGE_ADDR));
+  if (context != NULL)
+    {
+      syslog(LOG_ALERT,
+             "HARDFAULT: stacked PC=%08" PRIx32 " LR=%08" PRIx32 "\n",
+             ((FAR uint32_t *)context)[REG_PC],
+             ((FAR uint32_t *)context)[REG_R14]);
+    }
 
   up_irq_save();
   PANIC_WITH_REGS("panic", context);
