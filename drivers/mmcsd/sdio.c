@@ -41,6 +41,7 @@
 
 #define SDIO_CMD53_TIMEOUT_MS 1000
 #define SDIO_IDLE_DELAY_MS    50
+#define SDIO_CCCR_IORESET      (1 << 3)
 
 /****************************************************************************
  * Private Types
@@ -202,7 +203,13 @@ int sdio_io_rw_direct(FAR struct sdio_dev_s *dev, bool write,
   /* Send CMD52 command */
 
   sdio_takelock(dev);
-  sdio_sendcmdpoll(dev, SD_ACMD52, arg.value);
+  ret = sdio_sendcmdpoll(dev, SD_ACMD52, arg.value);
+  if (ret != OK)
+    {
+      sdio_givelock(dev);
+      return ret;
+    }
+
   ret = SDIO_RECVR5(dev, SD_ACMD52, &data);
   sdio_givelock(dev);
 
@@ -330,6 +337,7 @@ int sdio_io_rw_extended(FAR struct sdio_dev_s *dev, bool write,
       SDIO_RECVR1(dev, SD_ACMD52ABRT, &data);
       syslog(LOG_INFO, "CMD53PROBE: [7] after ABORT\n");
     }
+
   sdio_givelock(dev);
 
   if (ret != OK)
@@ -339,7 +347,6 @@ int sdio_io_rw_extended(FAR struct sdio_dev_s *dev, bool write,
     }
 
   memcpy(&resp, &data, sizeof(resp));
-
   /* Check for errors */
 
   if (wkupevent & SDIOWAIT_TIMEOUT)
@@ -366,6 +373,7 @@ int sdio_io_rw_extended(FAR struct sdio_dev_s *dev, bool write,
 int sdio_set_wide_bus(FAR struct sdio_dev_s *dev)
 {
   int ret;
+  uint8_t exchange;
   uint8_t value;
 
   /* Read Bus Interface Control register */
@@ -381,10 +389,17 @@ int sdio_set_wide_bus(FAR struct sdio_dev_s *dev)
   value &= ~SDIO_CCCR_BUS_IF_WIDTH_MASK;
   value |= SDIO_CCCR_BUS_IF_4_BITS;
 
-  ret = sdio_io_rw_direct(dev, true, 0, SDIO_CCCR_BUS_IF, value, NULL);
+  ret = sdio_io_rw_direct(dev, true, 0, SDIO_CCCR_BUS_IF, value, &exchange);
   if (ret != OK)
     {
       return ret;
+    }
+
+  ret = sdio_io_rw_direct(dev, false, 0, SDIO_CCCR_BUS_IF, 0, &exchange);
+  if (ret != OK ||
+      (exchange & SDIO_CCCR_BUS_IF_WIDTH_MASK) != SDIO_CCCR_BUS_IF_4_BITS)
+    {
+      return ret != OK ? ret : -EIO;
     }
 
   SDIO_WIDEBUS(dev, true);
@@ -410,6 +425,14 @@ int sdio_probe(FAR struct sdio_dev_s *dev)
       nxmutex_init(&dev->mutex);
       mutex_inited = true;
     }
+
+  /* Match the SDIO card initialization sequence used by ESP-IDF: reset the
+   * card's I/O functions through CCCR before CMD0/CMD5 enumeration.  A
+   * timeout is allowed while a slave is coming out of reset.
+   */
+
+  sdio_io_rw_direct(dev, true, 0, SDIO_CCCR_IOABORT,
+                    SDIO_CCCR_IORESET, NULL);
 
   sdio_takelock(dev);
 
@@ -454,9 +477,9 @@ int sdio_probe(FAR struct sdio_dev_s *dev)
     }
 
   /* Send CMD5 with the supported OCR voltage window and poll the R4 response
-   * until the card finishes powering up its I/O (OCR bit 31, "IO ready").  A
-   * card that is still busy will not answer CMD3, so it must not be pushed on
-   * until the ready bit is set.
+   * until the card finishes powering up its I/O (OCR bit 31, "IO ready").
+   * A card that is still busy will not answer CMD3, so it must not be pushed
+   * on until the ready bit is set.
    */
 
   retries = 20;
@@ -578,7 +601,7 @@ int sdio_enable_function(FAR struct sdio_dev_s *dev, uint8_t function)
     }
 
   ret = sdio_io_rw_direct(dev, true, 0,
-                          SDIO_CCCR_IOEN, value | (1 << function), NULL);
+                          SDIO_CCCR_IOEN, value | (1 << function), &value);
 
   if (ret != OK)
     {
@@ -587,16 +610,21 @@ int sdio_enable_function(FAR struct sdio_dev_s *dev, uint8_t function)
 
   /* Wait 1s for function to be enabled */
 
-  int loops = 100;
+  int loops = 1000;
 
   while (loops-- > 0)
     {
-      nxsig_usleep(10 * 1000);
+      up_mdelay(1);
 
       ret = sdio_io_rw_direct(dev, false, 0, SDIO_CCCR_IORDY, 0, &value);
       if (ret != OK)
         {
-          return ret;
+          /* The function may start driving its SDIO interface while this
+           * polling loop is in progress.  Treat a transient CMD52 response
+           * failure as not-ready and retry until the advertised timeout.
+           */
+
+          continue;
         }
 
       if (value & (1 << function))

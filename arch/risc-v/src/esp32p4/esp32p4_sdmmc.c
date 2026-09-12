@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/risc-v/src/esp32p4/espressif/esp32p4_sdmmc.c
+ * arch/risc-v/src/esp32p4/esp32p4_sdmmc.c
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -48,7 +48,7 @@
 
 #include "riscv_internal.h"
 #include "esp_gpio.h"
-#include "esp_irq.h"
+#include "esp_irq_p4.h"
 #include "esp32p4_sdmmc.h"
 
 #include "soc/gpio_sig_map.h"
@@ -170,14 +170,14 @@
  * Private Types
  ****************************************************************************/
 
-struct sdmmc_dma_s
+struct aligned_data(64) sdmmc_dma_s
 {
   volatile uint32_t des0;        /* Control and status */
   volatile uint32_t des1;        /* Buffer size(s) */
   volatile uint32_t des2;        /* Buffer address pointer 1 */
   volatile uint32_t des3;        /* Next descriptor (chained) */
   uint32_t reserved[12];         /* Pad to 64B (P4 L1 cache line) */
-} __attribute__((aligned(64)));
+};
 
 /* This structure lists GPIO Matrix signal numbers for the SD bus signals.
  * Field names match SD bus signal names.
@@ -273,11 +273,6 @@ static void __esp32p4_putreg(const char *func, uint32_t val, uint32_t addr);
 /* Data Transfer Helpers ****************************************************/
 
 static void esp32p4_eventtimeout(wdparm_t arg);
-
-/* PROBE: SDMMC interrupt hit counter and last MINTSTS value. */
-
-extern volatile uint32_t g_irq_nohandler_count;
-extern volatile uint32_t g_irq_nohandler_last;
 
 static volatile uint32_t g_sdmmc_isr_count;
 static volatile uint32_t g_sdmmc_isr_last;
@@ -581,9 +576,9 @@ static int esp32p4_ciu_sendcmd(uint32_t cmd, uint32_t arg)
 
   while ((esp32p4_getreg(ESP32P4_SDMMC_CMD) & SDMMC_CMD_STARTCMD) != 0)
     {
-      if (watchtime - clock_systime_ticks() > SDCARD_CMDTIMEOUT)
+      if (clock_systime_ticks() - watchtime > SDCARD_CMDTIMEOUT)
         {
-          mcerr("TMO Timed out (%08X)\n",
+          mcerr("TMO Timed out (%08" PRIX32 ")\n",
                 esp32p4_getreg(ESP32P4_SDMMC_CMD));
           return 1;
         }
@@ -596,7 +591,7 @@ static int esp32p4_ciu_sendcmd(uint32_t cmd, uint32_t arg)
   esp32p4_putreg(arg, ESP32P4_SDMMC_CMDARG);
   esp32p4_putreg(cmd, ESP32P4_SDMMC_CMD);
 
-  mcinfo("cmd=0x%x arg=0x%x\n", cmd, arg);
+  mcinfo("cmd=0x%" PRIx32 " arg=0x%" PRIx32 "\n", cmd, arg);
 
   return 0;
 }
@@ -830,12 +825,13 @@ static void esp32p4_eventtimeout(wdparm_t arg)
 
       esp32p4_endwait(priv, SDIOWAIT_TIMEOUT);
       syslog(LOG_ERR,
-             "SDMMCPROBE: timeout remaining=%d isr_count=%lu isr_last=0x%08lx\n"
+             "SDMMCPROBE: timeout remaining=%d isr_count=%lu "
+             "isr_last=0x%08lx\n"
              "SDMMCPROBE: CTRL=0x%08lx INTMASK=0x%08lx MINTSTS=0x%08lx "
              "RINTSTS=0x%08lx\n"
              "SDMMCPROBE: STATUS=0x%08lx IDSTS=0x%08lx IDINTEN=0x%08lx "
              "BYTCNT=0x%08lx BLKSIZ=0x%08lx\n"
-             "SDMMCPROBE: cpuint=%d clic_en=0x%08lx nohandler=%lu last=%lu\n",
+             "SDMMCPROBE: cpuint=%d clic_en=0x%08lx\n",
              priv->remaining,
              (unsigned long)g_sdmmc_isr_count,
              (unsigned long)g_sdmmc_isr_last,
@@ -849,9 +845,7 @@ static void esp32p4_eventtimeout(wdparm_t arg)
              (unsigned long)esp32p4_getreg(ESP32P4_SDMMC_BYTCNT),
              (unsigned long)esp32p4_getreg(ESP32P4_SDMMC_BLKSIZ),
              priv->cpuint,
-             (unsigned long)esp_cpu_intr_get_enabled_mask(),
-             (unsigned long)g_irq_nohandler_count,
-             (unsigned long)g_irq_nohandler_last);
+             (unsigned long)esp_cpu_intr_get_enabled_mask());
     }
 }
 
@@ -1162,7 +1156,8 @@ static int esp32p4_interrupt(int irq, void *context, void *arg)
 
           /* Handle data timeout error */
 
-          else if ((pending & SDMMC_INT_DRTO) != 0)
+          else if ((pending & SDMMC_INT_DRTO) != 0 &&
+                   (pending & SDMMC_INT_DTO) == 0)
             {
               syslog(LOG_ERR,
                      "SDMMCPROBE: DRTO pending=0x%08lx remaining=%d\n",
@@ -1204,35 +1199,9 @@ static int esp32p4_interrupt(int irq, void *context, void *arg)
 
           else if ((pending & SDMMC_INT_DTO) != 0)
             {
-#ifdef CONFIG_ESP32P4_SDMMC_DMA
-              int spin;
-#endif
-
               /* DTO+DCRC is treated as transfer-complete on this 1-bit
                * hosted path; do not log it as an error on every CMD53.
                */
-
-#ifdef CONFIG_ESP32P4_SDMMC_DMA
-              {
-                volatile struct sdmmc_dma_s *ncdesc =
-                  (volatile struct sdmmc_dma_s *)
-                  ESP32P4_NC_ADDR(&priv->dma_desc[0]);
-                volatile uint32_t *ncbuf = priv->buffer ?
-                  (volatile uint32_t *)ESP32P4_NC_ADDR(priv->buffer) :
-                  NULL;
-
-                for (spin = 0; spin < 64; spin++)
-                  {
-                    if ((ncdesc->des0 & MCI_DMADES0_OWN) == 0)
-                      {
-                        break;
-                      }
-                  }
-
-                UNUSED(spin);
-                UNUSED(ncbuf);
-              }
-#endif
 
               esp32p4_drain_fifo(priv);
               esp32p4_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
@@ -1256,7 +1225,8 @@ static int esp32p4_interrupt(int irq, void *context, void *arg)
 
               /* Wake the thread up */
 
-              mcerr("ERROR: Response error, pending=%08x\n", pending);
+              mcerr("ERROR: Response error, pending=%08" PRIx32 "\n",
+                    pending);
               esp32p4_endwait(priv, SDIOWAIT_RESPONSEDONE | SDIOWAIT_ERROR);
             }
 
@@ -1665,6 +1635,16 @@ static void sdmmc_host_set_clk_div(uint32_t slot, uint32_t host_div,
   uint32_t regval;
   uint32_t divider;
 
+  /* A divider of one selects the P4 SDIO high-speed bypass path.  All
+   * frequencies handled here use the low-speed edge divider, so clear the
+   * sticky HS-mode bit before programming those edges.  This mirrors
+   * sdmmc_ll_set_clock_div(div > 1).
+   */
+
+  regval = esp32p4_getreg(ESP32P4_HP_SYS_CLKRST_PERI_CLK_CTRL01);
+  regval &= ~HP_SYS_CLKRST_SDIO_HS_MODE;
+  esp32p4_putreg(regval, ESP32P4_HP_SYS_CLKRST_PERI_CLK_CTRL01);
+
   /* Set card divider (SDMMC CLKDIV, indexed by the divider selected in
    * esp32p4_reset()).
    */
@@ -1820,14 +1800,13 @@ static void esp32p4_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
   if (clk_en)
     {
       regval = esp32p4_getreg(ESP32P4_SDMMC_CLKENA);
-      /* Do NOT set CLKENA.LOWPOWER: it gates the card clock whenever the bus
-       * goes idle, and an SDIO slave (the on-board ESP32-C6) needs a running
-       * clock to keep its state machine and interrupt path alive.  With the
-       * low-power bit set, CMD52 starts timing out ~0.5 s after function 1 is
-       * enabled and never recovers.
+      /* Match Espressif's SDMMC host sequence.  LOWPOWER stops CCLK while
+       * the command/data path is idle; the ESP32-C6 SDIO slave uses that
+       * idle boundary when applying CCCR state changes such as IOEN.
        */
 
-      regval |= SDMMC_CLKENA_ENABLE(priv->slot);
+      regval |= SDMMC_CLKENA_ENABLE(priv->slot) |
+                SDMMC_CLKENA_LOWPOWER(priv->slot);
       esp32p4_putreg(regval, ESP32P4_SDMMC_CLKENA);
       if (sdmmc_host_clock_update_command(priv) != OK)
         {
@@ -1948,7 +1927,7 @@ static int esp32p4_sendcmd(struct sdio_dev_s *dev, uint32_t cmd,
   struct esp32p4_dev_s *priv = (struct esp32p4_dev_s *)dev;
   uint32_t regval = 0;
 
-  mcinfo("cmd=%04x arg=%04x\n", cmd, arg);
+  mcinfo("cmd=%04" PRIx32 " arg=%04" PRIx32 "\n", cmd, arg);
 
   /* Clear any stale command-done / response-error status left over from the
    * previous command so esp32p4_waitresponse() polls only this command's
@@ -2025,9 +2004,7 @@ static int esp32p4_sendcmd(struct sdio_dev_s *dev, uint32_t cmd,
 
   /* Write the SD card CMD */
 
-  esp32p4_ciu_sendcmd(regval, arg);
-
-  return OK;
+  return esp32p4_ciu_sendcmd(regval, arg) == 0 ? OK : -ETIMEDOUT;
 }
 
 /****************************************************************************
@@ -2256,7 +2233,7 @@ static int esp32p4_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
   clock_t watchtime;
   uint32_t respmask;
 
-  mcinfo("cmd=%04x\n", cmd);
+  mcinfo("cmd=%04" PRIx32 "\n", cmd);
 
   switch (cmd & MMCSD_RESPONSE_MASK)
     {
@@ -2287,19 +2264,21 @@ static int esp32p4_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
     {
       if (clock_systime_ticks() - watchtime > timeout)
         {
-          mcerr("ERROR: Timeout cmd: %04x STA: %08x RINTSTS: %08x\n",
+          mcerr("ERROR: Timeout cmd: %04" PRIx32 " STA: %08" PRIx32
+                " RINTSTS: %08" PRIx32 "\n",
                 cmd, esp32p4_getreg(ESP32P4_SDMMC_STATUS),
                 esp32p4_getreg(ESP32P4_SDMMC_RINTSTS));
 
           ret = -ETIMEDOUT;
+          break;
         }
     }
 
-  /* Check if there is a response error.  R3 and R4 responses carry neither a
-   * CRC (the CRC field is all ones) nor the command index (it is reserved and
-   * transmitted as all ones), so the DesignWare controller always raises
-   * RE/RCRC for them -- only a response timeout (RTO) is a genuine error in
-   * that case.  For every other response type keep the full check.
+  /* Check if there is a response error.  R3 and R4 responses carry neither
+   * a CRC (the CRC field is all ones) nor the command index (it is reserved
+   * and transmitted as all ones), so the DesignWare controller always
+   * raises RE/RCRC for them -- only a response timeout (RTO) is a genuine
+   * error in that case.  For every other response type keep the full check.
    */
 
   respmask = SDCARD_INT_RESPERR;
@@ -2308,16 +2287,32 @@ static int esp32p4_waitresponse(struct sdio_dev_s *dev, uint32_t cmd)
     {
       respmask = SDMMC_INT_RTO;
     }
+  else if ((cmd & MMCSD_RESPONSE_MASK) == MMCSD_R5_RESPONSE)
+    {
+      /* The P4 DesignWare host asserts RE on valid SDIO R5 responses.
+       * RESP0, response CRC and command-done remain valid, so reject only
+       * transport failures here.  sdio_io_rw_direct/extended still parse
+       * the error flags carried by R5 itself.
+       */
+
+      respmask = SDMMC_INT_RCRC | SDMMC_INT_RTO;
+    }
 
   if (esp32p4_getreg(ESP32P4_SDMMC_RINTSTS) & respmask)
     {
-      mcerr("ERROR: SDMMC failure cmd: %04x STA: %08x RINTSTS: %08x\n",
+      mcerr("ERROR: SDMMC failure cmd: %04" PRIx32 " STA: %08" PRIx32
+            " RINTSTS: %08" PRIx32 "\n",
             cmd, esp32p4_getreg(ESP32P4_SDMMC_STATUS),
             esp32p4_getreg(ESP32P4_SDMMC_RINTSTS));
       ret = -EIO;
     }
 
-  esp32p4_putreg(SDCARD_CMDDONE_CLEAR, ESP32P4_SDMMC_RINTSTS);
+  /* Response errors are write-one-to-clear and remain sticky across
+   * commands.  Clear them together with command-done so a transient timeout
+   * cannot poison every command that follows.
+   */
+
+  esp32p4_putreg(SDCARD_RESPDONE_CLEAR, ESP32P4_SDMMC_RINTSTS);
   return ret;
 }
 
@@ -2346,7 +2341,7 @@ static int esp32p4_recvshortcrc(struct sdio_dev_s *dev, uint32_t cmd,
   uint32_t regval;
   int ret = OK;
 
-  mcinfo("cmd=%04x\n", cmd);
+  mcinfo("cmd=%04" PRIx32 "\n", cmd);
 
 #ifdef CONFIG_DEBUG_FEATURES
   if (!rshort)
@@ -2373,12 +2368,12 @@ static int esp32p4_recvshortcrc(struct sdio_dev_s *dev, uint32_t cmd,
       regval = esp32p4_getreg(ESP32P4_SDMMC_RINTSTS);
       if ((regval & SDMMC_INT_RTO) != 0)
         {
-          mcerr("ERROR: Command timeout: %08x\n", regval);
+          mcerr("ERROR: Command timeout: %08" PRIx32 "\n", regval);
           ret = -ETIMEDOUT;
         }
       else if ((regval & SDMMC_INT_RCRC) != 0)
         {
-          mcerr("ERROR: CRC failure: %08x\n", regval);
+          mcerr("ERROR: CRC failure: %08" PRIx32 "\n", regval);
           ret = -EIO;
         }
     }
@@ -2390,7 +2385,7 @@ static int esp32p4_recvshortcrc(struct sdio_dev_s *dev, uint32_t cmd,
   esp32p4_putreg(SDCARD_RESPDONE_CLEAR | SDCARD_CMDDONE_CLEAR,
                  ESP32P4_SDMMC_RINTSTS);
   *rshort = esp32p4_getreg(ESP32P4_SDMMC_RESP0);
-  mcinfo("CRC=%04x\n", *rshort);
+  mcinfo("CRC=%04" PRIx32 "\n", *rshort);
 
   return ret;
 }
@@ -2420,7 +2415,7 @@ static int esp32p4_recvlong(struct sdio_dev_s *dev, uint32_t cmd,
   uint32_t regval;
   int ret = OK;
 
-  mcinfo("cmd=%04x\n", cmd);
+  mcinfo("cmd=%04" PRIx32 "\n", cmd);
 
 #ifdef CONFIG_DEBUG_FEATURES
   /* Check that R1 is the correct response to this command */
@@ -2438,12 +2433,12 @@ static int esp32p4_recvlong(struct sdio_dev_s *dev, uint32_t cmd,
       regval = esp32p4_getreg(ESP32P4_SDMMC_RINTSTS);
       if (regval & SDMMC_INT_RTO)
         {
-          mcerr("ERROR: Timeout STA: %08x\n", regval);
+          mcerr("ERROR: Timeout STA: %08" PRIx32 "\n", regval);
           ret = -ETIMEDOUT;
         }
       else if (regval & SDMMC_INT_RCRC)
         {
-          mcerr("ERROR: CRC fail STA: %08x\n", regval);
+          mcerr("ERROR: CRC fail STA: %08" PRIx32 "\n", regval);
           ret = -EIO;
         }
     }
@@ -2488,7 +2483,7 @@ static int esp32p4_recvshort(struct sdio_dev_s *dev, uint32_t cmd,
   uint32_t regval;
   int ret = OK;
 
-  mcinfo("cmd=%04x\n", cmd);
+  mcinfo("cmd=%04" PRIx32 "\n", cmd);
 
   /* Check that this is the correct response to this command */
 
@@ -2510,7 +2505,7 @@ static int esp32p4_recvshort(struct sdio_dev_s *dev, uint32_t cmd,
       regval = esp32p4_getreg(ESP32P4_SDMMC_RINTSTS);
       if (regval & SDMMC_INT_RTO)
         {
-          mcerr("ERROR: Timeout STA: %08x\n", regval);
+          mcerr("ERROR: Timeout STA: %08" PRIx32 "\n", regval);
           ret = -ETIMEDOUT;
         }
     }
@@ -2751,7 +2746,6 @@ static sdio_eventset_t esp32p4_eventwait(struct sdio_dev_s *dev)
 
   esp32p4_disable_allints(priv);
 
-out:
   leave_critical_section(flags);
 
   mcinfo("wkupevent=%04x\n", wkupevent);
@@ -2991,7 +2985,6 @@ static void esp32p4_idmac_arm(struct esp32p4_dev_s *priv, bool rx)
 
   esp32p4_putreg(SDMMC_BMOD_DE | SDMMC_BMOD_FB, ESP32P4_SDMMC_BMOD);
   sdmmc_ll_poll_demand(hw);
-
 }
 
 static int esp32p4_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
@@ -3226,7 +3219,7 @@ static void esp32p4_sdmmc_enable_clock_reset(void)
       /* Select PLL160M as the LS clock source and set the host divider */
 
       sdmmc_ll_select_clk_source(hw, SDMMC_CLK_SRC_PLL160M);
-      sdmmc_ll_set_clock_div(hw, 1);
+      sdmmc_ll_set_clock_div(hw, 2);
       sdmmc_ll_init_phase_delay(hw);
     }
 }
@@ -3253,6 +3246,7 @@ static void esp32p4_sdmmc_enable_clock_reset(void)
 struct sdio_dev_s *esp32p4_sdmmc_sdio_initialize(int slotno)
 {
   struct esp32p4_dev_s *priv = &g_sdiodev;
+  uint32_t regval;
 
   DEBUGASSERT(slotno == 0 || slotno == 1);
 
@@ -3316,6 +3310,16 @@ struct sdio_dev_s *esp32p4_sdmmc_sdio_initialize(int slotno)
 
   sdmmc_ll_init_dma(SDMMC_LL_GET_HW(0));
 
+  /* Keep the DesignWare global interrupt gate enabled as required by the
+   * reference host initialization.  INTMASK remains zero until an upper
+   * layer explicitly attaches the IRQ, so this does not route an interrupt
+   * into the P4 CLIC during the polled discovery path.
+   */
+
+  regval = esp32p4_getreg(ESP32P4_SDMMC_CTRL);
+  regval |= SDMMC_CTRL_INTENABLE;
+  esp32p4_putreg(regval, ESP32P4_SDMMC_CTRL);
+
   /* Pin configuration (slot 1 is routed through the GPIO matrix).  CLK is
    * output-only; CMD and D0 are bidirectional with a pull-up.  The extra
    * data lines D1..D3 are configured by esp32p4_widebus() when 4-bit mode
@@ -3331,8 +3335,17 @@ struct sdio_dev_s *esp32p4_sdmmc_sdio_initialize(int slotno)
                 INPUT | OUTPUT | PULLUP);
   configure_pin(CONFIG_ESP32P4_SDMMC_D2, priv->sdio_pins->d2,
                 INPUT | OUTPUT | PULLUP);
-  configure_pin(CONFIG_ESP32P4_SDMMC_D3, priv->sdio_pins->d3,
-                INPUT | OUTPUT | PULLUP);
+
+  /* Keep DAT3 high during the initial 1-bit enumeration.  A low DAT3 while
+   * CMD0 is sent selects SPI mode on SD/SDIO devices.  ESP-IDF deliberately
+   * leaves DAT3 as a GPIO output-high and only attaches the SDMMC matrix
+   * signal after CCCR switches the card to 4-bit mode.
+   */
+
+  esp_gpiowrite(CONFIG_ESP32P4_SDMMC_D3, true);
+  esp_gpio_matrix_out(CONFIG_ESP32P4_SDMMC_D3, SIG_GPIO_OUT_IDX,
+                      false, false);
+  esp_configgpio(CONFIG_ESP32P4_SDMMC_D3, OUTPUT | PULLUP | DRIVE_3);
 
   /* Tie the card-interrupt input high (inactive), card-detect low (card
    * present -- the C6 is hard-wired) and write-protect inactive, all

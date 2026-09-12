@@ -269,9 +269,65 @@ config ESP32P4_SDMMC
 	select MMCSD
 	select MMCSD_SDIO
 	select SDIO_BLOCKSETUP
+	select SCHED_WORKQUEUE
+	select SCHED_HPWORK
 	---help---
 		Enables SDMMC Host Controller driver support for ESP32-P4,
-		supporting MicroSD/TF card slot in 4-bit bus mode.
+		supporting both the fixed-pin MicroSD slot and the GPIO-matrix
+		SDIO link to the on-board ESP32-C6.
+
+if ESP32P4_SDMMC
+
+config ESP32P4_SDMMC_DMA
+	bool "Support SDMMC internal DMA"
+	default y
+	select SDIO_DMA
+
+config ESP32P4_SDMMC_SLOT
+	int "SDMMC slot"
+	range 0 1
+	default 0
+
+config ESP32P4_SDMMC_WIDTH
+	int "SDIO bus width"
+	range 1 4
+	default 4
+
+config ESP32P4_SDMMC_FREQ
+	int "Transfer clock frequency (kHz)"
+	default 20000
+
+config ESP32P4_SDMMC_CLK
+	int "CLK GPIO"
+	default 43 if ESP32P4_SDMMC_SLOT = 0
+	default 18
+
+config ESP32P4_SDMMC_CMD
+	int "CMD GPIO"
+	default 44 if ESP32P4_SDMMC_SLOT = 0
+	default 19
+
+config ESP32P4_SDMMC_D0
+	int "D0 GPIO"
+	default 39 if ESP32P4_SDMMC_SLOT = 0
+	default 14
+
+config ESP32P4_SDMMC_D1
+	int "D1 GPIO"
+	default 40 if ESP32P4_SDMMC_SLOT = 0
+	default 15
+
+config ESP32P4_SDMMC_D2
+	int "D2 GPIO"
+	default 41 if ESP32P4_SDMMC_SLOT = 0
+	default 16
+
+config ESP32P4_SDMMC_D3
+	int "D3 GPIO"
+	default 42 if ESP32P4_SDMMC_SLOT = 0
+	default 17
+
+endif # ESP32P4_SDMMC
 
 endif # ARCH_CHIP_ESP32P4
 
