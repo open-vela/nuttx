@@ -1,0 +1,341 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_ESP32P4
+
+source "arch/risc-v/src/common/espressif/Kconfig"
+
+config ESP32P4_SELECTS_REV_LESS_V3
+  bool "Select ESP32-P4 revisions <3.0 (No >=3.x Support)"
+  default n
+  ---help---
+    Select this option to support ESP32-P4 revisions 0.x and 1.x.
+    Revisions higher than 3.0 (included) and revisions less than 3.0
+    have huge hardware difference.
+    Revisions higher than 3.0 (included) is not compatible with 0.x and 1.x.
+
+choice ESP32P4_REV_MIN
+  prompt "Minimum Supported ESP32-P4 Revision"
+  default ESP32P4_REV_MIN_1
+  ---help---
+    Required minimum chip revision. ESP-IDF will check for it and
+    reject to boot if the chip revision fails the check.
+    This ensures the chip used will have some modifications (features, or bugfixes).
+
+    The complied binary will only support chips above this revision,
+    this will also help to reduce binary size.
+
+config ESP32P4_REV_MIN_0
+  depends on ESP32P4_SELECTS_REV_LESS_V3
+  bool "Rev v0.0"
+
+config ESP32P4_REV_MIN_1
+  depends on ESP32P4_SELECTS_REV_LESS_V3
+  bool "Rev v0.1"
+
+config ESP32P4_REV_MIN_100
+  depends on ESP32P4_SELECTS_REV_LESS_V3
+  bool "Rev v1.0"
+
+config ESP32P4_REV_MIN_300
+  bool "Rev v3.0"
+  depends on !ESP32P4_SELECTS_REV_LESS_V3
+
+endchoice
+
+config ESP32P4_REV_MIN_FULL
+  int
+  default 0 if ESP32P4_REV_MIN_0
+  default 1 if ESP32P4_REV_MIN_1
+  default 100 if ESP32P4_REV_MIN_100
+  default 300 if ESP32P4_REV_MIN_300
+
+config ESP_REV_MIN_FULL
+  int
+  default ESP32P4_REV_MIN_FULL
+
+config ESP32P4_REV_MAX_FULL
+  int
+  default 399 if !ESP32P4_SELECTS_REV_LESS_V3
+  default 199 if ESP32P4_SELECTS_REV_LESS_V3
+  # keep in sync the "Maximum Supported Revision" description with this value
+
+config ESP_REV_MAX_FULL
+  int
+  default ESP32P4_REV_MAX_FULL
+
+config ESP_EFUSE_BLOCK_REV_MIN_FULL
+  int "Minimum Supported ESP32-P4 eFuse Block Revision"
+  default 0
+  ---help---
+    Required minimum eFuse Block revision. ESP-IDF will check it at the 2nd bootloader stage
+    whether the current image can work correctly for this eFuse Block revision.
+    So that to avoid running an incompatible image on a SoC that contains breaking change in the eFuse Block.
+    If you want to update this value to run the image that not compatible with the current eFuse Block revision,
+    please contact to Espressif's business team for details:
+    https://www.espressif.com.cn/en/contact-us/sales-questions
+
+config ESP_EFUSE_BLOCK_REV_MAX_FULL
+  int
+  default 199
+  comment "Maximum Supported ESP32-P4 eFuse Block Revision (eFuse Block Rev v0.99)"
+  # The revision in the comment must correspond to the default value of ESP_EFUSE_BLOCK_REV_MAX_FULL
+
+config ESP32P4_MIPI_CSI
+	bool "ESP32-P4 MIPI CSI Controller"
+	default n
+	---help---
+		Enables the ESP32-P4 MIPI CSI-2 Host controller, D-PHY receiver,
+		and CSI Bridge subsystem.
+
+menuconfig ESP32P4_I2S
+	bool "ESP32-P4 I2S"
+	default n
+	select I2S
+	---help---
+		Enable support for the ESP32-P4 I2S peripheral.
+
+if ESP32P4_I2S
+
+config ESP32P4_I2S_MAXINFLIGHT
+	int "I2S queue size"
+	default 4
+	range 1 16
+	---help---
+		Total number of audio buffers that can be in flight simultaneously.
+
+config ESP32P4_I2S0
+	bool "I2S 0"
+	default y
+	---help---
+		Enable I2S Port 0.
+
+if ESP32P4_I2S0
+
+config ESP32P4_I2S0_TX
+	bool "Enable I2S0 TX (Transmitter/Playback)"
+	default y
+	---help---
+		Enable I2S0 transmitter channel.
+
+config ESP32P4_I2S0_RX
+	bool "Enable I2S0 RX (Receiver/Record)"
+	default y
+	---help---
+		Enable I2S0 receiver channel.
+
+choice
+	prompt "I2S0 Role"
+	default ESP32P4_I2S0_ROLE_MASTER
+	---help---
+		Select Master or Slave operation mode.
+
+config ESP32P4_I2S0_ROLE_MASTER
+	bool "Master"
+
+config ESP32P4_I2S0_ROLE_SLAVE
+	bool "Slave"
+
+endchoice # I2S0 Role
+
+config ESP32P4_I2S0_DATA_BIT_WIDTH
+	int "I2S0 Data Bit Width"
+	default 16
+	range 8 32
+	---help---
+		Sample data bit width (8, 16, 24, or 32).
+
+config ESP32P4_I2S0_SAMPLE_RATE
+	int "I2S0 Default Sample Rate (Hz)"
+	default 44100
+	---help---
+		Default audio sample rate in Hz (e.g. 16000, 44100, 48000).
+
+config ESP32P4_I2S0_MCLKPIN
+	int "I2S0 MCLK Pin"
+	default 13
+	---help---
+		GPIO pin number for I2S0 Master Clock output (Default 13 on EV Board V1.8).
+
+config ESP32P4_I2S0_BCLKPIN
+	int "I2S0 BCLK Pin"
+	default 12
+	---help---
+		GPIO pin number for I2S0 Bit Clock (Default 12 on EV Board V1.8).
+
+config ESP32P4_I2S0_WSPIN
+	int "I2S0 WS / LRCK Pin"
+	default 10
+	---help---
+		GPIO pin number for I2S0 Word Select / Left-Right Clock (Default 10 on EV Board V1.8).
+
+config ESP32P4_I2S0_DOUTPIN
+	int "I2S0 DOUT (TX/Playback) Pin"
+	default 9
+	depends on ESP32P4_I2S0_TX
+	---help---
+		GPIO pin number for I2S0 Data Output (Default 9 on EV Board V1.8).
+
+config ESP32P4_I2S0_DINPIN
+	int "I2S0 DIN (RX/Record) Pin"
+	default 11
+	depends on ESP32P4_I2S0_RX
+	---help---
+		GPIO pin number for I2S0 Data Input (Default 11 on EV Board V1.8).
+
+endif # ESP32P4_I2S0
+
+endif # ESP32P4_I2S
+
+menuconfig ESP32P4_MIPI_DSI
+	bool "MIPI DSI Host & Bridge Controller"
+	default n
+	select DRIVERS_VIDEO
+	select VIDEO_FB
+	---help---
+		Enable ESP32-P4 MIPI DSI Host controller, D-PHY TX PLL, and Bridge.
+
+if ESP32P4_MIPI_DSI
+
+config ESP32P4_MIPI_DSI_LANES
+	int "Number of MIPI DSI Data Lanes"
+	default 2
+	range 1 2
+
+config ESP32P4_MIPI_DSI_LANE_BITRATE_MBPS
+	int "MIPI DSI Lane Bitrate (Mbps)"
+	default 1000
+	range 100 1500
+
+choice
+	prompt "MIPI DSI Default Display Panel"
+	default ESP32P4_MIPI_DSI_PANEL_EK79007
+
+config ESP32P4_MIPI_DSI_PANEL_EK79007
+	bool "EK79007 (1024x600, 2-lane, RGB565/RGB888)"
+
+config ESP32P4_MIPI_DSI_PANEL_ILI9881C
+	bool "ILI9881C (720x1280, 2-lane, RGB565/RGB888)"
+
+config ESP32P4_MIPI_DSI_PANEL_ST7701S
+	bool "ST7701S (480x800, 2-lane, RGB565/RGB888)"
+
+config ESP32P4_MIPI_DSI_PANEL_GENERIC
+	bool "Generic DPI Video Mode Panel"
+
+endchoice
+
+config ESP32P4_MIPI_DSI_WIDTH
+	int "Display Horizontal Resolution (pixels)"
+	default 1024 if ESP32P4_MIPI_DSI_PANEL_EK79007
+	default 720 if ESP32P4_MIPI_DSI_PANEL_ILI9881C
+	default 480 if ESP32P4_MIPI_DSI_PANEL_ST7701S
+	default 1024
+
+config ESP32P4_MIPI_DSI_HEIGHT
+	int "Display Vertical Resolution (pixels)"
+	default 600 if ESP32P4_MIPI_DSI_PANEL_EK79007
+	default 1280 if ESP32P4_MIPI_DSI_PANEL_ILI9881C
+	default 800 if ESP32P4_MIPI_DSI_PANEL_ST7701S
+	default 600
+
+config ESP32P4_MIPI_DSI_COLOR_RGB565
+	bool "Use 16-bit RGB565 Color Format"
+	default y
+
+endif # ESP32P4_MIPI_DSI
+
+config ESP32P4_DMA2D
+	bool "ESP32-P4 2D-DMA Controller"
+	default y if ESP32P4_PPA
+	---help---
+		Enables 2D-DMA hardware controller support for ESP32-P4.
+
+config ESP32P4_PPA
+	bool "ESP32-P4 PPA (Pixel Processing Accelerator)"
+	default y
+	select ESP32P4_DMA2D
+	---help---
+		Enables hardware 2D Pixel Processing Accelerator (PPA) support
+		for ESP32-P4, providing hardware image scaling, rotation,
+		blending, and color space conversion.
+
+config ESP32P4_SDMMC
+	bool "ESP32-P4 SDMMC Host Controller"
+	default n
+	select ARCH_HAVE_SDIO
+	select MMCSD
+	select MMCSD_SDIO
+	select SDIO_BLOCKSETUP
+	select SCHED_WORKQUEUE
+	select SCHED_HPWORK
+	---help---
+		Enables SDMMC Host Controller driver support for ESP32-P4,
+		supporting both the fixed-pin MicroSD slot and the GPIO-matrix
+		SDIO link to the on-board ESP32-C6.
+
+if ESP32P4_SDMMC
+
+config ESP32P4_SDMMC_DMA
+	bool "Support SDMMC internal DMA"
+	default y
+	select SDIO_DMA
+
+config ESP32P4_SDMMC_SLOT
+	int "SDMMC slot"
+	range 0 1
+	default 0
+
+config ESP32P4_SDMMC_WIDTH
+	int "SDIO bus width"
+	range 1 4
+	default 4
+
+config ESP32P4_SDMMC_FREQ
+	int "Transfer clock frequency (kHz)"
+	default 20000
+
+config ESP32P4_SDMMC_CLK
+	int "CLK GPIO"
+	default 43 if ESP32P4_SDMMC_SLOT = 0
+	default 18
+
+config ESP32P4_SDMMC_CMD
+	int "CMD GPIO"
+	default 44 if ESP32P4_SDMMC_SLOT = 0
+	default 19
+
+config ESP32P4_SDMMC_D0
+	int "D0 GPIO"
+	default 39 if ESP32P4_SDMMC_SLOT = 0
+	default 14
+
+config ESP32P4_SDMMC_D1
+	int "D1 GPIO"
+	default 40 if ESP32P4_SDMMC_SLOT = 0
+	default 15
+
+config ESP32P4_SDMMC_D2
+	int "D2 GPIO"
+	default 41 if ESP32P4_SDMMC_SLOT = 0
+	default 16
+
+config ESP32P4_SDMMC_D3
+	int "D3 GPIO"
+	default 42 if ESP32P4_SDMMC_SLOT = 0
+	default 17
+
+endif # ESP32P4_SDMMC
+
+endif # ARCH_CHIP_ESP32P4
+
+config P4_REV3_MSPI_CRASH_AFTER_POWER_UP_WORKAROUND
+  bool
+  default y if ESP32P4_REV_MIN_300
+
+config P4_REV3_MSPI_WORKAROUND_SIZE
+  hex
+  default 0x100 if ESP32P4_REV_MIN_300
+  default 0

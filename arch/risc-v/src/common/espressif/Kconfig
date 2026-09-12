@@ -3,10 +3,11 @@
 # see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-if ARCH_CHIP_ESPRESSIF || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32C3_GENERIC
+if ARCH_CHIP_ESPRESSIF || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32C3_GENERIC || ARCH_CHIP_ESP32P4
 
 choice ESPRESSIF_CHIP_SERIES
 	prompt "Chip Series"
+	default ESPRESSIF_ESP32P4 if ARCH_CHIP_ESP32P4
 	default ESPRESSIF_ESP32C3
 
 config ESPRESSIF_ESP32C3
@@ -27,6 +28,12 @@ config ESPRESSIF_ESP32H2
 	---help---
 		Espressif ESP32-H2 (RV32IMC).
 
+config ESPRESSIF_ESP32P4
+	bool "ESP32-P4"
+	select ARCH_HAVE_I2CRESET
+	---help---
+		Espressif ESP32-P4 (dual-core RV32IMAC).
+
 endchoice # ESPRESSIF_CHIP_SERIES
 
 config ESPRESSIF_CHIP_SERIES
@@ -34,11 +41,12 @@ config ESPRESSIF_CHIP_SERIES
 	default "esp32c3" if ESPRESSIF_ESP32C3
 	default "esp32c6" if ESPRESSIF_ESP32C6
 	default "esp32h2" if ESPRESSIF_ESP32H2
+	default "esp32p4" if ESPRESSIF_ESP32P4
 	default "unknown"
 
 choice ESPRESSIF_FLASH
 	prompt "Flash Size"
-	default ESPRESSIF_FLASH_4M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32H2
+	default ESPRESSIF_FLASH_4M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32H2 || ESPRESSIF_ESP32P4
 
 config ESPRESSIF_FLASH_2M
 	bool "2 MB"
@@ -54,6 +62,89 @@ config ESPRESSIF_FLASH_16M
 
 endchoice # ESPRESSIF_FLASH
 
+config ESPRESSIF_DONT_USE_ROM_LIBC
+	bool "Don't use ROM libc functions"
+	default n
+	---help---
+		Use NuttX libc instead of ROM newlib functions.  This prevents
+		cross-heap allocation when external RAM is added to the NuttX heap.
+
+menuconfig ESPRESSIF_SPIRAM
+	bool "External SPI RAM (SPIRAM)"
+	depends on ESPRESSIF_ESP32P4
+	default n
+	---help---
+		Enable package-integrated PSRAM through the Espressif HAL.
+
+if ESPRESSIF_SPIRAM
+
+config ESPRESSIF_SPIRAM_BOOT_INIT
+	bool "Initialize SPIRAM during early boot"
+	default y
+
+config ESPRESSIF_SPIRAM_IGNORE_NOTFOUND
+	bool "Ignore SPIRAM not found"
+	depends on !ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+	default n
+
+config ESPRESSIF_SPIRAM_MEMTEST
+	bool "Run SPIRAM memory test at boot"
+	default y
+
+config ESPRESSIF_SPIRAM_USE_8LINE_MODE
+	bool "Use x8 line mode"
+	default n
+	---help---
+		Leave this disabled for the ESP32-P4NRW32X x16 PSRAM interface.
+
+config ESPRESSIF_SPIRAM_ECC_ENABLE
+	bool "Enable SPIRAM ECC"
+	default n
+
+choice ESPRESSIF_SPIRAM_SPEED
+	prompt "SPIRAM speed"
+	default ESPRESSIF_SPIRAM_SPEED_200M if ESP32P4_REV_MIN_300
+	default ESPRESSIF_SPIRAM_SPEED_80M
+
+config ESPRESSIF_SPIRAM_SPEED_20M
+	bool "20 MHz"
+
+config ESPRESSIF_SPIRAM_SPEED_80M
+	bool "80 MHz"
+
+config ESPRESSIF_SPIRAM_SPEED_200M
+	bool "200 MHz"
+	depends on ESP32P4_REV_MIN_300
+
+config ESPRESSIF_SPIRAM_SPEED_250M
+	bool "250 MHz"
+	depends on ESP32P4_REV_MIN_300
+
+endchoice # ESPRESSIF_SPIRAM_SPEED
+
+config ESPRESSIF_SPIRAM_SPEED
+	int
+	default 20 if ESPRESSIF_SPIRAM_SPEED_20M
+	default 80 if ESPRESSIF_SPIRAM_SPEED_80M
+	default 200 if ESPRESSIF_SPIRAM_SPEED_200M
+	default 250 if ESPRESSIF_SPIRAM_SPEED_250M
+
+config ESPRESSIF_SPIRAM_USER_HEAP
+	bool "Add SPIRAM to user heap"
+	default y
+	select ESPRESSIF_DONT_USE_ROM_LIBC
+	---help---
+		Add initialized PSRAM as an additional NuttX heap region.
+
+config ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+	bool "Allow .bss segment placed in external memory"
+	default n
+	---help---
+		Allow EXT_RAM_BSS_ATTR data to be placed in PSRAM.  Keep this
+		disabled during initial bring-up so boot does not depend on PSRAM.
+
+endif # ESPRESSIF_SPIRAM
+
 config ESPRESSIF_FLASH_DETECT
 	bool "Auto-detect FLASH size"
 	default n
@@ -63,9 +154,11 @@ config ESPRESSIF_FLASH_DETECT
 config ESPRESSIF_NUM_CPUS
 	int
 	default 1 if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32H2
+	default 2 if ESPRESSIF_ESP32P4
 
 choice ESPRESSIF_CPU_FREQ
 	prompt "CPU frequency"
+	default ESPRESSIF_CPU_FREQ_400 if ESPRESSIF_ESP32P4
 	default ESPRESSIF_CPU_FREQ_160 if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
 	default ESPRESSIF_CPU_FREQ_96 if ESPRESSIF_ESP32H2
 	---help---
@@ -107,6 +200,12 @@ config ESPRESSIF_CPU_FREQ_160
 	---help---
 		Set the CPU frequency to 160 MHz.
 
+config ESPRESSIF_CPU_FREQ_400
+	bool "400 MHz"
+	depends on ESPRESSIF_ESP32P4
+	---help---
+		Set the CPU frequency to 400 MHz.
+
 endchoice # ESPRESSIF_CPU_FREQ
 
 config ESPRESSIF_CPU_FREQ_MHZ
@@ -117,6 +216,7 @@ config ESPRESSIF_CPU_FREQ_MHZ
 	default 80 if ESPRESSIF_CPU_FREQ_80
 	default 96 if ESPRESSIF_CPU_FREQ_96
 	default 160 if ESPRESSIF_CPU_FREQ_160
+	default 400 if ESPRESSIF_CPU_FREQ_400
 
 config ESPRESSIF_REGION_PROTECTION
 	bool "Enable region protection"
@@ -340,7 +440,7 @@ config ESPRESSIF_I2C0
 config ESPRESSIF_I2C1
 	bool "I2C 1"
 	default n
-	depends on ARCH_CHIP_ESP32H2
+	depends on ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32P4
 	select ESPRESSIF_I2C
 	select I2C
 	select ESPRESSIF_I2C_PERIPH
@@ -1019,18 +1119,22 @@ config ESPRESSIF_UART0_TXPIN
 	default 21 if ESPRESSIF_ESP32C3
 	default 16 if ESPRESSIF_ESP32C6
 	default 24 if ESPRESSIF_ESP32H2
+	default 37 if ESPRESSIF_ESP32P4
 	range 0 21 if ESPRESSIF_ESP32C3
 	range 0 30 if ESPRESSIF_ESP32C6
 	range 0 27 if ESPRESSIF_ESP32H2
+	range 0 54 if ESPRESSIF_ESP32P4
 
 config ESPRESSIF_UART0_RXPIN
 	int "UART0 RX Pin"
 	default 20 if ESPRESSIF_ESP32C3
 	default 17 if ESPRESSIF_ESP32C6
 	default 23 if ESPRESSIF_ESP32H2
+	default 38 if ESPRESSIF_ESP32P4
 	range 0 21 if ESPRESSIF_ESP32C3
 	range 0 30 if ESPRESSIF_ESP32C6
 	range 0 27 if ESPRESSIF_ESP32H2
+	range 0 54 if ESPRESSIF_ESP32P4
 
 config ESPRESSIF_UART0_RTSPIN
 	int "UART0 RTS Pin"
@@ -1038,9 +1142,11 @@ config ESPRESSIF_UART0_RTSPIN
 	default 16 if ESPRESSIF_ESP32C3
 	default 15 if ESPRESSIF_ESP32C6
 	default 22 if ESPRESSIF_ESP32H2
+	default 35 if ESPRESSIF_ESP32P4
 	range 0 21 if ESPRESSIF_ESP32C3
 	range 0 30 if ESPRESSIF_ESP32C6
 	range 0 27 if ESPRESSIF_ESP32H2
+	range 0 54 if ESPRESSIF_ESP32P4
 
 config ESPRESSIF_UART0_CTSPIN
 	int "UART0 CTS Pin"
@@ -1048,9 +1154,11 @@ config ESPRESSIF_UART0_CTSPIN
 	default 15 if ESPRESSIF_ESP32C3
 	default 14 if ESPRESSIF_ESP32C6
 	default 21 if ESPRESSIF_ESP32H2
+	default 36 if ESPRESSIF_ESP32P4
 	range 0 21 if ESPRESSIF_ESP32C3
 	range 0 30 if ESPRESSIF_ESP32C6
 	range 0 27 if ESPRESSIF_ESP32H2
+	range 0 54 if ESPRESSIF_ESP32P4
 
 endif # ESPRESSIF_UART0
 
@@ -1388,14 +1496,14 @@ endif # ESPRESSIF_SPIFLASH
 
 choice ESPRESSIF_FLASH_FREQ
 	prompt "SPI Flash frequency"
-	default ESPRESSIF_FLASH_FREQ_80M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	default ESPRESSIF_FLASH_FREQ_80M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
 	default ESPRESSIF_FLASH_FREQ_48M if ESPRESSIF_ESP32H2
 	---help---
 		SPI Flash frequency.
 
 config ESPRESSIF_FLASH_FREQ_80M
 	bool "80 MHz"
-	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
 
 config ESPRESSIF_FLASH_FREQ_48M
 	bool "48 MHz"
@@ -1403,7 +1511,7 @@ config ESPRESSIF_FLASH_FREQ_48M
 
 config ESPRESSIF_FLASH_FREQ_40M
 	bool "40 MHz"
-	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
 
 config ESPRESSIF_FLASH_FREQ_26M
 	bool "26 MHz"
@@ -1633,12 +1741,14 @@ if ESPRESSIF_I2C0
 config ESPRESSIF_I2C0_SCLPIN
 	int "I2C0 SCL Pin"
 	default 6
-	range 0 21
+	range 0 21 if !ARCH_CHIP_ESP32P4
+	range 0 54 if ARCH_CHIP_ESP32P4
 
 config ESPRESSIF_I2C0_SDAPIN
 	int "I2C0 SDA Pin"
 	default 5
-	range 0 21
+	range 0 21 if !ARCH_CHIP_ESP32P4
+	range 0 54 if ARCH_CHIP_ESP32P4
 
 endif # ESPRESSIF_I2C0
 
@@ -1647,12 +1757,14 @@ if ESPRESSIF_I2C1
 config ESPRESSIF_I2C1_SCLPIN
 	int "I2C1 SCL Pin"
 	default 2
-	range 0 21
+	range 0 21 if !ARCH_CHIP_ESP32P4
+	range 0 54 if ARCH_CHIP_ESP32P4
 
 config ESPRESSIF_I2C1_SDAPIN
 	int "I2C1 SDA Pin"
 	default 1
-	range 0 21
+	range 0 21 if !ARCH_CHIP_ESP32P4
+	range 0 54 if ARCH_CHIP_ESP32P4
 
 endif # ESPRESSIF_I2C1
 
