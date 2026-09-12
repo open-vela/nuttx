@@ -271,7 +271,7 @@
 #define STM32_SDMMC_MMCXFR_CLKDIV   (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 #define STM32_SDMMC_SDXFR_CLKDIV    (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 
-/* ST BSP stm32h750b_discovery_mmc.c uses rising edge; prefer that for eMMC. */
+/* Rising clock edge, as in ST BSP stm32h750b_discovery_mmc.c (eMMC) */
 
 #define STM32_SDMMC_CLKCR_EDGE      (0) /* rising */
 

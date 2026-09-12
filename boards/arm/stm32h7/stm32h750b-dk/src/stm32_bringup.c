@@ -138,7 +138,9 @@ static void vg_setup_data_layout(void)
              "WARNING: mkdir /mnt/emmc/data failed: %d\n", ret);
     }
 
-  /* One-time stage0 → stage1: /mnt/emmc/velaguard → /mnt/emmc/data/velaguard */
+  /* One-time stage0 -> stage1 migration:
+   * /mnt/emmc/velaguard -> /mnt/emmc/data/velaguard
+   */
 
   if (stat("/mnt/emmc/velaguard", &st) == 0 &&
       stat("/mnt/emmc/data/velaguard", &st) != 0)
@@ -152,7 +154,8 @@ static void vg_setup_data_layout(void)
       else
         {
           syslog(LOG_INFO,
-                 "Migrated /mnt/emmc/velaguard -> /mnt/emmc/data/velaguard\n");
+                 "Migrated /mnt/emmc/velaguard -> "
+                 "/mnt/emmc/data/velaguard\n");
         }
     }
 
@@ -376,11 +379,13 @@ int stm32_bringup(void)
   ret = symlink("/dev/ttyS2", "/dev/rs485");
 #  else
   /* No USART2: UART7 is the first aux UART -> ttyS1 (see board README). */
+
   ret = symlink("/dev/ttyS1", "/dev/rs485");
 #  endif
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ERROR: Failed to create symlink for RS485: %d\n", ret);
+      syslog(LOG_ERR, "ERROR: Failed to create symlink for RS485: %d\n",
+             ret);
     }
 #endif
 
