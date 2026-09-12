@@ -380,7 +380,11 @@
 #endif
 
 #define BOARD_SDRAM2_SIZE               (8*1024*1024)
-#define BOARD_SDRAM2_HEAP_OFFSET        (1*1024*1024)
+/* 2MB: keep the heap well clear of the LVGL framebuffer reserve (1MB).
+ * A render-path out-of-bounds write was landing at SDRAM+1MB (right at
+ * the old heap start) and smashing free-node metadata; the extra 1MB
+ * dead zone keeps heap metadata out of reach. */
+#define BOARD_SDRAM2_HEAP_OFFSET        (2*1024*1024)
 
 /* BOARD_FMC_SDCR[1..2] - Initial value for SDRAM control registers for SDRAM
  *      bank 1-2. Note that some bits in SDCR1 influence both SDRAM banks and
