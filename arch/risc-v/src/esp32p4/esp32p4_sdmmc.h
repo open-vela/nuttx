@@ -1,5 +1,5 @@
 /****************************************************************************
- * arch/risc-v/src/esp32p4/espressif/esp32p4_sdmmc.h
+ * arch/risc-v/src/esp32p4/esp32p4_sdmmc.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *

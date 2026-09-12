@@ -347,6 +347,7 @@ int sdio_io_rw_extended(FAR struct sdio_dev_s *dev, bool write,
     }
 
   memcpy(&resp, &data, sizeof(resp));
+
   /* Check for errors */
 
   if (wkupevent & SDIOWAIT_TIMEOUT)
