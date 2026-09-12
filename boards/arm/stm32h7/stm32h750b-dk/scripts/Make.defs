@@ -23,7 +23,11 @@ include $(TOPDIR)/tools/Config.mk
 include $(TOPDIR)/arch/arm/src/armv7-m/Toolchain.defs
 
 ifeq ($(CONFIG_ARCH_CHIP_STM32H7_CORTEXM7),y)
-  LDSCRIPT = flash.ld
+  ifeq ($(CONFIG_STM32H750B_DK_QSPI_BOOT),y)
+    LDSCRIPT = qspi_flash.ld
+  else
+    LDSCRIPT = flash.ld
+  endif
 else
   LDSCRIPT = flash_m4.ld
 endif

@@ -271,9 +271,39 @@
 #define STM32_SDMMC_MMCXFR_CLKDIV   (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 #define STM32_SDMMC_SDXFR_CLKDIV    (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 
-#define STM32_SDMMC_CLKCR_EDGE      STM32_SDMMC_CLKCR_NEGEDGE
+/* Rising clock edge, as in ST BSP stm32h750b_discovery_mmc.c (eMMC) */
+
+#define STM32_SDMMC_CLKCR_EDGE      (0) /* rising */
+
+/* SDMMC1 — on-board eMMC (U11), 8-bit wiring (MB1381 / ST BSP MSP):
+ *   CK=PC12, CMD=PD2, D0–D3=PC8–11, D4–D5=PB8–9, D6–D7=PC6–7
+ * NuttX stm32_sdmmc.c configures D0–D3 (+CK/CMD) in sdio_initialize();
+ * board stm32_sdmmc.c also arms D4–D7 for a future 8-bit path.
+ */
+
+#define GPIO_SDMMC1_CK   (GPIO_SDMMC1_CK_0|GPIO_SPEED_100MHz)   /* PC12 */
+#define GPIO_SDMMC1_CMD  (GPIO_SDMMC1_CMD_0|GPIO_SPEED_100MHz)  /* PD2 */
+#define GPIO_SDMMC1_D0   (GPIO_SDMMC1_D0_0|GPIO_SPEED_100MHz)   /* PC8 */
+#define GPIO_SDMMC1_D1   (GPIO_SDMMC1_D1_0|GPIO_SPEED_100MHz)   /* PC9 */
+#define GPIO_SDMMC1_D2   (GPIO_SDMMC1_D2_0|GPIO_SPEED_100MHz)   /* PC10 */
+#define GPIO_SDMMC1_D3   (GPIO_SDMMC1_D3_0|GPIO_SPEED_100MHz)   /* PC11 */
+#define GPIO_SDMMC1_D4   (GPIO_SDMMC1_D4_0|GPIO_SPEED_100MHz)   /* PB8 */
+#define GPIO_SDMMC1_D5   (GPIO_SDMMC1_D5_0|GPIO_SPEED_100MHz)   /* PB9 */
+#define GPIO_SDMMC1_D6   (GPIO_SDMMC1_D6_0|GPIO_SPEED_100MHz)   /* PC6 */
+#define GPIO_SDMMC1_D7   (GPIO_SDMMC1_D7_0|GPIO_SPEED_100MHz)   /* PC7 */
 
 /* Ethernet definitions *****************************************************/
+
+/* MB1381 H750XB-B01 routes the LAN8740A through full MII.  PH2/MII_CRS and
+ * PH3/MII_COL share pins with QSPI bank 2 IO0/IO1.  QSPI-XIP builds must
+ * leave those pins in their QSPI alternate function; negotiated full-duplex
+ * Ethernet does not use CRS/COL.
+ */
+
+#ifdef CONFIG_STM32H750B_DK_QSPI_BOOT
+#  define BOARD_ETH_MII_NO_CRS_COL 1
+#  define BOARD_ETH_PHY_POLL 1
+#endif
 
 /* The STM32H7 connects to a LAN8740A PHY using these pins:
  *
@@ -350,6 +380,11 @@
 #endif
 
 #define BOARD_SDRAM2_SIZE               (8*1024*1024)
+/* 2MB: keep the heap well clear of the LVGL framebuffer reserve (1MB).
+ * A render-path out-of-bounds write was landing at SDRAM+1MB (right at
+ * the old heap start) and smashing free-node metadata; the extra 1MB
+ * dead zone keeps heap metadata out of reach. */
+#define BOARD_SDRAM2_HEAP_OFFSET        (2*1024*1024)
 
 /* BOARD_FMC_SDCR[1..2] - Initial value for SDRAM control registers for SDRAM
  *      bank 1-2. Note that some bits in SDCR1 influence both SDRAM banks and
@@ -496,6 +531,10 @@
 
 /* Alternate function pin selections ****************************************/
 
+/* USART2 - ESP-01 (VelaGuard expansion board, STMod P1-2/3) */
+#define GPIO_USART2_RX   (GPIO_USART2_RX_2 | GPIO_SPEED_100MHz)  /* PD6 */
+#define GPIO_USART2_TX   (GPIO_USART2_TX_2 | GPIO_SPEED_100MHz)  /* PD5 */
+
 /* USART3 (Nucleo Virtual Console) */
 
 #define GPIO_USART3_RX   (GPIO_USART3_RX_1 | GPIO_SPEED_100MHz)  /* PB11 */
@@ -505,6 +544,9 @@
 
 #define GPIO_UART7_RX   (GPIO_UART7_RX_1 | GPIO_SPEED_100MHz)  /* PA8 */
 #define GPIO_UART7_TX   (GPIO_UART7_TX_2 | GPIO_SPEED_100MHz)  /* PB4 */
+
+/* TIM15 - PWM (VelaGuard D01 / passive buzzer) */
+#define GPIO_TIM15_CH2OUT (GPIO_TIM15_CH2OUT_2 | GPIO_SPEED_50MHz)  /* PE6 */
 
 /* I2C4 - Used by Touchscreen and Audio Codec */
 
@@ -544,6 +586,19 @@
 #define GPIO_LTDC_HSYNC  (GPIO_LTDC_HSYNC_3 | GPIO_SPEED_100MHz)
 #define GPIO_LTDC_DE     (GPIO_LTDC_DE_3 | GPIO_SPEED_100MHz)
 #define GPIO_LTDC_CLK    (GPIO_LTDC_CLK_3 | GPIO_SPEED_100MHz)
+
+/* RS485 direction (VelaGuard expansion, Arduino D4 / PK1) */
+#define GPIO_UART7_RS485_DIR (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_CLEAR|\
+                              GPIO_PORTK|GPIO_PIN1) /* PK1 */
+
+/* ESP-01S control (STMod P1-14 / P1-12) */
+#define GPIO_ESP_EN (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_SET|\
+                              GPIO_PORTA|GPIO_PIN3) /* PA3 */
+#define GPIO_ESP_RST (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_SET|\
+                              GPIO_PORTH|GPIO_PIN10) /* PH10 */
 
 /* DMA **********************************************************************/
 
