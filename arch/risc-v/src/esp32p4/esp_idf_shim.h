@@ -191,46 +191,6 @@ static inline void *heap_caps_aligned_calloc(size_t align, size_t n,
 #define heap_caps_free(p)  kmm_free(p)
 
 /****************************************************************************
- * Clock Tree — simplified stubs for ESP32-P4
- *
- * soc_module_clk_t is defined in soc/clk_tree_defs.h (from HAL headers).
- * We only provide stub functions for esp_clk_tree_enable_src and
- * esp_clk_tree_src_get_freq_hz.
- ****************************************************************************/
-
-#include "soc/clk_tree_defs.h"  /* provides soc_module_clk_t enum */
-
-#define ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED  0
-#define ESP_CLK_TREE_SRC_FREQ_PRECISION_APPROX  1
-#define ESP_CLK_TREE_SRC_FREQ_PRECISION_EXACT   2
-
-static inline esp_err_t esp_clk_tree_enable_src(soc_module_clk_t src,
-                                                bool enable)
-{
-  (void)src;
-  (void)enable;
-  return ESP_OK; /* clocks enabled by default after reset on ESP32-P4 */
-}
-
-static inline esp_err_t esp_clk_tree_src_get_freq_hz(
-    soc_module_clk_t src, int precision, uint32_t *freq_hz)
-{
-  (void)precision;
-
-  /* ESP32-P4 known frequencies:
-   * XTAL = 40MHz (enum value varies)
-   * PLL_F240M (enum ~8-9 depending on version)
-   * Use a simple heuristic: if freq would be > 100MHz use 240M,
-   * otherwise default to 40MHz XTAL.
-   * The actual DSI code hardcodes the DPI source freq anyway.
-   */
-
-  (void)src;
-  *freq_hz = 40000000;
-  return ESP_OK;
-}
-
-/****************************************************************************
  * PERIPH_RCC_ATOMIC
  *
  * Already available via esp-hal-3rdparty periph_ctrl.h which provides

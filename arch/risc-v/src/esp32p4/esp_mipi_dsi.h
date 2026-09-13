@@ -153,6 +153,7 @@ int esp_mipi_dsi_set_front_fb(int index);
 
 void esp_mipi_dsi_start_demo(void);
 
+
 #ifdef __cplusplus
 }
 #endif

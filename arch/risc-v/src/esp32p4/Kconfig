@@ -146,12 +146,16 @@ endmenu # Cache config
 config ESP32P4_MIPI_DSI
 	bool "MIPI-DSI display"
 	default n
+	select FB_UPDATE if VIDEO_FB
 	---help---
 		Enable the MIPI-DSI display pipeline for ESP32-P4: DSI host,
 		PHY, DPI bridge and the EK79007 panel (1024x600 RGB565).
 		The DSI driver owns two framebuffers in PSRAM and the board
 		layer registers /dev/fb0 on top of it. Enable together with
-		CONFIG_DRIVERS_VIDEO and CONFIG_VIDEO_FB.
+		CONFIG_DRIVERS_VIDEO and CONFIG_VIDEO_FB. FB_UPDATE is required
+		because the display DMA reads physical PSRAM while the graphics
+		stack renders through the CPU cache: the FBIO_UPDATE ioctl is
+		what triggers the dirty-region cache writeback.
 
 endif # ARCH_CHIP_ESP32P4
 

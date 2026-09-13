@@ -66,6 +66,8 @@
 
 /* HAL includes */
 
+#include "esp_clk_tree.h"
+#include "esp_ldo_regulator.h"
 #include "hal/mipi_dsi_hal.h"
 #include "hal/mipi_dsi_ll.h"
 #include "hal/mipi_dsi_host_ll.h"
@@ -73,43 +75,6 @@
 #include "hal/mipi_dsi_brg_ll.h"
 #include "hal/dw_gdma_ll.h"
 #include "hal/dw_gdma_types.h"
-
-/****************************************************************************
- * MIPI PHY LDO power (register-level access)
- *
- * The DSI PHY is supplied by external LDO channel 3 routed to the
- * P0_0P2A PMU registers (control at PMU+0x1c0, analog trim at
- * PMU+0x1c4). The 2.5V output is derived from the reference voltage:
- * out = Vref * mul, selected by the dref/mul fields of the analog
- * register. Without eFuse calibration data the values dref=13 and
- * mul=3 produce the required 2500mV. The enable bit lives in the
- * control register together with the software override for the
- * voltage selector.
- ****************************************************************************/
-
-#define PMU_BASE_ADDR                   0x50115000
-#define PMU_EXT_LDO_P0_0P2A_REG_ADDR   (PMU_BASE_ADDR + 0x1c0)
-#define PMU_EXT_LDO_P0_0P2A_ANA_ADDR   (PMU_BASE_ADDR + 0x1c4)
-
-/* Bit positions in ext_ldo control register */
-
-#define EXT_LDO_FORCE_TIEH_SEL_BIT      (1 << 7)
-#define EXT_LDO_XPD_BIT                 (1 << 8)
-#define EXT_LDO_TIEH_SEL_SHIFT          9
-#define EXT_LDO_TIEH_SEL_MASK           (0x7 << EXT_LDO_TIEH_SEL_SHIFT)
-#define EXT_LDO_TIEH_BIT                (1 << 14)
-
-/* Bit positions in ext_ldo ANA register */
-
-#define EXT_LDO_ANA_MUL_SHIFT           23
-#define EXT_LDO_ANA_MUL_MASK            (0x7 << EXT_LDO_ANA_MUL_SHIFT)
-#define EXT_LDO_ANA_DREF_SHIFT          28
-#define EXT_LDO_ANA_DREF_MASK           (0xF << EXT_LDO_ANA_DREF_SHIFT)
-
-/* Voltage parameters for 2500mV (computed from ldo_ll algorithm) */
-
-#define MIPI_PHY_LDO_DREF               13
-#define MIPI_PHY_LDO_MUL                3
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -199,6 +164,10 @@ struct panel_cmd_s
 
 static mipi_dsi_hal_context_t g_dsi_hal;
 
+/* Handle of the LDO channel powering the DPHY */
+
+static esp_ldo_channel_handle_t g_phy_ldo;
+
 /* Display buffers (allocated from PSRAM).
  *
  * g_fb_count is the number of buffers actually available: 2 when the
@@ -222,7 +191,7 @@ static bool g_fb_contiguous;
 /* DW-GDMA handles for DSI DMA refresh (high-level driver) */
 
 static dw_gdma_channel_handle_t g_dsi_dma_chan;
-static dw_gdma_link_list_handle_t g_dsi_link_list;
+
 
 /* Transfer configuration for DMA re-arm in ISR callback */
 
@@ -383,55 +352,43 @@ static void dsi_enable_backlight(void)
  * Name: dsi_enable_phy_ldo
  *
  * Description:
- *   Enable LDO channel 3 at 2.5V for MIPI PHY power supply.
- *   Uses direct register access to PMU ext_ldo registers.
- *   LDO channel 3 = unit 2, index_array[2] = 1 → ext_ldo[1] (P0_0P2A).
+ *   Power the MIPI DPHY rail from the on-chip LDO channel 3 at 2.5V.
+ *   The voltage is applied through the LDO regulator driver, which
+ *   takes the per-chip eFuse calibration into account; driving the
+ *   PMU registers with fixed tuning values leaves the rail at a
+ *   marginally low level on some parts, and the PHY PLL then fails to
+ *   lock on cold boots.
+ *
+ * Returned Value:
+ *   Zero (OK) on success; a negated errno value on failure.
  *
  ****************************************************************************/
 
-static void dsi_enable_phy_ldo(void)
+static int dsi_enable_phy_ldo(void)
 {
-  volatile uint32_t *ldo_ctrl =
-      (volatile uint32_t *)PMU_EXT_LDO_P0_0P2A_REG_ADDR;
-  volatile uint32_t *ldo_ana =
-      (volatile uint32_t *)PMU_EXT_LDO_P0_0P2A_ANA_ADDR;
-  uint32_t reg;
+  esp_ldo_channel_config_t ldo_cfg;
+  int ret;
 
-  /* Step 1: Set owner to software (force_tieh_sel = 1, tieh_sel = 0) */
+  memset(&ldo_cfg, 0, sizeof(ldo_cfg));
+  ldo_cfg.chan_id    = ESP_DSI_PHY_LDO_CHAN;
+  ldo_cfg.voltage_mv = (int)ESP_DSI_PHY_LDO_MV;
 
-  reg = *ldo_ctrl;
-  reg |= EXT_LDO_FORCE_TIEH_SEL_BIT;          /* force_tieh_sel = 1 (SW) */
-  reg &= ~EXT_LDO_TIEH_SEL_MASK;              /* tieh_sel = 0 */
-  *ldo_ctrl = reg;
+  ret = esp_ldo_acquire_channel(&ldo_cfg, &g_phy_ldo);
+  if (ret != 0)
+    {
+      syslog(LOG_ERR, "[DSI] ERROR: failed to acquire DPHY LDO "
+             "channel %d: %d\n", ESP_DSI_PHY_LDO_CHAN, ret);
+      return -EIO;
+    }
 
-  /* Step 2: Set voltage parameters (dref and mul) in ANA register */
+  /* Give the rail a short cushion after the regulator reports the
+   * channel as configured */
 
-  reg = *ldo_ana;
-  reg &= ~EXT_LDO_ANA_DREF_MASK;
-  reg |= ((uint32_t)MIPI_PHY_LDO_DREF << EXT_LDO_ANA_DREF_SHIFT);
-  reg &= ~EXT_LDO_ANA_MUL_MASK;
-  reg |= ((uint32_t)MIPI_PHY_LDO_MUL << EXT_LDO_ANA_MUL_SHIFT);
-  *ldo_ana = reg;
+  dsi_delay_ms(10);
 
-  /* Step 3: Set tieh = 0 (use Vref*Mul, not rail voltage) */
-
-  reg = *ldo_ctrl;
-  reg &= ~EXT_LDO_TIEH_BIT;                   /* tieh = 0 */
-  *ldo_ctrl = reg;
-
-  /* Step 4: Enable the LDO (xpd = 1) */
-
-  reg = *ldo_ctrl;
-  reg |= EXT_LDO_XPD_BIT;                     /* xpd = 1 */
-  *ldo_ctrl = reg;
-
-  /* Step 5: Wait for voltage to stabilize */
-
-  dsi_delay_ms(5);
-
-  lcdinfo("DSI PHY LDO enabled: chan=%d, voltage=%dmV (dref=%d, mul=%d)\n",
-          ESP_DSI_PHY_LDO_CHAN, ESP_DSI_PHY_LDO_MV,
-          MIPI_PHY_LDO_DREF, MIPI_PHY_LDO_MUL);
+  lcdinfo("DSI PHY LDO enabled: chan=%d, voltage=%dmV\n",
+          ESP_DSI_PHY_LDO_CHAN, ESP_DSI_PHY_LDO_MV);
+  return OK;
 }
 
 /****************************************************************************
@@ -449,6 +406,15 @@ static void dsi_enable_clocks(void)
 
   int __DECLARE_RCC_ATOMIC_ENV;
   (void)__DECLARE_RCC_ATOMIC_ENV;
+
+  /* Step 0: Make sure the clock sources themselves are alive. On a
+   * cold boot the 20MHz system PLL is not running yet; the PHY
+   * configuration clock gates the register interface that programs
+   * the DPHY PLL, so with the source dark the PLL setup writes are
+   * silently dropped and the PLL never locks */
+
+  esp_clk_tree_enable_src(MIPI_DSI_PHY_CFG_CLK_SRC_PLL_F20M, true);
+  esp_clk_tree_enable_src(MIPI_DSI_PHY_PLLREF_CLK_SRC_XTAL, true);
 
   /* Step 1: Enable DSI APB bus clock and reset Bridge */
 
@@ -481,6 +447,7 @@ static void dsi_enable_clocks(void)
 static int dsi_init_phy(void)
 {
   mipi_dsi_hal_config_t hal_cfg;
+  int attempt;
   int timeout;
 
   /* Step 4: HAL init - sets lane number, powers on Host+PHY, resets PHY,
@@ -507,12 +474,39 @@ static int dsi_init_phy(void)
   mipi_dsi_hal_configure_phy_pll(&g_dsi_hal, DSI_PHY_CLK_FREQ,
                                  (float)DSI_LANE_RATE_MBPS);
 
-  /* Step 6: Wait for PLL lock */
+  /* Step 6: Wait for PLL lock. Cold boots occasionally miss the lock
+   * window on the first attempt, which leaves the panel dark for the
+   * whole session. Re-run the PHY power-up sequence and the PLL
+   * configuration a few times before giving up. */
 
-  timeout = 100000;
-  while (!mipi_dsi_phy_ll_is_pll_locked(g_dsi_hal.host) && timeout > 0)
+  for (attempt = 0; attempt < 3; attempt++)
     {
-      timeout--;
+      if (attempt > 0)
+        {
+          syslog(LOG_INFO, "[DSI] PHY PLL retry %d\n", attempt);
+
+          /* Give the analog supply and the PLL some settle time before
+           * restarting from a clean state: the HAL init re-asserts the
+           * shutdown/reset lines and re-enables the clock lane and the
+           * PLL, then the PLL settings are written again */
+
+          dsi_delay_ms(20);
+          mipi_dsi_hal_init(&g_dsi_hal, &hal_cfg);
+          mipi_dsi_hal_configure_phy_pll(&g_dsi_hal, DSI_PHY_CLK_FREQ,
+                                         (float)DSI_LANE_RATE_MBPS);
+        }
+
+      timeout = 100000;
+      while (!mipi_dsi_phy_ll_is_pll_locked(g_dsi_hal.host) &&
+             timeout > 0)
+        {
+          timeout--;
+        }
+
+      if (timeout > 0)
+        {
+          break;
+        }
     }
 
   if (timeout <= 0)
@@ -521,8 +515,8 @@ static int dsi_init_phy(void)
     }
   else
     {
-      syslog(LOG_INFO, "[DSI] PHY PLL locked (timeout remaining=%d)\n",
-             timeout);
+      syslog(LOG_INFO, "[DSI] PHY PLL locked (attempt %d, "
+             "timeout remaining=%d)\n", attempt, timeout);
     }
 
   /* Wait for lanes to reach stop state */
@@ -937,7 +931,12 @@ int esp_mipi_dsi_initialize(void)
 
   /* Phase 1: Enable PHY LDO and clocks */
 
-  dsi_enable_phy_ldo();
+  ret = dsi_enable_phy_ldo();
+  if (ret < 0)
+    {
+      return ret;
+    }
+
   dsi_enable_clocks();
 
   /* Phase 2: Initialize PHY (Steps 4-6) */
@@ -1155,62 +1154,30 @@ void esp_mipi_dsi_flush_fb_n(int index)
  ****************************************************************************/
 
 /****************************************************************************
- * Name: dsi_dma_trans_done_cb
- *
- * Description:
- *   DMA transfer-done callback. Re-arms the DMA for continuous refresh.
- *   This matches ESP-IDF's mipi_dsi_dma_trans_done_cb exactly.
- ****************************************************************************/
-
-static bool dsi_dma_trans_done_cb(dw_gdma_channel_handle_t chan,
-    const dw_gdma_trans_done_event_data_t *event_data, void *user_data)
-{
-  (void)event_data;
-  (void)user_data;
-
-  /* Re-configure LLI and re-enable channel */
-
-  dw_gdma_lli_config_transfer(
-      dw_gdma_link_list_get_item(g_dsi_link_list, 0),
-      &g_dsi_xfer_config);
-
-  dw_gdma_block_markers_t m = {
-      .is_valid = true,
-      .is_last = true,
-      .en_trans_done_intr = true,
-  };
-
-  dw_gdma_lli_set_block_markers(
-      dw_gdma_link_list_get_item(g_dsi_link_list, 0), m);
-
-  dw_gdma_channel_use_link_list(chan, g_dsi_link_list);
-  dw_gdma_channel_enable_ctrl(chan, true);
-  return false;
-}
-
-/****************************************************************************
- * Name: dsi_dma_start_linked_list
+ * Name: dsi_dma_start_reload
  *
  * Description:
  *   Configure DMA using the high-level DW-GDMA driver (matching ESP-IDF
  *   esp_lcd_panel_dpi.c exactly) and start continuous refresh.
  ****************************************************************************/
 
-static void dsi_dma_start_linked_list(void)
+static void dsi_dma_start_reload(void)
 {
   esp_err_t err;
 
-  /* 1. Allocate DMA channel (matches ESP-IDF DSI panel config) */
+  /* 1. Allocate the DMA channel. Both ends use the hardware
+   * auto-reload block mode: the same whole-frame block restarts
+   * forever without any CPU or interrupt involvement */
 
   dw_gdma_channel_alloc_config_t dma_alloc_config = {
       .src = {
-          .block_transfer_type = DW_GDMA_BLOCK_TRANSFER_LIST,
+          .block_transfer_type = DW_GDMA_BLOCK_TRANSFER_RELOAD,
           .role = DW_GDMA_ROLE_MEM,
           .handshake_type = DW_GDMA_HANDSHAKE_HW,
           .num_outstanding_requests = 5,
       },
       .dst = {
-          .block_transfer_type = DW_GDMA_BLOCK_TRANSFER_LIST,
+          .block_transfer_type = DW_GDMA_BLOCK_TRANSFER_RELOAD,
           .role = DW_GDMA_ROLE_PERIPH_DSI,
           .handshake_type = DW_GDMA_HANDSHAKE_HW,
           .num_outstanding_requests = 2,
@@ -1226,71 +1193,29 @@ static void dsi_dma_start_linked_list(void)
       return;
     }
 
-  /* 2. Create link list (1 item, singly linked) */
+  /* 2. Configure the whole-frame transfer from the framebuffer to the
+   * DSI bridge FIFO */
 
-  dw_gdma_link_list_config_t link_list_config = {
-      .num_items = 1,
-      .link_type = DW_GDMA_LINKED_LIST_TYPE_SINGLY,
-  };
+  dw_gdma_block_transfer_config_t dma_transfer_config;
+  memset(&dma_transfer_config, 0, sizeof(dma_transfer_config));
 
-  err = dw_gdma_new_link_list(&link_list_config, &g_dsi_link_list);
-  if (err != ESP_OK)
-    {
-      syslog(LOG_ERR, "[DSI] Failed to create link list: 0x%x\n", err);
-      return;
-    }
-
-  /* 3. Configure transfer parameters */
-
-  g_dsi_xfer_config.src.addr =
+  dma_transfer_config.src.addr =
       (uint32_t)(uintptr_t)g_framebuffer[g_fb_front];
-  g_dsi_xfer_config.src.burst_mode = DW_GDMA_BURST_MODE_INCREMENT;
-  g_dsi_xfer_config.src.burst_items = DW_GDMA_BURST_ITEMS_512;
-  g_dsi_xfer_config.src.burst_len = 16;
-  g_dsi_xfer_config.src.width = DW_GDMA_TRANS_WIDTH_64;
-  g_dsi_xfer_config.dst.addr = MIPI_DSI_BRG_MEM_BASE;
-  g_dsi_xfer_config.dst.burst_mode = DW_GDMA_BURST_MODE_FIXED;
-  g_dsi_xfer_config.dst.burst_items = DW_GDMA_BURST_ITEMS_256;
-  g_dsi_xfer_config.dst.burst_len = 16;
-  g_dsi_xfer_config.dst.width = DW_GDMA_TRANS_WIDTH_64;
-  g_dsi_xfer_config.size = ESP_DSI_FB_SIZE * 8 / 64;
+  dma_transfer_config.src.burst_mode = DW_GDMA_BURST_MODE_INCREMENT;
+  dma_transfer_config.src.burst_items = DW_GDMA_BURST_ITEMS_512;
+  dma_transfer_config.src.burst_len = 16;
+  dma_transfer_config.src.width = DW_GDMA_TRANS_WIDTH_64;
+  dma_transfer_config.dst.addr = MIPI_DSI_BRG_MEM_BASE;
+  dma_transfer_config.dst.burst_mode = DW_GDMA_BURST_MODE_FIXED;
+  dma_transfer_config.dst.burst_items = DW_GDMA_BURST_ITEMS_256;
+  dma_transfer_config.dst.burst_len = 16;
+  dma_transfer_config.dst.width = DW_GDMA_TRANS_WIDTH_64;
+  dma_transfer_config.size = ESP_DSI_FB_SIZE * 8 / 64;
 
-  dw_gdma_lli_config_transfer(
-      dw_gdma_link_list_get_item(g_dsi_link_list, 0),
-      &g_dsi_xfer_config);
-
-  /* 4. Set block markers */
-
-  dw_gdma_block_markers_t markers = {
-      .is_valid = true,
-      .is_last = true,
-      .en_trans_done_intr = true,
-  };
-
-  dw_gdma_lli_set_block_markers(
-      dw_gdma_link_list_get_item(g_dsi_link_list, 0), markers);
-
-  /* 5. Register trans_done callback for ISR re-arm */
-
-  dw_gdma_event_callbacks_t cbs = {
-      .on_full_trans_done = dsi_dma_trans_done_cb,
-  };
-
-  err = dw_gdma_channel_register_event_callbacks(
-            g_dsi_dma_chan, &cbs, NULL);
-  if (err != ESP_OK)
-    {
-      syslog(LOG_ERR, "[DSI] Failed to register DMA callbacks: 0x%x\n",
-             err);
-      return;
-    }
-
-  /* 6. Apply link list and enable channel */
-
-  dw_gdma_channel_use_link_list(g_dsi_dma_chan, g_dsi_link_list);
+  dw_gdma_channel_config_transfer(g_dsi_dma_chan, &dma_transfer_config);
   dw_gdma_channel_enable_ctrl(g_dsi_dma_chan, true);
 
-  syslog(LOG_INFO, "[DSI] DW-GDMA high-level driver started\n");
+  syslog(LOG_INFO, "[DSI] DW-GDMA reload refresh started\n");
 }
 
 void esp_mipi_dsi_start_refresh(void)
@@ -1348,7 +1273,7 @@ void esp_mipi_dsi_start_refresh(void)
   /* Start linked-list DMA — begins pushing FB to bridge FIFO */
 
   syslog(LOG_INFO, "[DSI] Starting DMA linked-list...\n");
-  dsi_dma_start_linked_list();
+  dsi_dma_start_reload();
 
   /* Wait for DMA to fill some data into bridge FIFO before enabling
    * video mode. Without data in FIFO, Host won't have anything to send.
@@ -1367,15 +1292,6 @@ void esp_mipi_dsi_start_refresh(void)
   syslog(LOG_INFO, "[DSI] Linked-list DMA refresh started\n");
 }
 
-/****************************************************************************
- * Name: dsi_demo_thread
- *
- * Description:
- *   Polling DMA re-arm + color demo thread.
- *   Checks if DMA channel has stopped (CHEN bit cleared) and re-arms it.
- *   Also alternates red/blue every 2 seconds.
- ****************************************************************************/
-
 static int dsi_demo_thread(int argc, FAR char *argv[])
 {
   uint16_t *fb16;
@@ -1390,22 +1306,14 @@ static int dsi_demo_thread(int argc, FAR char *argv[])
       return -EINVAL;
     }
 
-  /* Write through the normal (cached) framebuffer address and write back
-   * with esp_cache_msync afterwards. This is the ESP-IDF pattern used by
-   * esp_lcd_dpi_panel_draw_bitmap(). Do NOT mix non-cached alias writes
-   * with a cached framebuffer: the DMA reads the cached address and would
-   * see stale data.
-   */
-
   while (1)
     {
       /* Alternate colors every 2 seconds */
 
       usleep(2000000);
 
-      /* Always draw into the buffer the display is reading, re-read every
-       * iteration in case something switched the front buffer.
-       */
+      /* Always draw into the buffer the display is reading, re-read
+       * every iteration in case something switched the front buffer */
 
       fb16 = (uint16_t *)esp_mipi_dsi_get_fb();
 
@@ -1425,6 +1333,8 @@ static int dsi_demo_thread(int argc, FAR char *argv[])
             }
         }
 
+      /* Write the painted lines back so the display DMA reads them */
+
       esp_cache_msync((uint8_t *)fb16, ESP_DSI_FB_SIZE,
                       ESP_CACHE_MSYNC_FLAG_DIR_C2M);
     }
@@ -1432,23 +1342,10 @@ static int dsi_demo_thread(int argc, FAR char *argv[])
   return 0;
 }
 
-/****************************************************************************
- * Name: esp_mipi_dsi_start_demo
- *
- * Description:
- *   Start the red/blue alternating demo thread.
- *   Call after esp_mipi_dsi_start_refresh().
- ****************************************************************************/
-
 static int g_demo_pid = -1;
 
 void esp_mipi_dsi_start_demo(void)
 {
-  if (g_demo_pid > 0)
-    {
-      return;
-    }
-
   g_demo_pid = kthread_create("dsi_demo", 100,
                               CONFIG_DEFAULT_TASK_STACKSIZE,
                               dsi_demo_thread, NULL);
@@ -1461,3 +1358,4 @@ void esp_mipi_dsi_start_demo(void)
       syslog(LOG_INFO, "[DSI] Demo thread started (pid=%d)\n", g_demo_pid);
     }
 }
+
