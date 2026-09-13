@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_usbserial.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -28,7 +30,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #ifdef CONFIG_SERIAL_TERMIOS
 #  include <termios.h>
@@ -46,12 +48,19 @@
 #include "esp_config.h"
 #include "esp_irq.h"
 
+#include "esp_private/periph_ctrl.h"
 #include "hal/uart_hal.h"
 #include "hal/usb_serial_jtag_ll.h"
 
 /****************************************************************************
  * Pre-processor Macros
  ****************************************************************************/
+
+#if !SOC_RCC_IS_INDEPENDENT
+#define USJ_RCC_ATOMIC() PERIPH_RCC_ATOMIC()
+#else
+#define USJ_RCC_ATOMIC()
+#endif
 
 /* The hardware buffer has a fixed size of 64 bytes */
 
@@ -97,8 +106,8 @@ static char g_txbuffer[ESP_USBCDC_BUFFERSIZE];
 
 static struct esp_priv_s g_usbserial_priv =
 {
-  .source = USB_SERIAL_JTAG_INTR_SOURCE,
-  .irq    = ESP_IRQ_USB_SERIAL_JTAG,
+  .source = ETS_USB_SERIAL_JTAG_INTR_SOURCE,
+  .irq    = ESP_SOURCE2IRQ(ETS_USB_SERIAL_JTAG_INTR_SOURCE),
   .cpuint = -ENOMEM,
 };
 
@@ -158,23 +167,23 @@ uart_dev_t g_uart_usbserial =
 static int esp_interrupt(int irq, void *context, void *arg)
 {
   struct uart_dev_s *dev = (struct uart_dev_s *)arg;
-  uint32_t tx_mask = USB_SERIAL_JTAG_SERIAL_IN_EMPTY_INT_ST;
-  uint32_t rx_mask = USB_SERIAL_JTAG_SERIAL_OUT_RECV_PKT_INT_ST;
   uint32_t int_status = usb_serial_jtag_ll_get_intsts_mask();
 
   /* Send buffer has room and can accept new data. */
 
-  if ((int_status & tx_mask) != 0)
+  if ((int_status & USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY) != 0)
     {
-      usb_serial_jtag_ll_clr_intsts_mask(tx_mask);
+      usb_serial_jtag_ll_clr_intsts_mask(
+        USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
       uart_xmitchars(dev);
     }
 
   /* Data from the host are available to read. */
 
-  if ((int_status & rx_mask) != 0)
+  if ((int_status & USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT) != 0)
     {
-      usb_serial_jtag_ll_clr_intsts_mask(rx_mask);
+      usb_serial_jtag_ll_clr_intsts_mask(
+        USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
       uart_recvchars(dev);
     }
 
@@ -216,15 +225,17 @@ static void esp_shutdown(struct uart_dev_s *dev)
 
 static void esp_txint(struct uart_dev_s *dev, bool enable)
 {
+  usb_serial_jtag_ll_txfifo_flush();
+
   if (enable)
     {
       usb_serial_jtag_ll_ena_intr_mask(
-        USB_SERIAL_JTAG_SERIAL_IN_EMPTY_INT_ENA);
+        USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
     }
   else
     {
       usb_serial_jtag_ll_disable_intr_mask(
-        USB_SERIAL_JTAG_SERIAL_IN_EMPTY_INT_ENA);
+        USB_SERIAL_JTAG_INTR_SERIAL_IN_EMPTY);
     }
 }
 
@@ -241,12 +252,12 @@ static void esp_rxint(struct uart_dev_s *dev, bool enable)
   if (enable)
     {
       usb_serial_jtag_ll_ena_intr_mask(
-        USB_SERIAL_JTAG_SERIAL_OUT_RECV_PKT_INT_ENA);
+        USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
     }
   else
     {
       usb_serial_jtag_ll_disable_intr_mask(
-        USB_SERIAL_JTAG_SERIAL_OUT_RECV_PKT_INT_ENA);
+        USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
     }
 }
 
@@ -256,7 +267,7 @@ static void esp_rxint(struct uart_dev_s *dev, bool enable)
  * Description:
  *   Configure the UART to operation in interrupt driven mode. This method
  *   is called when the serial port is opened. Normally, this is just after
- *   the the setup() method is called, however, the serial console may
+ *   the setup() method is called, however, the serial console may
  *   operate in a non-interrupt driven mode during the boot phase.
  *
  *   RX and TX interrupts are not enabled by the attach method (unless
@@ -269,15 +280,25 @@ static void esp_rxint(struct uart_dev_s *dev, bool enable)
 static int esp_attach(struct uart_dev_s *dev)
 {
   struct esp_priv_s *priv = dev->priv;
-  int ret;
 
   DEBUGASSERT(priv->cpuint == -ENOMEM);
+
+  USJ_RCC_ATOMIC()
+    {
+      usb_serial_jtag_ll_enable_bus_clock(true);
+    }
+
+  usb_serial_jtag_ll_phy_set_defaults();
+
+  usb_serial_jtag_ll_ena_intr_mask(USB_SERIAL_JTAG_INTR_SERIAL_OUT_RECV_PKT);
 
   /* Try to attach the IRQ to a CPU int */
 
   priv->cpuint = esp_setup_irq(priv->source,
                                ESP_IRQ_PRIORITY_DEFAULT,
-                               ESP_IRQ_TRIGGER_LEVEL);
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               esp_interrupt,
+                               dev);
   if (priv->cpuint < 0)
     {
       return priv->cpuint;
@@ -285,8 +306,7 @@ static int esp_attach(struct uart_dev_s *dev)
 
   /* Attach and enable the IRQ */
 
-  ret = irq_attach(priv->irq, esp_interrupt, dev);
-  if (ret == OK)
+  if (priv->cpuint >= 0)
     {
       up_enable_irq(priv->irq);
     }
@@ -295,7 +315,7 @@ static int esp_attach(struct uart_dev_s *dev)
       up_disable_irq(priv->irq);
     }
 
-  return ret;
+  return OK;
 }
 
 /****************************************************************************
@@ -461,4 +481,3 @@ void esp_usbserial_write(char ch)
 
   esp_send(&g_uart_usbserial, ch);
 }
-
