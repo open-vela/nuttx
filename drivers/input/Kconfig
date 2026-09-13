@@ -619,6 +619,12 @@ config INPUT_GT9XX
 	bool "Goodix GT9xx Driver"
 	default n
 	select INPUT_TOUCHSCREEN
+	select SCHED_HPWORK
+	---help---
+		Enable the Goodix GT9xx touch controller driver. The high
+		priority work queue is selected because polling mode (no
+		IRQ line wired to the SoC) samples the status register from
+		a deferred worker.
 	---help---
 		Enable support for Goodix GT9xx touch panel.
 
@@ -635,6 +641,54 @@ config INPUT_GT9XX_I2C_FREQUENCY
 	default 400000
 	---help---
 		I2C frequency in Hz
+
+config INPUT_GT9XX_I2C_RETRIES
+	int "I2C transfer retries on NACK"
+	default 5
+	depends on INPUT_GT9XX
+	---help---
+		The controller NACKs accesses for a short window while its
+		internal MCU refreshes the coordinate buffer. Each failed
+		transfer is retried this many times with a 20 ms pause
+		between attempts before the error is reported.
+
+config INPUT_GT9XX_ALT_ADDR
+	bool "Probe the alternative I2C address"
+	depends on INPUT_GT9XX
+	default n
+	---help---
+		The controller latches its I2C address (0x5d or 0x14) from
+		the INT level while leaving reset and both variants exist
+		in the field. When the probe at the configured address is
+		silent, retry once at the complementary address.
+
+config INPUT_GT9XX_X_INVERT
+	bool "Invert X coordinates"
+	depends on INPUT_GT9XX
+	default n
+	---help---
+		Mirror the reported X coordinate around the range given by
+		INPUT_GT9XX_X_INVERT_MAX. Enable this when the controller
+		is mounted rotated with respect to the display.
+
+config INPUT_GT9XX_X_INVERT_MAX
+	int "Inverted X coordinate range"
+	default 1024
+	depends on INPUT_GT9XX_X_INVERT
+
+config INPUT_GT9XX_Y_INVERT
+	bool "Invert Y coordinates"
+	depends on INPUT_GT9XX
+	default n
+	---help---
+		Mirror the reported Y coordinate around the range given by
+		INPUT_GT9XX_Y_INVERT_MAX. Enable this when the controller
+		is mounted rotated with respect to the display.
+
+config INPUT_GT9XX_Y_INVERT_MAX
+	int "Inverted Y coordinate range"
+	default 600
+	depends on INPUT_GT9XX_Y_INVERT
 
 endif # INPUT_GT9XX
 

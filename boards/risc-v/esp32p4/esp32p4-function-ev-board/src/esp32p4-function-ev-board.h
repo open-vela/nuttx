@@ -133,13 +133,13 @@ int board_emac_init(void);
 #endif
 
 /****************************************************************************
- * Name: board_gt911_initialize
+ * Name: board_touch_initialize
  *
  * Description:
- *   Initialize the Goodix GT911 touch controller on the specified I2C bus.
+ *   Register the GT911 touch panel as /dev/input0 on I2C0.
  *
  * Input Parameters:
- *   busno - I2C bus number
+ *   None
  *
  * Returned Value:
  *   Zero (OK) on success; a negated errno value on failure.
