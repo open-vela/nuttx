@@ -185,7 +185,8 @@ int arm_hardfault(int irq, void *context, void *arg)
 
   /* Surface the SCB fault status and the stacked PC/LR unconditionally:
    * this image executes from QSPI XIP and intermittent hard faults carry
-   * no other evidence of the failing access. */
+   * no other evidence of the failing access.
+   */
 
   syslog(LOG_ALERT,
          "HARDFAULT: CFSR=%08" PRIx32 " HFSR=%08" PRIx32
