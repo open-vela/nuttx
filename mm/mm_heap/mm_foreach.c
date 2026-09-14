@@ -46,30 +46,57 @@
  ****************************************************************************/
 
 #ifdef CONFIG_MM_RECORD_STACK
-/* Dump the allocation backtrace recorded in a node, to identify who
- * allocated a heap node with smashed metadata. */
+
+/****************************************************************************
+ * Name: mm_foreach_nregions
+ *
+ * Description:
+ *   Return the number of regions in the heap.  mm_nregions exists only
+ *   when CONFIG_MM_REGIONS > 1.
+ *
+ ****************************************************************************/
+
+static int mm_foreach_nregions(FAR struct mm_heap_s *heap)
+{
+#if CONFIG_MM_REGIONS > 1
+  return heap->mm_nregions;
+#else
+  UNUSED(heap);
+  return 1;
+#endif
+}
+
+/****************************************************************************
+ * Name: mm_foreach_dump_node
+ *
+ * Description:
+ *   Dump the allocation backtrace recorded in a node, to identify who
+ *   allocated a heap node with smashed metadata.
+ *
+ ****************************************************************************/
 
 static void mm_foreach_dump_node(FAR struct mm_heap_s *heap,
                                  FAR struct mm_allocnode_s *node)
 {
+  FAR volatile uint8_t *pre = (FAR volatile uint8_t *)node - 32;
+  FAR volatile uint8_t *post = (FAR volatile uint8_t *)node;
   int r;
+  int i;
 
   merr("MM CORRUPT: node=%p size=%zu preceding=%u\n",
        node, MM_SIZEOF_NODE(node), (unsigned int)node->preceding);
 
   merr("MM CORRUPT: heap=%p regions:", heap);
-  for (r = 0; r < heap->mm_nregions; r++)
+  for (r = 0; r < mm_foreach_nregions(heap); r++)
     {
       merr(" [%p..%p)", heap->mm_heapstart[r], heap->mm_heapend[r]);
     }
+
   merr("\n");
 
   /* Raw bytes around the smashed header: identifies the writer's
-   * data fingerprint (pixels / JSON / pointers). */
-
-  FAR volatile uint8_t *pre = (FAR volatile uint8_t *)node - 32;
-  FAR volatile uint8_t *post = (FAR volatile uint8_t *)node;
-  int i;
+   * data fingerprint (pixels / JSON / pointers).
+   */
 
   for (i = 0; i < 32; i++)
     {
@@ -86,9 +113,15 @@ static void mm_foreach_dump_node(FAR struct mm_heap_s *heap,
   merr("\n");
 }
 
-/* A free-list neighbor must be inside one of the heap regions or inside
- * the heap struct itself (bucket list heads). Anything else is corrupted
- * metadata; report instead of faulting on the deref. */
+/****************************************************************************
+ * Name: mm_foreach_nearby
+ *
+ * Description:
+ *   A free-list neighbor must be inside one of the heap regions or inside
+ *   the heap struct itself (bucket list heads). Anything else is corrupted
+ *   metadata; report instead of faulting on the deref.
+ *
+ ****************************************************************************/
 
 static bool mm_foreach_nearby(FAR struct mm_heap_s *heap, FAR void *p)
 {
@@ -109,14 +142,10 @@ static bool mm_foreach_nearby(FAR struct mm_heap_s *heap, FAR void *p)
       return true;
     }
 
-#if CONFIG_MM_REGIONS > 1
-  for (r = 0; r < heap->mm_nregions; r++)
-#else
-  for (r = 0; r < 1; r++)
-#endif
+  for (r = 0; r < mm_foreach_nregions(heap); r++)
     {
-      if (p >= heap->mm_heapstart[r] &&
-          p < heap->mm_heapend[r])
+      if (p >= (FAR void *)heap->mm_heapstart[r] &&
+          p < (FAR void *)heap->mm_heapend[r])
         {
           return true;
         }
@@ -208,10 +237,12 @@ void mm_foreach(FAR struct mm_heap_s *heap, mm_node_handler_t handler,
           /* A smashed size field makes the walk escape the region and
            * fault on the next node header. Report the current node
            * (its allocation record names the overflowing buffer's
-           * owner) and stop instead of faulting. */
+           * owner) and stop instead of faulting.
+           */
 
           if (nodesize < MM_SIZEOF_ALLOCNODE ||
-              (uintptr_t)node + nodesize > (uintptr_t)heap->mm_heapend[region])
+              ((uintptr_t)node + nodesize >
+               (uintptr_t)heap->mm_heapend[region]))
             {
               merr("MM CORRUPT: walk escapes region=%d node=%p size=%zu\n",
                    region, node, nodesize);
@@ -221,6 +252,7 @@ void mm_foreach(FAR struct mm_heap_s *heap, mm_node_handler_t handler,
                 {
                   DEBUGVERIFY(nxrmutex_unlock(&heap->mm_lock));
                 }
+
               return;
             }
 
@@ -240,6 +272,7 @@ void mm_foreach(FAR struct mm_heap_s *heap, mm_node_handler_t handler,
                     {
                       DEBUGVERIFY(nxrmutex_unlock(&heap->mm_lock));
                     }
+
                   return;
                 }
             }
