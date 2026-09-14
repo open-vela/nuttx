@@ -706,7 +706,16 @@ int libelf_findsymbol(FAR struct mod_loadinfo_s *loadinfo,
 
       ret = libelf_symname(loadinfo, sym,
                            loadinfo->shdr[loadinfo->strtabidx].sh_offset);
-      if (ret < 0 && ret != -ESRCH)
+      if (ret == -ESRCH)
+        {
+          /* Symbol has no name (for example, the mandatory null symbol at
+           * index zero).  Skip it; there is nothing to compare.
+           */
+
+          continue;
+        }
+
+      if (ret < 0)
         {
           berr("ERROR: Failed to get symbol name\n");
           return ret;
