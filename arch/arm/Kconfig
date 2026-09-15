@@ -327,6 +327,16 @@ config ARCH_CHIP_NUC1XX
 	---help---
 		Nuvoton NUC100/120 architectures (ARM Cortex-M0).
 
+config ARCH_CHIP_RK3588_M0
+	bool "Rockchip RK3588 PMU Cortex-M0"
+	select ARCH_CORTEXM0
+	---help---
+		The PMU Cortex-M0 ("PMU_M0") coprocessor inside the Rockchip
+		RK3588 (ARMv6-M). It runs as an AMP domain alongside Linux on
+		the Cortex-A55 cores: u-boot loads the firmware into a reserved
+		DDR carveout, points the M0's code window at it and releases the
+		core from reset.
+
 config ARCH_CHIP_RP2040
 	bool "Raspberry Pi RP2040"
 	select ARCH_CORTEXM0
@@ -1119,6 +1129,7 @@ config ARCH_CHIP
 	default "nrf53"		if ARCH_CHIP_NRF53
 	default "nrf91"		if ARCH_CHIP_NRF91
 	default "nuc1xx"	if ARCH_CHIP_NUC1XX
+	default "rk3588-m0"	if ARCH_CHIP_RK3588_M0
 	default "rp2040"	if ARCH_CHIP_RP2040
 	default "s32k1xx"	if ARCH_CHIP_S32K1XX
 	default "s32k3xx"	if ARCH_CHIP_S32K3XX
@@ -1588,6 +1599,9 @@ source "arch/arm/src/nrf91/Kconfig"
 endif
 if ARCH_CHIP_NUC1XX
 source "arch/arm/src/nuc1xx/Kconfig"
+endif
+if ARCH_CHIP_RK3588_M0
+source "arch/arm/src/rk3588-m0/Kconfig"
 endif
 if ARCH_CHIP_RP2040
 source "arch/arm/src/rp2040/Kconfig"

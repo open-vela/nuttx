@@ -32,10 +32,12 @@
 #include <string.h>
 
 #include <nuttx/irq.h>
+#include <nuttx/clock.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/spinlock.h>
 #include <nuttx/mutex.h>
+#include <nuttx/wqueue.h>
 #include <nuttx/rpmsg/rpmsg.h>
 #include <nuttx/serial/serial.h>
 #include <nuttx/serial/uart_rpmsg.h>
@@ -85,7 +87,20 @@ struct uart_rpmsg_priv_s
   char                  cpuname[UART_RPMSG_NAME_SIZE];
   FAR void              *recv_data;
   atomic_t              last_upper;
+  struct work_s         announce_work;   /* deferred NS re-announce */
+  int                   announce_cnt;    /* re-announce attempts left */
 };
+
+/* Some masters (e.g. Linux) bring their rpmsg host online well after this
+ * remote pins DRIVER_OK, so the single name-service announce emitted by
+ * rpmsg_create_ept() during device-created can be lost (no vring buffer yet).
+ * Re-announce periodically until the master binds our endpoint (dest_addr
+ * learned) or we run out of attempts. Harmless when the master is early: the
+ * first check already sees the endpoint bound and the work stops.
+ */
+
+#define UART_RPMSG_REANNOUNCE_MAX      30
+#define UART_RPMSG_REANNOUNCE_PERIOD   MSEC2TICK(1000)
 
 /****************************************************************************
  * Private Function Prototypes
@@ -174,7 +189,12 @@ static bool uart_rpmsg_rxflowcontrol(FAR struct uart_dev_s *dev,
       msg.header.command = UART_RPMSG_TTY_WAKEUP;
       if (is_rpmsg_ept_ready(&priv->ept))
         {
-          rpmsg_send(&priv->ept, &msg, sizeof(msg));
+          /* Non-blocking: this runs in the RX path; a full TX ring must not
+           * wedge it (see dmasend). Dropping a wakeup only briefly delays
+           * flow-control resumption.
+           */
+
+          rpmsg_trysend(&priv->ept, &msg, sizeof(msg));
         }
     }
 
@@ -189,7 +209,15 @@ static void uart_rpmsg_dmasend(FAR struct uart_dev_s *dev)
   size_t len = xfer->length + xfer->nlength;
   uint32_t space;
 
-  msg = rpmsg_get_tx_payload_buffer(&priv->ept, &space, true);
+  /* Non-blocking (wait=false). The blocking form deadlocks on the console
+   * use case: if the peer (Linux) stops consuming -- e.g. the tty is closed
+   * on a picocom disconnect -- the TX ring fills and this call, running in the
+   * NuttX sender path, would wait forever. Instead just drop this batch (the
+   * data stays in dev->xmit and is retried on the next dmatxavail), so the
+   * sender never wedges across a disconnect/reconnect.
+   */
+
+  msg = rpmsg_get_tx_payload_buffer(&priv->ept, &space, false);
   if (!msg)
     {
       dev->dmatx.length = 0;
@@ -328,6 +356,35 @@ static void uart_rpmsg_ns_bound(struct rpmsg_endpoint *ept)
   uart_rpmsg_dmatxavail(dev);
 }
 
+static void uart_rpmsg_announce_work(FAR void *arg)
+{
+  FAR struct uart_rpmsg_priv_s *priv = arg;
+
+  /* Stop once the master has bound our endpoint (dest_addr learned) or the
+   * attempt budget is exhausted.
+   */
+
+  if (priv->ept.dest_addr != RPMSG_ADDR_ANY || priv->announce_cnt <= 0)
+    {
+      return;
+    }
+
+  priv->announce_cnt--;
+
+  /* Re-send the NS announce UNCONDITIONALLY (as a healthy remote does). This
+   * also kicks the mailbox doorbell, which is what makes the master (Linux)
+   * process the announce sitting in the vring and create the channel. Gating
+   * this on is_rpmsg_ept_ready() was a chicken-and-egg bug: dest_addr stays
+   * RPMSG_ADDR_ANY until the master binds, and the master never binds without
+   * receiving this doorbell -> the channel was never created.
+   */
+
+  rpmsg_send_ns_message(&priv->ept, RPMSG_NS_CREATE);
+
+  work_queue(HPWORK, &priv->announce_work, uart_rpmsg_announce_work,
+             priv, UART_RPMSG_REANNOUNCE_PERIOD);
+}
+
 static void uart_rpmsg_device_created(FAR struct rpmsg_device *rdev,
                                       FAR void *priv_)
 {
@@ -344,6 +401,14 @@ static void uart_rpmsg_device_created(FAR struct rpmsg_device *rdev,
       rpmsg_create_ept(&priv->ept, rdev, eptname,
                        RPMSG_ADDR_ANY, RPMSG_ADDR_ANY,
                        uart_rpmsg_ept_cb, NULL);
+
+      /* The first name-service announce above may be lost if the master's
+       * rpmsg host is not online yet. Re-announce periodically until it binds.
+       */
+
+      priv->announce_cnt = UART_RPMSG_REANNOUNCE_MAX;
+      work_queue(HPWORK, &priv->announce_work, uart_rpmsg_announce_work,
+                 priv, UART_RPMSG_REANNOUNCE_PERIOD);
     }
 }
 
@@ -356,6 +421,7 @@ static void uart_rpmsg_device_destroy(FAR struct rpmsg_device *rdev,
   if (priv->ept.priv != NULL &&
       strcmp(priv->cpuname, rpmsg_get_cpuname(rdev)) == 0)
     {
+      work_cancel(HPWORK, &priv->announce_work);
       rpmsg_destroy_ept(&priv->ept);
     }
 

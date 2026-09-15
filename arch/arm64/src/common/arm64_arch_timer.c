@@ -48,7 +48,26 @@
 #define CONFIG_ARM_TIMER_VIRTUAL_IRQ        (GIC_PPI_INT_BASE + 11)
 #define CONFIG_ARM_TIMER_HYP_IRQ            (GIC_PPI_INT_BASE + 10)
 
-#define ARM_ARCH_TIMER_IRQ                  CONFIG_ARM_TIMER_VIRTUAL_IRQ
+#ifdef CONFIG_ARCH_CHIP_RK3588
+/* AMP core (cpu_l3): use the EL1 PHYSICAL timer (CNTP*), not the virtual timer.
+ * The virtual timer depends on CNTVOFF_EL2, which Linux reprograms when it
+ * probes/takes over; that made cpu_l3's virtual-timer compare value appear
+ * "already expired" -> a timer IRQ storm that hung the core. The EL1 physical
+ * timer is independent of CNTVOFF.
+ */
+#  define ARM_ARCH_TIMER_IRQ                CONFIG_ARM_TIMER_NON_SECURE_IRQ
+#  define ARCH_TIMER_CVAL_EL0               cntp_cval_el0
+#  define ARCH_TIMER_TVAL_EL0               cntp_tval_el0
+#  define ARCH_TIMER_CTL_EL0                cntp_ctl_el0
+#  define ARCH_TIMER_CT_EL0                 cntpct_el0
+#else
+#  define ARM_ARCH_TIMER_IRQ                CONFIG_ARM_TIMER_VIRTUAL_IRQ
+#  define ARCH_TIMER_CVAL_EL0               cntv_cval_el0
+#  define ARCH_TIMER_TVAL_EL0               cntv_tval_el0
+#  define ARCH_TIMER_CTL_EL0                cntv_ctl_el0
+#  define ARCH_TIMER_CT_EL0                 cntvct_el0
+#endif
+
 #define ARM_ARCH_TIMER_PRIO                 IRQ_DEFAULT_PRIORITY
 #define ARM_ARCH_TIMER_FLAGS                IRQ_TYPE_LEVEL
 
@@ -58,29 +77,29 @@
 
 static inline void arm64_arch_timer_set_compare(uint64_t value)
 {
-  write_sysreg(value, cntv_cval_el0);
+  write_sysreg(value, ARCH_TIMER_CVAL_EL0);
 }
 
 static inline void arm64_arch_timer_set_relative(uint64_t value)
 {
-  write_sysreg(value, cntv_tval_el0);
+  write_sysreg(value, ARCH_TIMER_TVAL_EL0);
 }
 
 static inline void arm64_arch_timer_enable(bool enable)
 {
   modify_sysreg(enable ? CNTV_CTL_ENABLE_BIT : 0u,
-                CNTV_CTL_ENABLE_BIT, cntv_ctl_el0);
+                CNTV_CTL_ENABLE_BIT, ARCH_TIMER_CTL_EL0);
 }
 
 static inline void arm64_arch_timer_set_irq_mask(bool mask)
 {
   modify_sysreg(mask ? CNTV_CTL_IMASK_BIT : 0u,
-                CNTV_CTL_IMASK_BIT, cntv_ctl_el0);
+                CNTV_CTL_IMASK_BIT, ARCH_TIMER_CTL_EL0);
 }
 
 static inline uint64_t arm64_arch_timer_count(void)
 {
-  return read_sysreg(cntvct_el0);
+  return read_sysreg(ARCH_TIMER_CT_EL0);
 }
 
 static inline uint64_t arm64_arch_timer_get_cntfrq(void)

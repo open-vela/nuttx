@@ -1,0 +1,37 @@
+/****************************************************************************
+ * boards/arm64/rk3588/evb7-amp/src/etc/init.d/rc.sysinit
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/* Deliberately empty of mounts.
+ *
+ * The reference boards mount procfs here. This one already has it: bringup does
+ * it in evb7_amp_bringup(), before nsh exists, because the board's own init
+ * wants /proc regardless of whether a shell ever runs. Mounting it a second time
+ * from here would fail with EBUSY and print an error on the console at every
+ * boot, which is a worse outcome than an empty script.
+ *
+ * The file exists because nsh looks for CONFIG_NSH_SYSINITSCRIPT before
+ * CONFIG_NSH_INITSCRIPT and both are wanted in the image; leaving it out means
+ * the shell reports a missing script on the way to running the one that is
+ * there.
+ */
+
+#include <nuttx/config.h>

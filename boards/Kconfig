@@ -1292,6 +1292,20 @@ config ARCH_BOARD_NRF9160_DK_NRF52
 	---help---
 		This option selects the nRF9160 Development Kit (PCA10090) - nRF52840 chip
 
+config ARCH_BOARD_EVB7_M0
+	bool "Rockchip RK3588 EVB7 V11 PMU Cortex-M0"
+	depends on ARCH_CHIP_RK3588_M0
+	---help---
+		NuttX running on the PMU Cortex-M0 of the Rockchip RK3588, on the
+		RK3588 EVB7 V11 board, as an AMP domain beside Linux (7x A55) and
+		the NuttX instance on cpu_l3.
+
+		The firmware is packaged into amp.img as a FIT "standalone" image;
+		u-boot points the M0 code window at the mcu_reserved carveout
+		(physical 0x07a00000) and releases the core from reset. Console
+		output is polled on the shared UART2, which is only borrowed, never
+		reconfigured.
+
 config ARCH_BOARD_NUTINY_NUC120
 	bool "Nuvoton NuTiny NUC120"
 	depends on ARCH_CHIP_NUC120LE3AN
@@ -2235,6 +2249,13 @@ config ARCH_BOARD_PINEPHONE_PRO
 	---help---
 		This options selects support for NuttX on PINE64 PinePhone based
 		on Rockchip RK3399 SoC with ARM Cortex-A53
+
+config ARCH_BOARD_EVB7_AMP
+	bool "Rockchip RK3588 EVB7 V11 (AMP remote core)"
+	depends on ARCH_CHIP_RK3588
+	---help---
+		NuttX as an AMP remote-core firmware on the RK3588 EVB7 V11,
+		running on cpu_l3 launched by vendor U-Boot (CONFIG_AMP).
 
 config ARCH_BOARD_NANOPI_M4
 	bool "FriendlyElec NanoPi M4"
@@ -3466,6 +3487,7 @@ config ARCH_BOARD
 	default "flipperzero"               if ARCH_BOARD_FLIPPERZERO
 	default "nucleo-wb55rg"             if ARCH_BOARD_NUCLEO_WB55RG
 	default "nucleo-wl55jc"             if ARCH_BOARD_NUCLEO_WL55JC
+	default "evb7-m0"                   if ARCH_BOARD_EVB7_M0
 	default "nutiny-nuc120"             if ARCH_BOARD_NUTINY_NUC120
 	default "olimex-efm32g880f128-stk"  if ARCH_BOARD_OLIMEX_EFM32G880F128_STK
 	default "olimex-lpc1766stk"         if ARCH_BOARD_LPC1766STK
@@ -3530,6 +3552,7 @@ config ARCH_BOARD
 	default "qemu-armv8r-aarch32"       if ARCH_BOARD_QEMU_ARMV8R_AARCH32
 	default "pinephone"                 if ARCH_BOARD_PINEPHONE
 	default "pinephonepro"              if ARCH_BOARD_PINEPHONE_PRO
+	default "evb7-amp"                  if ARCH_BOARD_EVB7_AMP
 	default "nanopi_m4"                 if ARCH_BOARD_NANOPI_M4
 	default "fvp-armv8r"                if ARCH_BOARD_FVP_ARMV8R
 	default "vdk-armv8r"                if ARCH_BOARD_VDK_ARMV8R_BASE
@@ -3762,6 +3785,9 @@ endif
 if ARCH_BOARD_PINEPHONE_PRO
 source "boards/arm64/rk3399/pinephonepro/Kconfig"
 endif
+if ARCH_BOARD_EVB7_AMP
+source "boards/arm64/rk3588/evb7-amp/Kconfig"
+endif
 if ARCH_BOARD_FVP_ARMV8R
 source "boards/arm64/fvp-v8r/fvp-armv8r/Kconfig"
 endif
@@ -3949,6 +3975,7 @@ if ARCH_BOARD_NRF9160_DK_NRF52
 source "boards/arm/nrf52/nrf9160-dk-nrf52/Kconfig"
 endif
 if ARCH_BOARD_NUTINY_NUC120
+source "boards/arm/rk3588-m0/evb7-m0/Kconfig"
 source "boards/arm/nuc1xx/nutiny-nuc120/Kconfig"
 endif
 if ARCH_BOARD_RASPBERRYPI_PICO
