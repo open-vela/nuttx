@@ -1,3 +1,29 @@
+/****************************************************************************
+ * arch/loongarch/src/ls2k0300/ls2k0300_pwm.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <stdint.h>
@@ -16,6 +42,10 @@
 #include "hardware/ls2k0300_pwm.h"
 
 #if defined(CONFIG_LS2K0300_PWM)
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 #define LS2K0300_PWM_CLOCK_FREQ 200000000UL
 
@@ -206,26 +236,46 @@ static const struct pwm_ops_s g_pwm_ops =
 static struct ls2k0300_pwm_priv_s g_pwm_priv[4] =
 {
   {
-    .lower = { .ops = &g_pwm_ops },
+    .lower =
+    {
+      .ops = &g_pwm_ops
+    },
+
     .base = LS2K0300_PWM0_BASE,
     .clock_freq = LS2K0300_PWM_CLOCK_FREQ,
   },
   {
-    .lower = { .ops = &g_pwm_ops },
+    .lower =
+    {
+      .ops = &g_pwm_ops
+    },
+
     .base = LS2K0300_PWM1_BASE,
     .clock_freq = LS2K0300_PWM_CLOCK_FREQ,
   },
   {
-    .lower = { .ops = &g_pwm_ops },
+    .lower =
+    {
+      .ops = &g_pwm_ops
+    },
+
     .base = LS2K0300_PWM2_BASE,
     .clock_freq = LS2K0300_PWM_CLOCK_FREQ,
   },
   {
-    .lower = { .ops = &g_pwm_ops },
+    .lower =
+    {
+      .ops = &g_pwm_ops
+    },
+
     .base = LS2K0300_PWM3_BASE,
     .clock_freq = LS2K0300_PWM_CLOCK_FREQ,
   },
 };
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
 
 int ls2k0300_pwm_initialize(int port)
 {
