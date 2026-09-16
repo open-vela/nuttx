@@ -20,7 +20,7 @@
 #
 ############################################################################
 
-CMN_ASRCS += loongarch_vectors.S loongarch_macros.S loongarch_saveusercontext.S
+CMN_ASRCS += loongarch_vectors.S loongarch_macros.S loongarch_saveusercontext.S loongarch_fork_func.S
 
 CMN_CSRCS += loongarch_initialize.c loongarch_swint.c
 CMN_CSRCS += loongarch_allocateheap.c loongarch_createstack.c
@@ -29,7 +29,7 @@ CMN_CSRCS += loongarch_getnewintctx.c loongarch_getintstack.c loongarch_initials
 CMN_CSRCS += loongarch_modifyreg32.c loongarch_nputs.c loongarch_releasestack.c
 CMN_CSRCS += loongarch_registerdump.c loongarch_stackframe.c loongarch_schedulesigaction.c
 CMN_CSRCS += loongarch_sigdeliver.c loongarch_switchcontext.c
-CMN_CSRCS += loongarch_usestack.c loongarch_tcbinfo.c
+CMN_CSRCS += loongarch_usestack.c loongarch_tcbinfo.c loongarch_fork.c
 
 ifneq ($(CONFIG_ARCH_IDLE_CUSTOM),y)
   CMN_CSRCS += loongarch_idle.c
