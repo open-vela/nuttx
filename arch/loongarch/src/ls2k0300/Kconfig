@@ -120,6 +120,41 @@ config LS2K0300_I2C3
 
 endif
 
+config LS2K0300_PWM
+	bool "PWM"
+	default n
+	select PWM
+	---help---
+		Enable LS2K0300 PWM controller driver support
+
+if LS2K0300_PWM
+
+config LS2K0300_PWM0
+	bool "PWM0"
+	default n
+	---help---
+		Enable LS2K0300 PWM0 controller
+
+config LS2K0300_PWM1
+	bool "PWM1"
+	default n
+	---help---
+		Enable LS2K0300 PWM1 controller
+
+config LS2K0300_PWM2
+	bool "PWM2"
+	default n
+	---help---
+		Enable LS2K0300 PWM2 controller
+
+config LS2K0300_PWM3
+	bool "PWM3"
+	default n
+	---help---
+		Enable LS2K0300 PWM3 controller
+
+endif
+
 endmenu
 
 menu "LS2K0300 UART Configuration"

@@ -42,4 +42,8 @@ if(CONFIG_LS2K0300_I2C)
   list(APPEND SRCS ls2k0300_i2c.c)
 endif()
 
+if(CONFIG_LS2K0300_PWM)
+  list(APPEND SRCS ls2k0300_pwm.c)
+endif()
+
 target_sources(arch PRIVATE ${SRCS})
