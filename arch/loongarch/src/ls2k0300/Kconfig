@@ -207,6 +207,13 @@ config LS2K0300_THERMAL
 	---help---
 		Enable LS2K0300 thermal sensor driver support
 
+config LS2K0300_WDT
+	bool "Watchdog"
+	default n
+	select WATCHDOG
+	---help---
+		Enable LS2K0300 watchdog timer driver support
+
 endmenu
 
 menu "LS2K0300 UART Configuration"

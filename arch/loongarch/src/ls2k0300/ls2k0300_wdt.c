@@ -1,3 +1,29 @@
+/****************************************************************************
+ * arch/loongarch/src/ls2k0300/ls2k0300_wdt.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <stdint.h>
@@ -15,6 +41,10 @@
 #include "hardware/ls2k0300_wdt.h"
 
 #if defined(CONFIG_LS2K0300_WDT)
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 #define LS2K0300_WDT_CLOCK_FREQ 200000000UL
 
@@ -139,13 +169,20 @@ static const struct watchdog_ops_s g_wdt_ops =
 
 static struct ls2k0300_wdt_priv_s g_wdt_priv =
 {
-  .lower = { .ops = &g_wdt_ops },
+  .lower =
+  {
+    .ops = &g_wdt_ops
+  },
   .base = LS2K0300_WDT_BASE,
   .clock_freq = LS2K0300_WDT_CLOCK_FREQ,
   .timeout = 30000,
   .max_hw_heatbeat_ms = UINT32_MAX / LS2K0300_WDT_CLOCK_FREQ * 1000,
   .started = false,
 };
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
 
 int ls2k0300_wdt_initialize(void)
 {
