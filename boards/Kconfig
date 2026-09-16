@@ -3231,6 +3231,13 @@ config ARCH_BOARD_AT32F437_MINI
 	---help---
 		AT32F437-MINI board based on the Artery AT32F437VMT7 MCU.
 
+config ARCH_BOARD_HUMMINGBIRD_LS2K0300
+	bool "Hummingbird board for LS2K0300"
+	depends on ARCH_CHIP_LS2K0300
+	select ARCH_HAVE_LEDS
+	---help---
+		Hummingbird evaluation board for Loongson LS2K0300 SoC.
+
 config ARCH_BOARD_CUSTOM
 	bool "Custom development board"
 	---help---
@@ -3639,6 +3646,7 @@ config ARCH_BOARD
 	default "hpm6360evk"                if ARCH_BOARD_HPM6360EVK
 	default "hpm6750evk2"               if ARCH_BOARD_HPM6750EVK2
 	default "at32f437-mini"             if ARCH_BOARD_AT32F437_MINI
+	default "hummingbird-ls2k0300"       if ARCH_BOARD_HUMMINGBIRD_LS2K0300
 	default "csk6011a-nano"             if ARCH_BOARD_CSK6011A_NANO
 
 comment "Common Board Options"
@@ -4667,6 +4675,9 @@ source "boards/risc-v/hpm6750/hpm6750evk2/Kconfig"
 endif
 if ARCH_BOARD_AT32F437_MINI
 source "boards/arm/at32/at32f437-mini/Kconfig"
+endif
+if ARCH_BOARD_HUMMINGBIRD_LS2K0300
+source "boards/loongarch/ls2k0300/hummingbird-ls2k0300/Kconfig"
 endif
 if ARCH_BOARD_CSK6011A_NANO
 source "boards/arm/csk6/csk6011a-nano/Kconfig"
