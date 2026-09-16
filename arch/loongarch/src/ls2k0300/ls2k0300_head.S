@@ -39,8 +39,13 @@
  * Additional constants not in ls2k0300_memorymap.h
  ****************************************************************************/
 
+#ifndef CONFIG_LS2K0300_UBOOT_BOOT
 #define BOOT_SPACE_BASE         0x1c000000
 #define LS2K0300_IDLESTACK_TOP   (CACHED_MEMORY_ADDR | LS2K0300_L2CACHE_BASE | LS2K0300_L2CACHE_SIZE)
+#else
+#define BOOT_SPACE_BASE         0x98000000
+#define LS2K0300_IDLESTACK_TOP   (CACHED_MEMORY_ADDR | BOOT_SPACE_BASE | 0x800000)
+#endif
 
 #define EARLY_UART_BASE         (UNCACHED_MEMORY_ADDR | 0x16100000)
 #define EARLY_UART_THR          (EARLY_UART_BASE + 0x00)
@@ -82,8 +87,10 @@
 
 __start:
 
-  /* CPU feature register configuration */
-
+#ifndef CONFIG_LS2K0300_UBOOT_BOOT
+  /* CPU feature register configuration - only needed for direct boot,
+   * skip when booting from U-Boot (U-Boot has already configured these)
+   */
   li.d    $t0, (1 << (24 + 32))
   csrxchg $t0, $t0, LOONGARCH_CSR_PRID
 
@@ -102,8 +109,11 @@ __start:
 
   li.w    $t0, 0xe
   csrxchg $t0, $t0, LOONGARCH_CSR_MCSR24
+#endif
 
   /* Configure DMWIN0 (uncached) and DMWIN1 (cached)
+   * For U-Boot boot: trust U-Boot's cache cleanup, no need for
+   * additional cache invalidation (avoiding self-referential paradox)
    */
   li.d    $t0, UNCACHED_MEMORY_ADDR | 0xf
   csrwr   $t0, LOONGARCH_CSR_DMWIN0
@@ -125,6 +135,7 @@ __start:
   li.d    $t0, (1 << 2)
   csrxchg $r0, $t0, LOONGARCH_CSR_CRMD
 
+#ifndef CONFIG_LS2K0300_UBOOT_BOOT
   bl      ls2k0300_lowlevel_init
   nop
 
@@ -141,10 +152,12 @@ __start:
 
   li.w    $t0, 0xb0
   csrwr   $t0, LOONGARCH_CSR_CRMD
+#endif
 
   li.d    $t0, LS2K0300_IDLESTACK_TOP
   move    $sp, $t0
 
+#ifndef CONFIG_LS2K0300_UBOOT_BOOT
   EARLY_UART_INIT
   la      $a0, hello_str
   bl      early_print
@@ -152,6 +165,7 @@ __start:
 
   dbar    0
   ibar    0
+#endif
 
   bl      __ls2k0300_start
   nop

@@ -22,6 +22,14 @@
 
 comment "LS2K0300 Configuration Options"
 
+config LS2K0300_UBOOT_BOOT
+	bool "Boot from U-Boot"
+	default n
+	---help---
+		Enable U-Boot boot support. When enabled, the system expects to be
+		loaded by U-Boot at address 0x9000000098000000. The L2 scache will
+		not be locked as memory.
+
 menu "LS2K0300 Peripheral Support"
 
 config LS2K0300_HAVE_UART0
