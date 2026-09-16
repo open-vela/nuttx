@@ -1,0 +1,57 @@
+############################################################################
+# arch/loongarch/src/common/Make.defs
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+############################################################################
+
+CMN_ASRCS += loongarch_vectors.S loongarch_macros.S loongarch_saveusercontext.S
+
+CMN_CSRCS += loongarch_initialize.c loongarch_swint.c
+CMN_CSRCS += loongarch_allocateheap.c loongarch_createstack.c
+CMN_CSRCS += loongarch_cpuidlestack.c loongarch_doirq.c loongarch_exit.c loongarch_exception.c
+CMN_CSRCS += loongarch_getnewintctx.c loongarch_getintstack.c loongarch_initialstate.c
+CMN_CSRCS += loongarch_modifyreg32.c loongarch_nputs.c loongarch_releasestack.c
+CMN_CSRCS += loongarch_registerdump.c loongarch_stackframe.c loongarch_schedulesigaction.c
+CMN_CSRCS += loongarch_sigdeliver.c loongarch_switchcontext.c
+CMN_CSRCS += loongarch_usestack.c loongarch_tcbinfo.c
+
+ifneq ($(CONFIG_ARCH_IDLE_CUSTOM),y)
+  CMN_CSRCS += loongarch_idle.c
+endif
+
+ifneq ($(CONFIG_ALARM_ARCH),y)
+  ifneq ($(CONFIG_TIMER_ARCH),y)
+    CMN_CSRCS += loongarch_mdelay.c loongarch_udelay.c
+  endif
+endif
+
+ifneq ($(CONFIG_BUILD_FLAT),y)
+CMN_CSRCS  += loongarch_task_start.c
+CMN_CSRCS  += loongarch_pthread_start.c
+CMN_CSRCS  += loongarch_signal_dispatch.c
+CMN_UASRCS += loongarch_signal_handler.S
+endif
+
+ifeq ($(CONFIG_STACK_COLORATION),y)
+CMN_CSRCS += loongarch_checkstack.c
+endif
+
+ifeq ($(CONFIG_SCHED_THREAD_LOCAL),y)
+CMN_CSRCS += loongarch_tls.c
+endif

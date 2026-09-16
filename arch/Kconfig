@@ -201,6 +201,16 @@ config ARCH_SPARC
 	---help---
 		SPARC architectures (SPARC V8)
 
+config ARCH_LOONGARCH
+	bool "LoongArch"
+	select ARCH_HAVE_INTERRUPTSTACK
+	select ARCH_HAVE_CUSTOMOPT
+	select ARCH_HAVE_SYSCALL
+	select ARCH_HAVE_TCBINFO
+	select ARCH_HAVE_STDARG_H
+	---help---
+		Loongson LoongArch 64-bit architectures
+
 config ARCH_TRICORE
 	bool "Infineon TriCore"
 	select ARCH_HAVE_INTERRUPTSTACK
@@ -237,6 +247,7 @@ config ARCH
 	default "or1k"    if ARCH_OR1K
 	default "sparc"   if ARCH_SPARC
 	default "tricore" if ARCH_TRICORE
+	default "loongarch" if ARCH_LOONGARCH
 
 source "arch/arm/Kconfig"
 source "arch/arm64/Kconfig"
@@ -255,6 +266,7 @@ source "arch/z80/Kconfig"
 source "arch/or1k/Kconfig"
 source "arch/sparc/Kconfig"
 source "arch/tricore/Kconfig"
+source "arch/loongarch/Kconfig"
 
 config ARCH_CHIP_CUSTOM
 	bool "Custom Chip Support"
