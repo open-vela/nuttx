@@ -32,6 +32,14 @@ ifeq ($(CONFIG_LS2K0300_ADC),y)
 CHIP_CSRCS += ls2k0300_adc.c
 endif
 
+ifeq ($(CONFIG_LS2K0300_RTC),y)
+CHIP_CSRCS += ls2k0300_rtc.c
+endif
+
+ifeq ($(CONFIG_LS2K0300_I2C),y)
+CHIP_CSRCS += ls2k0300_i2c.c
+endif
+
 ifeq ($(CONFIG_TIMER),y)
 CHIP_CSRCS += ls2k0300_timerisr.c
 endif

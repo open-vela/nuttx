@@ -1,3 +1,29 @@
+/****************************************************************************
+ * arch/loongarch/src/ls2k0300/ls2k0300_rtc.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <stdbool.h>
@@ -59,7 +85,8 @@ static int ls2k0300_rtc_rdtime(FAR struct rtc_lowerhalf_s *lower,
   rtctime->tm_min  = (toy_read0 >> RTC_TOY_MIN_SHIFT) & RTC_TOY_MIN_MASK;
   rtctime->tm_hour = (toy_read0 >> RTC_TOY_HOUR_SHIFT) & RTC_TOY_HOUR_MASK;
   rtctime->tm_mday = (toy_read0 >> RTC_TOY_DAY_SHIFT) & RTC_TOY_DAY_MASK;
-  rtctime->tm_mon  = ((toy_read0 >> RTC_TOY_MON_SHIFT) & RTC_TOY_MON_MASK) - 1;
+  rtctime->tm_mon  = ((toy_read0 >> RTC_TOY_MON_SHIFT) &
+                       RTC_TOY_MON_MASK) - 1;
   rtctime->tm_year = toy_read1;
 
   if (rtctime->tm_mon < 0 || rtctime->tm_mon > 11 ||
@@ -110,6 +137,10 @@ static int ls2k0300_rtc_settime(FAR struct rtc_lowerhalf_s *lower,
 
   return OK;
 }
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
 
 static bool ls2k0300_rtc_havesettime(FAR struct rtc_lowerhalf_s *lower)
 {
