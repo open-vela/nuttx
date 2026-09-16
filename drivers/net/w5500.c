@@ -1549,7 +1549,9 @@ static void w5500_interrupt_work(FAR void *arg)
 
   if (ir[2] == 0)
     {
-      nwarn("Overinitiative interrupt work.\n");
+      /* Polling mode enters here frequently: keep it at debug level */
+
+      ninfo("Overinitiative interrupt work.\n");
 
       goto done;
     }

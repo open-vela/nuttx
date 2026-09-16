@@ -83,6 +83,13 @@
 #    define FMC_PROGMEM_SECTOR_SADDR     (0x08200000)
 #    define FMC_PROGMEM_SECTOR_EADDR     (0x082FFFFF)
 #    define FMC_PROGMEM_PAGESIZE         4096
+
+#elif defined(CONFIG_GD32F4_GD32F407) 
+#    define FMC_PROGMEM_SECTOR_SIZES     {_K(16), _K(16), _K(16), _K(16)}
+#    define FMC_PROGMEM_SECTOR_NUM       (4)
+#    define FMC_PROGMEM_SECTOR_SADDR     (0x08100000)
+#    define FMC_PROGMEM_SECTOR_EADDR     (0x0810FFFF)
+
 #endif
 
 #  endif

@@ -29,7 +29,7 @@
 
 /* GD32 F4 Family ***********************************************************/
 
-#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470)
+#if defined(CONFIG_GD32F4_GD32F450) || defined(CONFIG_GD32F4_GD32F470) || defined(CONFIG_GD32F4_GD32F407)
 #  include "hardware/gd32f450_pinmap.h"
 
 #else
