@@ -62,4 +62,12 @@ if(CONFIG_LS2K0300_WDT)
   list(APPEND SRCS ls2k0300_wdt.c)
 endif()
 
+if(CONFIG_LS2K0300_GPIO)
+  list(APPEND SRCS ls2k0300_gpio.c)
+endif()
+
+if(CONFIG_LS2K0300_PINCTRL)
+  list(APPEND SRCS ls2k0300_pinctrl.c)
+endif()
+
 target_sources(arch PRIVATE ${SRCS})

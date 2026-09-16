@@ -214,6 +214,31 @@ config LS2K0300_WDT
 	---help---
 		Enable LS2K0300 watchdog timer driver support
 
+config LS2K0300_GPIO
+	bool "GPIO"
+	default n
+	select DEV_GPIO
+	---help---
+		Enable LS2K0300 GPIO driver support
+
+if LS2K0300_GPIO
+
+config LS2K0300_GPIO_IRQ
+	bool "GPIO interrupt support"
+	default n
+	depends on LS2K0300_GPIO
+	---help---
+		Enable GPIO interrupt support
+
+endif
+
+config LS2K0300_PINCTRL
+	bool "Pin Controller"
+	default n
+	select PINCTRL
+	---help---
+		Enable LS2K0300 pin controller driver support
+
 endmenu
 
 menu "LS2K0300 UART Configuration"
