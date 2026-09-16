@@ -1,3 +1,29 @@
+/****************************************************************************
+ * arch/loongarch/src/ls2k0300/ls2k0300_gpio.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <stdint.h>
@@ -36,6 +62,10 @@ static void gpio_set_reg(uintptr_t base, uint32_t offset, int pin,
 {
   putreg8(val, base + offset + pin);
 }
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
 
 static uint8_t gpio_get_reg(uintptr_t base, uint32_t offset, int pin)
 {
@@ -235,6 +265,10 @@ static const int g_gpio_irqs[] =
   LS2K0300_IRQ_GPIO6,
 };
 
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
 #define GPIO_IRQ_GROUPS  7
 
 static const int g_gpio_irq_group_start[] =
@@ -281,7 +315,6 @@ static int ls2k0300_gpio_irq_handler(int irq, FAR void *context,
 }
 
 #endif
-
 
 int ls2k0300_gpio_config_pin(int pin, enum gpio_pintype_e pintype)
 {
@@ -351,7 +384,6 @@ int ls2k0300_gpio_set_direction(int pin, bool input)
   gpio_set_reg(g_gpio_base, LS2K0300_GPIO_DIR, pin, input ? 1 : 0);
   return OK;
 }
-
 
 int ls2k0300_gpio_initialize(void)
 {
