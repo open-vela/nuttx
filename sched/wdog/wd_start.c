@@ -111,6 +111,20 @@ static DEFINE_PER_CPU_BSS_BMP(unsigned int, g_wdtimernested);
  *
  ****************************************************************************/
 
+/* g_wdactivelist.next == NULL is list_is_clear, not empty. Empty is
+ * next == &list. 2026-09-14: vg_net_thread nxsem_clockwait walked a
+ * cleared list and HARDFAULT at wd_start_abstick [NULL,#16] BFAR=0x10.
+ */
+
+static inline_function void wd_repair_activelist(void)
+{
+  if (list_is_clear(&g_wdactivelist))
+    {
+      serr("ERROR: wdog active list was cleared, reinit\n");
+      list_initialize(&g_wdactivelist);
+    }
+}
+
 static inline_function clock_t wd_expiration(clock_t ticks)
 {
   FAR struct wdog_s *wdog;
@@ -120,6 +134,7 @@ static inline_function clock_t wd_expiration(clock_t ticks)
   clock_t            ret = CLOCK_MAX;
 
   flags = enter_critical_section();
+  wd_repair_activelist();
 
 #ifdef CONFIG_SCHED_TICKLESS
   /* Increment the nested watchdog timer count to handle cases where wd_start
@@ -200,6 +215,8 @@ bool wd_insert(FAR struct wdog_s *wdog, clock_t expired,
 {
   FAR struct wdog_s *curr;
   FAR struct wdog_s *head;
+
+  wd_repair_activelist();
 
   /* Traverse the watchdog list */
 
