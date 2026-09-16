@@ -53,8 +53,12 @@
  * Public Data
  ****************************************************************************/
 
+#ifdef CONFIG_LS2K0300_UBOOT_BOOT
+uintptr_t g_idle_topstack = CONFIG_RAM_START + CONFIG_RAM_SIZE;
+#else
 uintptr_t g_idle_topstack =
     PHYS_TO_CACHED(LS2K0300_L2CACHE_BASE + LS2K0300_L2CACHE_SIZE);
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -70,12 +74,14 @@ void __ls2k0300_start(void)
       *dest++ = 0;
     }
 
+#ifndef CONFIG_LS2K0300_UBOOT_BOOT
   for (src = (const uint32_t *)_eronly,
        dest = (uint32_t *)_sdata; dest < (uint32_t *)_edata;
       )
     {
       *dest++ = *src++;
     }
+#endif
 
   ls2k0300_lowsetup();
 
