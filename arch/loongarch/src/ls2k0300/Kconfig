@@ -66,6 +66,14 @@ config LS2K0300_UART2
 config LS2K0300_UART
 	bool
 
+config LS2K0300_ADC
+	bool "ADC"
+	default n
+	select ANALOG
+	select ADC
+	---help---
+		Enable LS2K0300 ADC driver support
+
 endmenu
 
 menu "LS2K0300 UART Configuration"

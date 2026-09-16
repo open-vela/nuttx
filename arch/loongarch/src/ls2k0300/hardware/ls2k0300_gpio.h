@@ -1,0 +1,16 @@
+#ifndef __ARCH_LOONGARCH_SRC_LS2K0300_HARDWARE_LS2K0300_GPIO_H
+#define __ARCH_LOONGARCH_SRC_LS2K0300_HARDWARE_LS2K0300_GPIO_H
+
+#define LS2K0300_GPIO_DIR            0x800
+#define LS2K0300_GPIO_OUT            0x900
+#define LS2K0300_GPIO_IN             0xa00
+#define LS2K0300_GPIO_IRQ            0xb00
+#define LS2K0300_GPIO_IRQPOL         0xc00
+#define LS2K0300_GPIO_IRQEDG         0xd00
+#define LS2K0300_GPIO_IRQCLR         0xe00
+#define LS2K0300_GPIO_IRQSTA         0xf00
+#define LS2K0300_GPIO_IRQDUL         0xf80
+
+#define LS2K0300_GPIO_NPINS          106
+
+#endif
