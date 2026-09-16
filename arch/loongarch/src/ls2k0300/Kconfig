@@ -201,6 +201,12 @@ config LS2K0300_SPIIO3
 
 endif
 
+config LS2K0300_THERMAL
+	bool "Thermal"
+	default n
+	---help---
+		Enable LS2K0300 thermal sensor driver support
+
 endmenu
 
 menu "LS2K0300 UART Configuration"

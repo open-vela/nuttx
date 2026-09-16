@@ -54,4 +54,8 @@ if(CONFIG_LS2K0300_SPIIO)
   list(APPEND SRCS ls2k0300_spiio.c)
 endif()
 
+if(CONFIG_LS2K0300_THERMAL)
+  list(APPEND SRCS ls2k0300_thermal.c)
+endif()
+
 target_sources(arch PRIVATE ${SRCS})

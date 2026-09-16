@@ -1,3 +1,29 @@
+/****************************************************************************
+ * arch/loongarch/src/ls2k0300/ls2k0300_thermal.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <stdint.h>
@@ -16,6 +42,10 @@
 
 #if defined(CONFIG_LS2K0300_THERMAL)
 
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
 #define LS2K_MIN_TEMP     -40
 #define LS2K_MAX_TEMP     125
 #define THSENS_OUT_OFFSET 100
@@ -33,42 +63,50 @@ static uint32_t thermal_getreg(FAR struct ls2k0300_thermal_dev_s *priv,
   return getreg32(priv->base + offset);
 }
 
-/**
- * @low : temperature in degree
- * @high: temperature in degree
+/* Set the temperature alarm thresholds
+ *
+ * low : temperature in degree
+ * high: temperature in degree
  */
+
 static int ls2k_tsensor_set(struct ls2k0300_thermal_dev_s *priv,
-					int low, int high, bool enable)
+                            int low, int high, bool enable)
 {
-	uint32_t reg_ctrl = 0;
+  uint32_t reg_ctrl = 0;
+  int reg_off;
+  uint8_t lo_en = 8;
+  uint8_t hi_en = 8;
 
-	/*
-	 * thsens_int_ctrl register have 4 sets of setup bits each using 2 Bytes
-	 */
-	int reg_off = priv->id * 2;
-	uint8_t lo_en = 8;
-	uint8_t hi_en = 8;
+  /* thsens_int_ctrl register have 4 sets of setup bits each using 2 Bytes */
 
-	if (low > high)
-		return -EINVAL;
+  reg_off = priv->id * 2;
 
-	low = low < LS2K_MIN_TEMP ? LS2K_MIN_TEMP : low;
-	high = high > LS2K_MAX_TEMP ? LS2K_MAX_TEMP : high;
+  if (low > high)
+    {
+      return -EINVAL;
+    }
 
-	low += THSENS_OUT_OFFSET;
-	high += THSENS_OUT_OFFSET;
+  low = low < LS2K_MIN_TEMP ? LS2K_MIN_TEMP : low;
+  high = high > LS2K_MAX_TEMP ? LS2K_MAX_TEMP : high;
 
-	reg_ctrl |= low;
-	reg_ctrl |= enable ? (1<<lo_en) : 0;
-	putreg16(reg_ctrl, priv->base + LS2K0300_TSENSOR_CTRL_LO + reg_off);
+  low += THSENS_OUT_OFFSET;
+  high += THSENS_OUT_OFFSET;
 
-	reg_ctrl = 0;
-	reg_ctrl |= high;
-	reg_ctrl |= enable ? (1<<hi_en) : 0;
-	putreg16(reg_ctrl, priv->base + LS2K0300_TSENSOR_CTRL_HI + reg_off);
+  reg_ctrl |= low;
+  reg_ctrl |= enable ? (1 << lo_en) : 0;
+  putreg16(reg_ctrl, priv->base + LS2K0300_TSENSOR_CTRL_LO + reg_off);
 
-	return 0;
+  reg_ctrl = 0;
+  reg_ctrl |= high;
+  reg_ctrl |= enable ? (1 << hi_en) : 0;
+  putreg16(reg_ctrl, priv->base + LS2K0300_TSENSOR_CTRL_HI + reg_off);
+
+  return 0;
 }
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
 
 static int ls2k0300_thermal_open(FAR struct file *filep)
 {
@@ -168,7 +206,8 @@ int ls2k0300_thermal_initialize(void)
 
   putreg8(0xff, priv->base + LS2K0300_TSENSOR_STATUS);
 
-  // enable thermal sensor
+  /* Enable thermal sensor */
+
   putreg32(0x0000ff03, priv->base + LS2K0300_TSENSOR_CFG);
 
   ls2k_tsensor_set(priv, 5, 120, false);
