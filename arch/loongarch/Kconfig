@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright 2024 Loongson Technology Corporation Limited
+#
+
+if ARCH_LOONGARCH
+
+choice
+	prompt "LoongArch Chip Selection"
+	default ARCH_CHIP_LS2K0300
+	depends on ARCH_LOONGARCH
+
+config ARCH_CHIP_LS2K0300
+	bool "LS2K0300"
+	select ARCH_USE_MMU
+	---help---
+		Loongson LS2K0300 SoC, LoongArch 64-bit
+
+endchoice
+
+config ARCH_CHIP
+	string
+	default "ls2k0300" if ARCH_CHIP_LS2K0300
+
+config ARCH_LOONGARCH64
+	bool
+	default y if ARCH_LOONGARCH
+	select ARCH_HAVE_STACKCHECK
+
+config ARCH_HAVE_FORK
+	bool
+	default y
+
+config ARCH_HAVE_MPU
+	bool
+	default n
+
+config ARCH_HAVE_MMU
+	bool
+	default y
+
+config ARCH_USE_MPU
+	bool
+	default n
+
+config ARCH_USE_MMU
+	bool
+	default y if ARCH_HAVE_MMU
+
+endif
