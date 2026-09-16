@@ -1,3 +1,29 @@
+/****************************************************************************
+ * arch/loongarch/src/ls2k0300/ls2k0300_spiio.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <stdint.h>
@@ -15,6 +41,10 @@
 #if defined(CONFIG_LS2K0300_SPIIO)
 
 /* SR1 W1C flags from test code: EOT | bit11 | bit10 | bit9 | bit8 */
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 #define SR1_W1C_FLAGS  (SR1_EOT | (1U << 11) | (1U << 10) | (1U << 9) | (1U << 8))
 
@@ -429,13 +459,21 @@ static const struct spi_ops_s g_spiio_ops =
 static struct ls2k0300_spiio_priv_s g_spiio_priv[2] =
 {
   {
-    .dev = { .ops = &g_spiio_ops },
+    .dev =
+    {
+      .ops = &g_spiio_ops
+    },
+
     .base = PHYS_TO_UNCACHED(LS2K0300_SPI2_BASE),
     .clock_freq = SPIIO_CLOCK_FREQ,
     .nbits = 8,
   },
   {
-    .dev = { .ops = &g_spiio_ops },
+    .dev =
+    {
+      .ops = &g_spiio_ops
+    },
+
     .base = PHYS_TO_UNCACHED(LS2K0300_SPI3_BASE),
     .clock_freq = SPIIO_CLOCK_FREQ,
     .nbits = 8,
@@ -444,13 +482,19 @@ static struct ls2k0300_spiio_priv_s g_spiio_priv[2] =
 
 /* ===== initialize — matches spi2_init() ===== */
 
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
 FAR struct spi_dev_s *ls2k0300_spiio_initialize(int port)
 {
   FAR struct ls2k0300_spiio_priv_s *priv;
   uint32_t brint;
 
   if (port < 0 || port > 1)
-    return NULL;
+    {
+      return NULL;
+    }
 
   priv = &g_spiio_priv[port];
 

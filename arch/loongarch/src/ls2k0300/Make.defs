@@ -44,6 +44,14 @@ ifeq ($(CONFIG_LS2K0300_PWM),y)
 CHIP_CSRCS += ls2k0300_pwm.c
 endif
 
+ifeq ($(CONFIG_LS2K0300_SPI),y)
+CHIP_CSRCS += ls2k0300_spi.c
+endif
+
+ifeq ($(CONFIG_LS2K0300_SPIIO),y)
+CHIP_CSRCS += ls2k0300_spiio.c
+endif
+
 ifeq ($(CONFIG_TIMER),y)
 CHIP_CSRCS += ls2k0300_timerisr.c
 endif

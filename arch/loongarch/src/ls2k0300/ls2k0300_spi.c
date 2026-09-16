@@ -1,3 +1,29 @@
+/****************************************************************************
+ * arch/loongarch/src/ls2k0300/ls2k0300_spi.c
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <stdint.h>
@@ -15,6 +41,10 @@
 #include "hardware/ls2k0300_spi.h"
 
 #if defined(CONFIG_LS2K0300_SPI)
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 #define LS2K0300_SPI_CLOCK_FREQ 200000000UL
 
@@ -245,18 +275,30 @@ static const struct spi_ops_s g_spi_ops =
 static struct ls2k0300_spi_priv_s g_spi_priv[2] =
 {
   {
-    .dev = { .ops = &g_spi_ops },
+    .dev =
+    {
+      .ops = &g_spi_ops
+    },
+
     .base = PHYS_TO_UNCACHED(LS2K0300_SPI0_BASE),
     .clock_freq = LS2K0300_SPI_CLOCK_FREQ,
     .nbits = 8,
   },
   {
-    .dev = { .ops = &g_spi_ops },
+    .dev =
+    {
+      .ops = &g_spi_ops
+    },
+
     .base = PHYS_TO_UNCACHED(LS2K0300_SPI1_BASE),
     .clock_freq = LS2K0300_SPI_CLOCK_FREQ,
     .nbits = 8,
   },
 };
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
 
 FAR struct spi_dev_s *ls2k0300_spiflash_initialize(int port)
 {

@@ -155,6 +155,52 @@ config LS2K0300_PWM3
 
 endif
 
+config LS2K0300_SPI
+	bool "SPI Flash Controller"
+	default n
+	select SPI
+	---help---
+		Enable LS2K0300 SPI flash controller driver support
+
+if LS2K0300_SPI
+
+config LS2K0300_SPI0
+	bool "SPI0"
+	default n
+	---help---
+		Enable LS2K0300 SPI0 controller
+
+config LS2K0300_SPI1
+	bool "SPI1"
+	default n
+	---help---
+		Enable LS2K0300 SPI1 controller
+
+endif
+
+config LS2K0300_SPIIO
+	bool "SPI IO Controller"
+	default n
+	select SPI
+	---help---
+		Enable LS2K0300 SPI IO controller driver support
+
+if LS2K0300_SPIIO
+
+config LS2K0300_SPIIO2
+	bool "SPIIO2"
+	default n
+	---help---
+		Enable LS2K0300 SPI2 (IO) controller
+
+config LS2K0300_SPIIO3
+	bool "SPIIO3"
+	default n
+	---help---
+		Enable LS2K0300 SPI3 (IO) controller
+
+endif
+
 endmenu
 
 menu "LS2K0300 UART Configuration"

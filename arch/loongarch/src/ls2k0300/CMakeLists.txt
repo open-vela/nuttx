@@ -46,4 +46,12 @@ if(CONFIG_LS2K0300_PWM)
   list(APPEND SRCS ls2k0300_pwm.c)
 endif()
 
+if(CONFIG_LS2K0300_SPI)
+  list(APPEND SRCS ls2k0300_spi.c)
+endif()
+
+if(CONFIG_LS2K0300_SPIIO)
+  list(APPEND SRCS ls2k0300_spiio.c)
+endif()
+
 target_sources(arch PRIVATE ${SRCS})
