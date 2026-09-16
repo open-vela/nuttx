@@ -30,4 +30,8 @@ if(CONFIG_TIMER)
   list(APPEND SRCS ls2k0300_timerisr.c)
 endif()
 
+if(CONFIG_LS2K0300_ADC)
+  list(APPEND SRCS ls2k0300_adc.c)
+endif()
+
 target_sources(arch PRIVATE ${SRCS})

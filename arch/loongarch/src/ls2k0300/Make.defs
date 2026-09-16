@@ -28,6 +28,10 @@ CHIP_CSRCS  = ls2k0300_start.c ls2k0300_lowputc.c ls2k0300_irq.c
 CHIP_CSRCS += ls2k0300_allocateheap.c ls2k0300_clockconfig.c
 CHIP_CSRCS += ls2k0300_serial.c
 
+ifeq ($(CONFIG_LS2K0300_ADC),y)
+CHIP_CSRCS += ls2k0300_adc.c
+endif
+
 ifeq ($(CONFIG_TIMER),y)
 CHIP_CSRCS += ls2k0300_timerisr.c
 endif
