@@ -239,6 +239,38 @@ config LS2K0300_PINCTRL
 	---help---
 		Enable LS2K0300 pin controller driver support
 
+config LS2K0300_ETHERNET
+	bool "Ethernet"
+	default n
+	select NET
+	select NET_ETHERNET
+	select NET_STATISTICS
+	---help---
+		Enable LS2K0300 Ethernet driver support
+
+if LS2K0300_ETHERNET
+
+config LS2K0300_ETHERNET0
+	bool "Ethernet0 (GMAC0)"
+	default y
+	---help---
+		Enable LS2K0300 GMAC0 Ethernet controller
+
+config LS2K0300_ETHERNET_PHY_ADDR
+	int "PHY Address"
+	default 0
+	---help---
+		PHY address for MDIO communication
+
+config LS2K0300_ETHERNET_WORKQUEUE
+	bool "Use Work Queue"
+	default y
+	depends on SCHED_WORKQUEUE
+	---help---
+		Use work queue for interrupt handling
+
+endif
+
 endmenu
 
 menu "LS2K0300 UART Configuration"
