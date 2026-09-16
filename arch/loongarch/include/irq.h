@@ -187,6 +187,10 @@
 #define REG_RA              REG_R1
 #define REG_SP              REG_R3
 
+/* Fork context size: ra + sp + 10 callee-saved registers */
+
+#define FORK_CONTEXT_SIZE   (12 * INT_REG_SIZE)
+
 #ifndef __ASSEMBLY__
 
 /****************************************************************************

@@ -23,7 +23,7 @@
 set(SRCS)
 
 list(APPEND SRCS loongarch_vectors.S loongarch_macros.S)
-list(APPEND SRCS loongarch_saveusercontext.S)
+list(APPEND SRCS loongarch_saveusercontext.S loongarch_fork_func.S)
 list(APPEND SRCS loongarch_allocateheap.c loongarch_cpuidlestack.c)
 list(APPEND SRCS loongarch_createstack.c loongarch_doirq.c
      loongarch_exception.c)
@@ -33,7 +33,7 @@ list(APPEND SRCS loongarch_nputs.c loongarch_registerdump.c)
 list(APPEND SRCS loongarch_releasestack.c loongarch_schedulesigaction.c
      loongarch_sigdeliver.c)
 list(APPEND SRCS loongarch_stackframe.c loongarch_tcbinfo.c loongarch_swint.c)
-list(APPEND SRCS loongarch_switchcontext.c loongarch_usestack.c)
+list(APPEND SRCS loongarch_switchcontext.c loongarch_usestack.c loongarch_fork.c)
 
 if(NOT CONFIG_ARCH_IDLE_CUSTOM)
   list(APPEND SRCS loongarch_idle.c)
