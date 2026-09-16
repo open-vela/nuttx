@@ -74,6 +74,52 @@ config LS2K0300_ADC
 	---help---
 		Enable LS2K0300 ADC driver support
 
+config LS2K0300_RTC
+	bool "RTC"
+	default n
+	select RTC
+	select RTC_DATETIME
+	select RTC_DRIVER
+	select RTC_ARCH
+	---help---
+		Enable LS2K0300 RTC driver support
+
+config LS2K0300_I2C
+	bool "I2C"
+	default n
+	select I2C
+	select I2C_DRIVER
+	---help---
+		Enable LS2K0300 I2C driver support
+
+if LS2K0300_I2C
+
+config LS2K0300_I2C0
+	bool "I2C0"
+	default n
+	---help---
+		Enable LS2K0300 I2C0 controller
+
+config LS2K0300_I2C1
+	bool "I2C1"
+	default n
+	---help---
+		Enable LS2K0300 I2C1 controller
+
+config LS2K0300_I2C2
+	bool "I2C2"
+	default n
+	---help---
+		Enable LS2K0300 I2C2 controller
+
+config LS2K0300_I2C3
+	bool "I2C3"
+	default n
+	---help---
+		Enable LS2K0300 I2C3 controller
+
+endif
+
 endmenu
 
 menu "LS2K0300 UART Configuration"
