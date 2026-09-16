@@ -68,9 +68,12 @@ struct ls2k0300_dma_desc_s
 /* Register Access */
 
 static inline uint32_t gmac_read(uint64_t base, uint32_t offset);
-static inline void gmac_write(uint64_t base, uint32_t offset, uint32_t value);
-static inline void gmac_set_bits(uint64_t base, uint32_t offset, uint32_t bits);
-static inline void gmac_clear_bits(uint64_t base, uint32_t offset, uint32_t bits);
+static inline void gmac_write(uint64_t base, uint32_t offset,
+                              uint32_t value);
+static inline void gmac_set_bits(uint64_t base, uint32_t offset,
+                                 uint32_t bits);
+static inline void gmac_clear_bits(uint64_t base, uint32_t offset,
+                                    uint32_t bits);
 
 /* MDIO Operations */
 
@@ -135,7 +138,8 @@ static inline void gmac_write(uint64_t base, uint32_t offset, uint32_t value)
  *
  ****************************************************************************/
 
-static inline void gmac_set_bits(uint64_t base, uint32_t offset, uint32_t bits)
+static inline void gmac_set_bits(uint64_t base, uint32_t offset,
+                                 uint32_t bits)
 {
   uint32_t value = gmac_read(base, offset);
   gmac_write(base, offset, value | bits);
@@ -149,7 +153,8 @@ static inline void gmac_set_bits(uint64_t base, uint32_t offset, uint32_t bits)
  *
  ****************************************************************************/
 
-static inline void gmac_clear_bits(uint64_t base, uint32_t offset, uint32_t bits)
+static inline void gmac_clear_bits(uint64_t base, uint32_t offset,
+                                    uint32_t bits)
 {
   uint32_t value = gmac_read(base, offset);
   gmac_write(base, offset, value & ~bits);
@@ -200,7 +205,7 @@ static uint16_t gmac_mdio_read(uint64_t mac_base, uint32_t phy_addr,
 
   /* Read the data */
 
-  return (uint16_t)(gmac_read(mac_base, GMAC_GMII_DATA) & 0xFFFF);
+  return (uint16_t)(gmac_read(mac_base, GMAC_GMII_DATA) & 0xffff);
 }
 
 /****************************************************************************

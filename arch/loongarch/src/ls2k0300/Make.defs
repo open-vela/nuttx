@@ -68,10 +68,18 @@ ifeq ($(CONFIG_LS2K0300_PINCTRL),y)
 CHIP_CSRCS += ls2k0300_pinctrl.c
 endif
 
+ifeq ($(CONFIG_LS2K0300_ETHERNET),y)
+CHIP_CSRCS += ls2k0300_gmac.c ls2k0300_ethernet.c
+endif
+
 ifeq ($(CONFIG_TIMER),y)
 CHIP_CSRCS += ls2k0300_timerisr.c
 endif
 
 CHIP_ASRCS  = ls2k0300_head.S
+
+ifeq ($(CONFIG_LS2K0300_ETHERNET),y)
+CHIP_ASRCS += ls2k0300_dma_cache.S
+endif
 
 endif

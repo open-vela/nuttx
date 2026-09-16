@@ -174,18 +174,23 @@ static struct ls2k0300_driver_s g_ls2k0300;
 /* Register Access */
 
 static inline uint32_t gmac_read(uint64_t base, uint32_t offset);
-static inline void gmac_write(uint64_t base, uint32_t offset, uint32_t value);
-static inline void gmac_set_bits(uint64_t base, uint32_t offset, uint32_t bits);
-static inline void gmac_clear_bits(uint64_t base, uint32_t offset, uint32_t bits);
+static inline void gmac_write(uint64_t base, uint32_t offset,
+                              uint32_t value);
+static inline void gmac_set_bits(uint64_t base, uint32_t offset,
+                                 uint32_t bits);
+static inline void gmac_clear_bits(uint64_t base, uint32_t offset,
+                                    uint32_t bits);
 
 /* MDIO Operations */
 
 static uint16_t gmac_mdio_read(uint32_t phy_addr, uint32_t reg_addr);
-static void gmac_mdio_write(uint32_t phy_addr, uint32_t reg_addr, uint16_t data);
+static void gmac_mdio_write(uint32_t phy_addr, uint32_t reg_addr,
+                            uint16_t data);
 
 /* DMA Cache Coherency */
 
 /* Assembly function in ls2k0300_dma_cache.S */
+
 extern void ls2k0300_dma_flush(FAR void *addr, size_t len);
 
 /* PHY Operations */
@@ -257,7 +262,8 @@ static inline void gmac_write(uint64_t base, uint32_t offset, uint32_t value)
  *
  ****************************************************************************/
 
-static inline void gmac_set_bits(uint64_t base, uint32_t offset, uint32_t bits)
+static inline void gmac_set_bits(uint64_t base, uint32_t offset,
+                                 uint32_t bits)
 {
   uint32_t value = gmac_read(base, offset);
   gmac_write(base, offset, value | bits);
@@ -271,7 +277,8 @@ static inline void gmac_set_bits(uint64_t base, uint32_t offset, uint32_t bits)
  *
  ****************************************************************************/
 
-static inline void gmac_clear_bits(uint64_t base, uint32_t offset, uint32_t bits)
+static inline void gmac_clear_bits(uint64_t base, uint32_t offset,
+                                    uint32_t bits)
 {
   uint32_t value = gmac_read(base, offset);
   gmac_write(base, offset, value & ~bits);
@@ -322,7 +329,7 @@ static uint16_t gmac_mdio_read(uint32_t phy_addr, uint32_t reg_addr)
 
   /* Read the data */
 
-  return (uint16_t)(gmac_read(mac_base, GMAC_GMII_DATA) & 0xFFFF);
+  return (uint16_t)(gmac_read(mac_base, GMAC_GMII_DATA) & 0xffff);
 }
 
 /****************************************************************************
@@ -333,7 +340,8 @@ static uint16_t gmac_mdio_read(uint32_t phy_addr, uint32_t reg_addr)
  *
  ****************************************************************************/
 
-static void gmac_mdio_write(uint32_t phy_addr, uint32_t reg_addr, uint16_t data)
+static void gmac_mdio_write(uint32_t phy_addr, uint32_t reg_addr,
+                            uint16_t data)
 {
   uint64_t mac_base = LS2K0300_GMAC0_MAC_BASE;
   uint32_t addr;
@@ -408,14 +416,14 @@ static void ls2k0300_phy_init(struct ls2k0300_driver_s *priv)
   (void)phy_id1;
   (void)phy_id2;
 
-
   /* Check if bootloader already established the link */
 
   bmsr = gmac_mdio_read(priv->phy_addr, PHY_BMSR);
 
   if (bmsr & (1 << 2))  /* Bit 2: Link Status */
     {
-      //_alert("PHY: link already UP from bootloader, skipping reset\n");
+      /* _alert("PHY: link already UP from bootloader, skipping reset\n"); */
+
       return;
     }
 
@@ -672,7 +680,7 @@ static void ls2k0300_receive_packet(struct ls2k0300_driver_s *priv)
       /* Get packet status */
 
       status = desc->status;
-      length = (status >> 16) & 0x3FFF;
+      length = (status >> 16) & 0x3fff;
 
       /* Check for errors */
 
@@ -687,7 +695,8 @@ static void ls2k0300_receive_packet(struct ls2k0300_driver_s *priv)
 
           if (length <= priv->dev.d_pktsize)
             {
-              memcpy(priv->dev.d_buf, &priv->rx_buffer[priv->rx_idx][0], length);
+              memcpy(priv->dev.d_buf, &priv->rx_buffer[priv->rx_idx][0],
+                     length);
               priv->dev.d_len = length;
 
               /* Get Ethernet header */
@@ -695,12 +704,16 @@ static void ls2k0300_receive_packet(struct ls2k0300_driver_s *priv)
               eth = (struct ether_header *)priv->dev.d_buf;
 
 #ifdef CONFIG_NET_PKT
-              /* When packet sockets are enabled, feed the frame into the tap */
+              /* When packet sockets are enabled, feed the frame into
+               * the tap
+               */
 
               pkt_input(&priv->dev);
 #endif
 
-              /* We only accept IP packets of the configured type and ARP packets */
+              /* We only accept IP packets of the configured type and
+               * ARP packets
+               */
 
 #ifdef CONFIG_NET_IPv4
               if (eth->ether_type == HTONS(ETHTYPE_IP))
@@ -759,6 +772,7 @@ static void ls2k0300_receive_packet(struct ls2k0300_driver_s *priv)
                       ls2k0300_transmit(priv);
                     }
                 }
+
 #endif
               priv->rx_packets++;
             }
@@ -927,9 +941,11 @@ static void ls2k0300_irq_work_handler(void *arg)
 
 static int ls2k0300_ifup(struct net_driver_s *dev)
 {
-  struct ls2k0300_driver_s *priv = (struct ls2k0300_driver_s *)dev->d_private;
+  struct ls2k0300_driver_s *priv =
+    (struct ls2k0300_driver_s *)dev->d_private;
   uint64_t mac_base = LS2K0300_GMAC0_MAC_BASE;
   uint64_t dma_base = LS2K0300_GMAC0_DMA_BASE;
+  int link_timeout;
 
   ninfo("Bringing up interface\n");
 
@@ -989,30 +1005,28 @@ static int ls2k0300_ifup(struct net_driver_s *dev)
 
   /* Wait for link to come up (auto-negotiation takes 1-3 seconds) */
 
-  {
-    int link_timeout = 40;  /* 40 × 100ms = 4 seconds max */
+  link_timeout = 40;  /* 40 × 100ms = 4 seconds max */
 
-    while (link_timeout > 0)
-      {
-        up_mdelay(100);
-        ls2k0300_phy_poll(priv);
-        if (priv->link_up)
-          {
-            break;
-          }
+  while (link_timeout > 0)
+    {
+      up_mdelay(100);
+      ls2k0300_phy_poll(priv);
+      if (priv->link_up)
+        {
+          break;
+        }
 
-        link_timeout--;
-      }
+      link_timeout--;
+    }
 
-    if (priv->link_up)
-      {
-        _alert("PHY: link UP after %d00ms\n", 40 - link_timeout);
-      }
-    else
-      {
-        _alert("PHY: link still DOWN after 4s timeout\n");
-      }
-  }
+  if (priv->link_up)
+    {
+      _alert("PHY: link UP after %d00ms\n", 40 - link_timeout);
+    }
+  else
+    {
+      _alert("PHY: link still DOWN after 4s timeout\n");
+    }
 
   /* Enable MAC transmitter and receiver */
 
@@ -1057,7 +1071,8 @@ skip_hw_init:
 
 static int ls2k0300_ifdown(struct net_driver_s *dev)
 {
-  struct ls2k0300_driver_s *priv = (struct ls2k0300_driver_s *)dev->d_private;
+  struct ls2k0300_driver_s *priv =
+    (struct ls2k0300_driver_s *)dev->d_private;
   uint64_t mac_base = LS2K0300_GMAC0_MAC_BASE;
   uint64_t dma_base = LS2K0300_GMAC0_DMA_BASE;
 
@@ -1169,7 +1184,8 @@ static int ls2k0300_transmit(struct ls2k0300_driver_s *priv)
 
 static int ls2k0300_txpoll(struct net_driver_s *dev)
 {
-  struct ls2k0300_driver_s *priv = (struct ls2k0300_driver_s *)dev->d_private;
+  struct ls2k0300_driver_s *priv =
+    (struct ls2k0300_driver_s *)dev->d_private;
   int ret = ls2k0300_transmit(priv);
 
   ninfo("TXPOLL: transmit ret=%d d_len=%d\n", ret, dev->d_len);
@@ -1225,7 +1241,8 @@ static void ls2k0300_txavail_work(void *arg)
 
 static int ls2k0300_txavail(struct net_driver_s *dev)
 {
-  struct ls2k0300_driver_s *priv = (struct ls2k0300_driver_s *)dev->d_private;
+  struct ls2k0300_driver_s *priv =
+    (struct ls2k0300_driver_s *)dev->d_private;
 
   ninfo("TXAVAIL: enter link_up=%d avail=%d\n", priv->link_up,
         work_available(&priv->tx_pollwork));
