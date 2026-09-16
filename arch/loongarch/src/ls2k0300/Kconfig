@@ -1,0 +1,163 @@
+#############################################################################
+# arch/loongarch/src/ls2k0300/Kconfig
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+#############################################################################
+
+comment "LS2K0300 Configuration Options"
+
+menu "LS2K0300 Peripheral Support"
+
+config LS2K0300_HAVE_UART0
+	bool
+	default y
+	select UART0_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config LS2K0300_HAVE_UART1
+	bool
+	default y
+	select UART1_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config LS2K0300_HAVE_UART2
+	bool
+	default y
+	select UART2_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config LS2K0300_UART0
+	bool "UART0"
+	default y
+	select ARCH_HAVE_UART0
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select LS2K0300_UART
+
+config LS2K0300_UART1
+	bool "UART1"
+	default n
+	select ARCH_HAVE_UART1
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select LS2K0300_UART
+
+config LS2K0300_UART2
+	bool "UART2"
+	default n
+	select ARCH_HAVE_UART2
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select LS2K0300_UART
+
+config LS2K0300_UART
+	bool
+
+endmenu
+
+menu "LS2K0300 UART Configuration"
+
+config UART0_BAUD
+	int "UART0 Baud Rate"
+	default 115200
+	depends on LS2K0300_UART0
+
+config UART0_BITS
+	int "UART0 Bits"
+	default 8
+	depends on LS2K0300_UART0
+
+config UART0_PARITY
+	int "UART0 Parity"
+	default 0
+	depends on LS2K0300_UART0
+
+config UART0_2STOP
+	int "UART0 Stop Bits"
+	default 0
+	depends on LS2K0300_UART0
+
+config UART0_RXBUFSIZE
+	int "UART0 Rx Buffer Size"
+	default 256
+	depends on LS2K0300_UART0
+
+config UART0_TXBUFSIZE
+	int "UART0 Tx Buffer Size"
+	default 256
+	depends on LS2K0300_UART0
+
+config UART1_BAUD
+	int "UART1 Baud Rate"
+	default 115200
+	depends on LS2K0300_UART1
+
+config UART1_BITS
+	int "UART1 Bits"
+	default 8
+	depends on LS2K0300_UART1
+
+config UART1_PARITY
+	int "UART1 Parity"
+	default 0
+	depends on LS2K0300_UART1
+
+config UART1_2STOP
+	int "UART1 Stop Bits"
+	default 0
+	depends on LS2K0300_UART1
+
+config UART1_RXBUFSIZE
+	int "UART1 Rx Buffer Size"
+	default 256
+	depends on LS2K0300_UART1
+
+config UART1_TXBUFSIZE
+	int "UART1 Tx Buffer Size"
+	default 256
+	depends on LS2K0300_UART1
+
+config UART2_BAUD
+	int "UART2 Baud Rate"
+	default 115200
+	depends on LS2K0300_UART2
+
+config UART2_BITS
+	int "UART2 Bits"
+	default 8
+	depends on LS2K0300_UART2
+
+config UART2_PARITY
+	int "UART2 Parity"
+	default 0
+	depends on LS2K0300_UART2
+
+config UART2_2STOP
+	int "UART2 Stop Bits"
+	default 0
+	depends on LS2K0300_UART2
+
+config UART2_RXBUFSIZE
+	int "UART2 Rx Buffer Size"
+	default 256
+	depends on LS2K0300_UART2
+
+config UART2_TXBUFSIZE
+	int "UART2 Tx Buffer Size"
+	default 256
+	depends on LS2K0300_UART2
+
+endmenu

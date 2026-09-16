@@ -47,4 +47,6 @@ config ARCH_USE_MMU
 	bool
 	default y if ARCH_HAVE_MMU
 
+source "arch/loongarch/src/ls2k0300/Kconfig"
+
 endif
