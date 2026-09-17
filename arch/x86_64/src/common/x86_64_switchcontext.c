@@ -95,8 +95,6 @@ void up_switch_context(struct tcb_s *tcb, struct tcb_s *rtcb)
       tcb = this_task();
 #endif
 
-      break_critical_section();
-
       /* Update scheduler parameters */
 
       running_task = &g_running_task;
@@ -108,8 +106,16 @@ void up_switch_context(struct tcb_s *tcb, struct tcb_s *rtcb)
 
       *running_task = tcb;
 
-      /* Then switch contexts */
+      /* Restore the cpu lock.  This makes the outgoing task wakeable by
+       * other CPUs while this CPU still runs on the outgoing task's
+       * stack, so it must come last and the final jump must not touch
+       * the stack (a call would push the return address onto it).
+       */
 
-      x86_64_fullcontextrestore(tcb->xcp.regs);
+      break_critical_section();
+
+      __asm__ volatile ("jmp x86_64_fullcontextrestore"
+                        :: "D" (tcb->xcp.regs) : "memory");
+      __builtin_unreachable();
     }
 }
