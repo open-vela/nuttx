@@ -156,10 +156,13 @@ void x86_64_timer_calibrate_freq(void)
 #  endif
 #endif
 
+#if defined(CONFIG_ARCH_INTEL64_TSC_DEADLINE) || \
+    defined(CONFIG_ARCH_INTEL64_TSC)
   if (g_x86_64_timer_freq == 0)
     {
       /* The TSC frequency is not available */
 
       PANIC();
     }
+#endif
 }
