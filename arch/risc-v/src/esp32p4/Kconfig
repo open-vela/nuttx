@@ -427,6 +427,121 @@ config ESPRESSIF_MIPI_CSI_RAW_PASSTHROUGH
 		verify the CSI link and DMA path independently of the ISP
 		programming.
 
+config ESPRESSIF_EMAC
+	bool "Ethernet MAC"
+	depends on ARCH_CHIP_ESP32P4
+	default n
+	select NET
+	select ARCH_PHY_INTERRUPT
+	select ESPRESSIF_HR_TIMER
+	select SCHED_LPWORK
+	---help---
+		Enable the ESP32-P4 internal Ethernet MAC with an external RMII PHY.
+
+menu "Ethernet Configuration"
+	depends on ESPRESSIF_EMAC
+
+config ESPRESSIF_ETH_NRXDESC
+	int "RX descriptor number"
+	default 20
+	---help---
+		Number of DMA receive descriptors/buffers used by the EMAC.
+
+config ESPRESSIF_ETH_NTXDESC
+	int "TX descriptor number"
+	default 20
+	---help---
+		Number of DMA transmit descriptors/buffers used by the EMAC.
+
+config ESPRESSIF_ETH_DMA_BUFFER_SIZE
+	int "DMA buffer size (bytes)"
+	default 1600
+	range 256 1600
+	---help---
+		Size of each DMA buffer used by the EMAC.
+
+config ESPRESSIF_ETH_TX_MAX_RETRIES
+	int "TX submit retry budget"
+	default 32
+	range 1 256
+	---help---
+		Number of times emac_transmit() retries esp_eth_transmit() when
+		the DMA TX descriptor ring is fully owned by hardware.
+
+config ESPRESSIF_ETH_PHY_ADDR
+	int "PHY address"
+	default 1
+	range 0 31
+	---help---
+		Address of the external Ethernet PHY on the SMI bus.
+
+config ESPRESSIF_ETH_MDC_GPIO
+	int "MDC GPIO"
+	default 31
+	---help---
+		GPIO number connected to the PHY MDC pin.
+
+config ESPRESSIF_ETH_MDIO_GPIO
+	int "MDIO GPIO"
+	default 52
+	---help---
+		GPIO number connected to the PHY MDIO pin.
+
+config ESPRESSIF_ETH_RMII_CLK_GPIO
+	int "RMII REF_CLK GPIO"
+	default 50
+	---help---
+		GPIO number for the RMII 50 MHz reference clock input.
+
+config ESPRESSIF_ETH_RMII_TX_EN_GPIO
+	int "RMII TX_EN GPIO"
+	default 49
+	---help---
+		GPIO number connected to the RMII TX_EN pin.
+
+config ESPRESSIF_ETH_RMII_TXD0_GPIO
+	int "RMII TXD0 GPIO"
+	default 34
+	---help---
+		GPIO number connected to the RMII TXD0 pin.
+
+config ESPRESSIF_ETH_RMII_TXD1_GPIO
+	int "RMII TXD1 GPIO"
+	default 35
+	---help---
+		GPIO number connected to the RMII TXD1 pin.
+
+config ESPRESSIF_ETH_RMII_CRS_DV_GPIO
+	int "RMII CRS_DV GPIO"
+	default 28
+	---help---
+		GPIO number connected to the RMII CRS_DV pin.
+
+config ESPRESSIF_ETH_RMII_RXD0_GPIO
+	int "RMII RXD0 GPIO"
+	default 29
+	---help---
+		GPIO number connected to the RMII RXD0 pin.
+
+config ESPRESSIF_ETH_RMII_RXD1_GPIO
+	int "RMII RXD1 GPIO"
+	default 30
+	---help---
+		GPIO number connected to the RMII RXD1 pin.
+
+config ESPRESSIF_ETH_ENABLE_PHY_RSTPIN
+	bool "Enable PHY reset pin"
+	default y
+
+config ESPRESSIF_ETH_PHY_RST_GPIO
+	int "PHY reset GPIO"
+	default 51
+	depends on ESPRESSIF_ETH_ENABLE_PHY_RSTPIN
+	---help---
+		GPIO number connected to the PHY reset pin.
+
+endmenu # Ethernet Configuration
+
 menu "SD/MMC Configuration"
 
 config ESP32P4_SDMMC

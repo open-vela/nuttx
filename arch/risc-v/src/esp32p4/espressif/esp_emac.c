@@ -649,7 +649,6 @@ int esp_emac_init(void)
   memset(priv, 0, sizeof(*priv));
   IOB_QINIT(&priv->rxq);
   spin_lock_init(&priv->lock);
-
   /* Override default RMII/SMI pin configuration from Kconfig. */
 
   esp32_cfg.smi_gpio.mdc_num  = CONFIG_ESPRESSIF_ETH_MDC_GPIO;

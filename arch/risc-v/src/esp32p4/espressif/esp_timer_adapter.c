@@ -483,6 +483,12 @@ int esp_hr_timer_init(void)
 
   /* Initialize the timer subsystem */
 
+  ret = esp_timer_impl_early_init();
+  if (ret != ESP_OK)
+    {
+      return ERROR;
+    }
+
   ret = esp_timer_init();
   if (ret == ESP_OK)
     {

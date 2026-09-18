@@ -38,6 +38,7 @@
 #include <nuttx/net/netconfig.h>
 #include <nuttx/compiler.h>
 #include <nuttx/mutex.h>
+#include <nuttx/semaphore.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -320,8 +321,19 @@ static inline_function int
 usrsock_sem_timedwait(FAR sem_t *sem, bool interruptible,
                       unsigned int timeout)
 {
+#ifdef CONFIG_NET
   return net_sem_timedwait2(sem, interruptible, timeout, &g_usrsock_lock,
                             NULL);
+#else
+  if (timeout == UINT_MAX)
+    {
+      return interruptible ? nxsem_wait(sem) :
+                             nxsem_wait_uninterruptible(sem);
+    }
+
+  return interruptible ? nxsem_tickwait(sem, timeout) :
+                         nxsem_tickwait_uninterruptible(sem, timeout);
+#endif
 }
 
 /****************************************************************************

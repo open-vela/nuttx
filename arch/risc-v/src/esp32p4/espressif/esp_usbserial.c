@@ -62,9 +62,11 @@
 #define USJ_RCC_ATOMIC()
 #endif
 
-/* The hardware buffer has a fixed size of 64 bytes */
+/* Software queues must hold more than one 64-byte USB packet.  The serial
+ * ring reserves one slot, so a 64-byte ring drops data from a full packet.
+ */
 
-#define ESP_USBCDC_BUFFERSIZE 64
+#define ESP_USBCDC_BUFFERSIZE 2048
 
 /****************************************************************************
  * Private Types

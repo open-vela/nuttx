@@ -4737,6 +4737,9 @@ endif
 if ARCH_CHIP_ESP32H2
 source "boards/risc-v/esp32h2/common/Kconfig"
 endif
+if ARCH_CHIP_ESP32P4
+source "boards/risc-v/esp32p4/common/Kconfig"
+endif
 if ARCH_CHIP_SAMV7
 source "boards/arm/samv7/common/Kconfig"
 endif

@@ -27,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <debug.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <syslog.h>
 #include <sys/ioctl.h>
@@ -175,6 +176,12 @@ int esp_bringup(void)
 
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
+
+  ret = mkdir("/proc", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      _err("Failed to create /proc: %d\n", errno);
+    }
 
   ret = nx_mount(NULL, "/proc", "procfs", 0, NULL);
   if (ret < 0)

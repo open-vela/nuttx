@@ -64,6 +64,11 @@
  * Private Function Prototypes
  ****************************************************************************/
 
+int esp_flash_app_init(void);
+int esp_flash_app_init_os_functions(void);
+int esp_flash_init_default_chip(void);
+int mksmartfs(const char *pathname, uint16_t sectorsize);
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -105,8 +110,32 @@ static int setup_smartfs(int smartn, struct mtd_dev_s *mtd,
       ret = mtd->ioctl(mtd, MTDIOC_BULKERASE, 0);
       if (ret < 0)
         {
-          syslog(LOG_ERR, "ERROR: ioctl(BULKERASE) failed: %d\n", ret);
-          return ret;
+          struct mtd_geometry_s geo;
+          off_t block;
+
+          syslog(LOG_WARNING,
+                 "WARNING: ioctl(BULKERASE) failed: %d, "
+                 "trying sector erase\n", ret);
+          ret = mtd->ioctl(mtd, MTDIOC_GEOMETRY,
+                           (unsigned long)(uintptr_t)&geo);
+          if (ret < 0)
+            {
+              syslog(LOG_ERR, "ERROR: Failed to query MTD geometry: %d\n",
+                     ret);
+              return ret;
+            }
+
+          for (block = 0; block < geo.neraseblocks; block++)
+            {
+              ret = mtd->erase(mtd, block, 1);
+              if (ret != 1)
+                {
+                  syslog(LOG_ERR,
+                         "ERROR: Failed to erase MTD block %ld: %d\n",
+                         (long)block, ret);
+                  return ret < 0 ? ret : -EIO;
+                }
+            }
         }
 
       syslog(LOG_INFO, "Erase successful, initializing it again.\n");
@@ -123,15 +152,24 @@ static int setup_smartfs(int smartn, struct mtd_dev_s *mtd,
       snprintf(path, sizeof(path), "/dev/smart%d", smartn);
 
       ret = nx_mount(path, mnt_pt, "smartfs", 0, NULL);
+      if (ret == -ENODEV)
+        {
+          syslog(LOG_INFO, "Formatting uninitialized SmartFS volume %s\n",
+                 path);
+          ret = mksmartfs(path, 0);
+          if (ret < 0)
+            {
+              syslog(LOG_ERR, "ERROR: Failed to format SmartFS volume: %d\n",
+                     errno);
+              return -errno;
+            }
+
+          ret = nx_mount(path, mnt_pt, "smartfs", 0, NULL);
+        }
+
       if (ret < 0)
         {
           syslog(LOG_ERR, "ERROR: Failed to mount the FS volume: %d\n", ret);
-          if (ret == -ENODEV)
-            {
-              syslog(LOG_WARNING, "Smartfs seems unformatted. "
-                     "Did you run 'mksmartfs /dev/smart%d'?\n", smartn);
-            }
-
           return ret;
         }
     }
@@ -412,7 +450,31 @@ static int init_storage_partition(void)
 
 int board_spiflash_init(void)
 {
-  int ret = OK;
+  int ret;
+
+  ret = esp_flash_app_init_os_functions();
+  if (ret != OK)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize SPI Flash OS locks: %d\n",
+             ret);
+      return ret;
+    }
+
+  ret = esp_flash_app_init();
+  if (ret != OK)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize SPI Flash OS layer: %d\n",
+             ret);
+      return ret;
+    }
+
+  ret = esp_flash_init_default_chip();
+  if (ret != OK)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize default SPI Flash: %d\n",
+             ret);
+      return ret;
+    }
 
   ret = init_storage_partition();
   if (ret < 0)
