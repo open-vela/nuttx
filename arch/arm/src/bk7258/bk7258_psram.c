@@ -613,6 +613,59 @@ int bk7258_psram_init(void)
 }
 
 /****************************************************************************
+ * Name: bk7258_psram_deinit
+ *
+ * Description:
+ *   Power off the PSRAM subsystem to save ~80-90mA standby current.
+ *   Strict reverse of bk7258_psram_init():
+ *     1. Disable PSRAM peripheral clock (bit19 of SYS_DEV_CLK_ENABLE)
+ *     2. Disable PSRAM LDO (ana_reg13 enpsram=0, via SPI-polled ana_rmw)
+ *     3. Power off AHB domain (set pwd_ahbp bit5 of SYS_POWER_SLEEP_WAKEUP)
+ *     4. Clear g_psram_init_done so next init runs full sequence
+ *
+ *   Idempotent — no-op if not initialized.
+ *
+ ****************************************************************************/
+
+void bk7258_psram_deinit(void)
+{
+  uint32_t val;
+
+  if (!g_psram_init_done)
+    {
+      return;
+    }
+
+  /* 1. Disable PSRAM peripheral clock (bit19) */
+
+  val = psram_getreg(SYS_DEV_CLK_ENABLE);
+  val &= ~PSRAM_CKEN_BIT;
+  psram_putreg(val, SYS_DEV_CLK_ENABLE);
+
+  /* 2. Disable PSRAM LDO (ana_reg13 enpsram=0).
+   * Must use ana_rmw (SPI-polled) — plain MMIO won't complete the
+   * SPI transfer to the analog front-end.
+   */
+
+  ana_rmw(SYS_ANA_REG13, 31, 0x1, 0);   /* enpsram = 0 */
+
+  /* 3. Power off AHB PSRAM domain (set pwd_ahbp bit5) */
+
+  val = psram_getreg(SYS_POWER_SLEEP_WAKEUP);
+  val |= PWD_AHBP_BIT;
+  psram_putreg(val, SYS_POWER_SLEEP_WAKEUP);
+
+  /* 4. Clear guard — next bk7258_psram_init() will run full sequence */
+
+  g_psram_init_done = false;
+  g_psram_chip_id = 0;
+  g_psram_size = 0;
+
+  syslog(LOG_INFO,
+         "psram: deinit — clock off, LDO off, AHB off\n");
+}
+
+/****************************************************************************
  * Name: bk7258_psram_get_id
  *
  * Description:

@@ -37,6 +37,7 @@
  ****************************************************************************/
 
 int bk7258_psram_init(void);
+void bk7258_psram_deinit(void);
 uint32_t bk7258_psram_get_id(void);
 uint32_t bk7258_psram_get_size(void);
 int bk7258_psram_probe(void);
