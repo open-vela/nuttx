@@ -714,7 +714,6 @@ int esp_hr_timer_init(void)
   if (g_hr_timer_initialized)
     {
       tmrinfo("HR Timer already initialized, skipping...\n");
-
       return OK;
     }
 
@@ -726,7 +725,6 @@ int esp_hr_timer_init(void)
   if (pid < 0)
     {
       tmrerr("Failed to create HR Timer task=%d\n", pid);
-
       return pid;
     }
 

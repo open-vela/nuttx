@@ -25,6 +25,7 @@
  ****************************************************************************/
 
 #include <debug.h>
+#include <syslog.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <string.h>
@@ -313,11 +314,22 @@ int sdio_io_rw_extended(FAR struct sdio_dev_s *dev, bool write,
     }
 
   wlinfo("Transaction ends\n");
-  sdio_sendcmdpoll(dev, SD_ACMD52ABRT, 0);
+  /* CMD52 I/O-Abort is a recovery mechanism for a transfer that did not
+   * finish; issuing it after a completed transfer is unnecessary and on the
+   * ESP32-P4 controller it never completes, hanging the caller.  Only abort
+   * when the data phase did not report completion.
+   */
 
-  /* There may not be a response to this, so don't look for one */
+  if ((wkupevent & SDIOWAIT_TRANSFERDONE) == 0)
+    {
+      syslog(LOG_INFO, "CMD53PROBE: [6] issuing ABORT\n");
+      sdio_sendcmdpoll(dev, SD_ACMD52ABRT, 0);
 
-  SDIO_RECVR1(dev, SD_ACMD52ABRT, &data);
+      /* There may not be a response to this, so don't look for one */
+
+      SDIO_RECVR1(dev, SD_ACMD52ABRT, &data);
+      syslog(LOG_INFO, "CMD53PROBE: [7] after ABORT\n");
+    }
   sdio_givelock(dev);
 
   if (ret != OK)
@@ -383,9 +395,21 @@ int sdio_probe(FAR struct sdio_dev_s *dev)
 {
   int ret;
   int bit;
+  int retries;
   uint32_t data = 0;
+  uint32_t resp = 0;
 
-  nxmutex_init(&dev->mutex);
+  /* probe() is retried while the C6 SDIO slave is still booting.  The
+   * mutex is per-device and must only be initialised once.
+   */
+
+  static bool mutex_inited;
+
+  if (!mutex_inited)
+    {
+      nxmutex_init(&dev->mutex);
+      mutex_inited = true;
+    }
 
   sdio_takelock(dev);
 
@@ -429,9 +453,40 @@ int sdio_probe(FAR struct sdio_dev_s *dev)
       goto err;
     }
 
-  ret = sdio_sendcmdpoll(dev, SDIO_CMD5, data);
-  if (ret != OK)
+  /* Send CMD5 with the supported OCR voltage window and poll the R4 response
+   * until the card finishes powering up its I/O (OCR bit 31, "IO ready").  A
+   * card that is still busy will not answer CMD3, so it must not be pushed on
+   * until the ready bit is set.
+   */
+
+  retries = 20;
+  do
     {
+      ret = sdio_sendcmdpoll(dev, SDIO_CMD5, data);
+      if (ret != OK)
+        {
+          goto err;
+        }
+
+      ret = SDIO_RECVR4(dev, SDIO_CMD5, &resp);
+      if (ret != OK)
+        {
+          goto err;
+        }
+
+      if ((resp & (1u << 31)) != 0)
+        {
+          break;
+        }
+
+      up_mdelay(10);
+    }
+  while (--retries > 0);
+
+  if (retries <= 0)
+    {
+      wlerr("ERROR: SDIO card not ready (OCR=%08" PRIx32 ")\n", resp);
+      ret = -ETIMEDOUT;
       goto err;
     }
 
@@ -470,10 +525,14 @@ int sdio_probe(FAR struct sdio_dev_s *dev)
       goto err;
     }
 
-  /* Configure 4 bits bus width */
+  /* Leave the card in 1-bit mode.  Switching to 4-bit here makes the
+   * ESP32-C6 slave send CMD53 data as 4-bit; our host then either SBE
+   * (4-bit) or DCRC (if we later drop back to 1-bit).  Bring the data
+   * path up in 1-bit first.
+   */
 
   sdio_givelock(dev);
-  return sdio_set_wide_bus(dev);
+  return OK;
 
 err:
   sdio_givelock(dev);

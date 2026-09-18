@@ -1,0 +1,99 @@
+/****************************************************************************
+ * arch/risc-v/src/esp32p4/espressif/esp_rtc.h
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ ****************************************************************************/
+
+#ifndef __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_RTC_H
+#define __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_RTC_H
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
+#include <nuttx/config.h>
+
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
+
+/****************************************************************************
+ * Name: esp_set_time_from_rtc
+ *
+ * Description:
+ *   Update the offset between RTC timer and HR-Timer after light sleep
+ *   wake-up. This function is called by the ESP-HAL sleep_modes.c after
+ *   waking from light sleep to resynchronize the timers.
+ *
+ *   Note: This function is only available when both CONFIG_RTC_DRIVER and
+ *   CONFIG_ESPRESSIF_HR_TIMER are enabled.
+ *
+ * Input Parameters:
+ *   None.
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_RTC_DRIVER) && defined(CONFIG_ESPRESSIF_HR_TIMER)
+void esp_set_time_from_rtc(void);
+#endif
+
+/****************************************************************************
+ * Name: esp_sync_timekeeping_timers
+ *
+ * Description:
+ *   Synchronize the RTC timer and HR-Timer by recalculating and adjusting
+ *   the offset between them. This function can be called periodically to
+ *   compensate for any drift between the two time sources.
+ *
+ *   Note: This function is only available when both CONFIG_RTC_DRIVER and
+ *   CONFIG_ESPRESSIF_HR_TIMER are enabled.
+ *
+ * Input Parameters:
+ *   None.
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_RTC_DRIVER) && defined(CONFIG_ESPRESSIF_HR_TIMER)
+void esp_sync_timekeeping_timers(void);
+#endif
+
+/****************************************************************************
+ * Name: esp_rtc_driverinit
+ *
+ * Description:
+ *   Initialize and register an RTC lower half driver.
+ *
+ * Input Parameters:
+ *   None.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned
+ *   on any failure.
+ *
+ ****************************************************************************/
+
+int esp_rtc_driverinit(void);
+
+#endif /* __ARCH_RISCV_SRC_COMMON_ESPRESSIF_ESP_RTC_H */

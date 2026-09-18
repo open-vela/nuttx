@@ -46,6 +46,10 @@ if(CONFIG_DRIVERS_VIDEO)
       list(APPEND SRCS isx019.c)
     endif()
 
+    if(CONFIG_VIDEO_SC2336)
+      list(APPEND SRCS sc2336.c)
+    endif()
+
     if(CONFIG_VIDEO_OV2640)
       list(APPEND SRCS ov2640.c)
     endif()
