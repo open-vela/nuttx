@@ -40,9 +40,6 @@
 #include <nuttx/semaphore.h>
 #include <nuttx/spinlock.h>
 #include <nuttx/mmcsd.h>
-#if defined(CONFIG_ESP32S3_SDMMC_DMA) && defined(CONFIG_ESP32S3_SPIRAM)
-#include <nuttx/kmalloc.h>
-#endif
 
 #include "xtensa.h"
 #include "esp32s3_gpio.h"
@@ -104,14 +101,39 @@
 #define ESP32S3_TXFIFO_SIZE       (ESP32S3_TXFIFO_DEPTH | ESP32S3_TXFIFO_WIDTH)
 #define ESP32S3_RXFIFO_SIZE       (ESP32S3_RXFIFO_DEPTH | ESP32S3_RXFIFO_WIDTH)
 
-/* Number of DMA Descriptors */
+/* Number of DMA Descriptors.
+ *
+ * ESP32S3_MULTIBLOCK_LIMIT also bounds the static bounce buffer below, so it
+ * must stay in sync with CONFIG_MMCSD_MULTIBLOCK_LIMIT (the mmcsd layer
+ * splits larger transfers into chunks of at most this many blocks).
+ */
 
-#define ESP32S3_MULTIBLOCK_LIMIT  128
+#define ESP32S3_MULTIBLOCK_LIMIT  16
 #define NUM_DMA_DESCRIPTORS       (1 + (ESP32S3_MULTIBLOCK_LIMIT * 512 / MCI_DMADES1_MAXTR))
 
 #if (CONFIG_MMCSD_MULTIBLOCK_LIMIT == 0 || \
      CONFIG_MMCSD_MULTIBLOCK_LIMIT > ESP32S3_MULTIBLOCK_LIMIT)
 #error "CONFIG_MMCSD_MULTIBLOCK_LIMIT is too big"
+#endif
+
+#if defined(CONFIG_ESP32S3_SDMMC_DMA) && defined(CONFIG_ESP32S3_SPIRAM)
+/* Bounce buffer for client buffers the SDMMC internal DMA cannot reach.
+ *
+ * The controller's DMA only addresses the internal SRAM window, so a
+ * transfer whose client buffer lives in PSRAM must be routed through a
+ * buffer that is guaranteed to be internal.  .bss always links to internal
+ * SRAM on this SoC, while kmm_memalign() may fall back to PSRAM once
+ * internal DRAM is exhausted.  The internal window is uncached, so no cache
+ * maintenance is needed around the DMA (esp32s3_cam.c needs cache ops only
+ * because GDMA, unlike this controller, can reach cached PSRAM).
+ *
+ * The descriptor buffer pointers must be word aligned, and .bss placement
+ * alone gives no alignment guarantee (the linker may place this at any byte
+ * boundary), so force one explicitly.
+ */
+
+static uint8_t g_bounce_buf[ESP32S3_MULTIBLOCK_LIMIT * 512]
+  __attribute__((aligned(32)));
 #endif
 
 /* Data transfer interrupt mask bits */
@@ -234,6 +256,8 @@ struct esp32s3_dev_s
   worker_t           callback;        /* Registered callback function */
   void              *cbarg;           /* Registered callback argument */
   struct work_s      cbwork;          /* Callback work queue structure */
+  struct work_s      cdwork;          /* Card-detect debounce work */
+  volatile bool      cdwork_pending;  /* Debounce work is queued */
 
   /* Interrupt mode data transfer support */
 
@@ -244,8 +268,8 @@ struct esp32s3_dev_s
   uint32_t           dmamask;         /* Interrupt enables for DMA transfer */
   volatile struct sdmmc_dma_s dma_desc[NUM_DMA_DESCRIPTORS];
 #ifdef CONFIG_ESP32S3_SPIRAM
-  uint8_t           *dma_buf;
-  size_t            dma_buf_size;
+  size_t            bounce_len;      /* Non-zero while a static-bounce
+                                      * transfer is in flight */
 #endif
 #endif
   bool               wrdir;           /* True: Writing False: Reading */
@@ -844,6 +868,71 @@ static void esp32s3_endtransfer(struct esp32s3_dev_s *priv,
 }
 
 /****************************************************************************
+ * Name: esp32s3_update_cdstatus
+ *
+ * Description:
+ *   Sample the live card-detect (and write-protect) levels into cdstatus.
+ *   Only this function and the debounced card-detect worker change the
+ *   PRESENT bit, so a momentary glitch on the line cannot make the driver
+ *   unregister a working card through a racing status() call.
+ *
+ ****************************************************************************/
+
+static void esp32s3_update_cdstatus(struct esp32s3_dev_s *priv)
+{
+  if ((esp32s3_getreg(ESP32S3_SDMMC_CDETECT) &
+       SDMMC_CDETECT_NOTPRESENT(priv->slot)) == 0)
+    {
+      priv->cdstatus |= SDIO_STATUS_PRESENT;
+
+#ifdef CONFIG_MMCSD_HAVE_WRITEPROTECT
+      if ((esp32s3_getreg(ESP32S3_SDMMC_WRTPRT) &
+           SDMMC_WRTPRT_PROTECTED(priv->slot)) != 0)
+        {
+          priv->cdstatus |= SDIO_STATUS_WRPROTECTED;
+        }
+      else
+#endif
+        {
+          priv->cdstatus &= ~SDIO_STATUS_WRPROTECTED;
+        }
+    }
+  else
+    {
+      priv->cdstatus &= ~(SDIO_STATUS_PRESENT | SDIO_STATUS_WRPROTECTED);
+    }
+}
+
+/****************************************************************************
+ * Name: esp32s3_cd_debounce
+ *
+ * Description:
+ *   Deferred card-detect re-check.  The card-detect input can glitch
+ *   briefly while other peripherals power up; acting on the instantaneous
+ *   edge would unregister a perfectly good card.  Re-read the level after
+ *   the debounce delay and only propagate a real, stable change.
+ *
+ ****************************************************************************/
+
+static void esp32s3_cd_debounce(void *arg)
+{
+  struct esp32s3_dev_s *priv = arg;
+  sdio_statset_t cdstatus = priv->cdstatus;
+
+  priv->cdwork_pending = false;
+  esp32s3_update_cdstatus(priv);
+
+  mcinfo("cdstatus OLD: %02x NEW: %02x\n", cdstatus, priv->cdstatus);
+
+  /* Perform any requested callback if the status has changed */
+
+  if (cdstatus != priv->cdstatus)
+    {
+      esp32s3_callback(priv);
+    }
+}
+
+/****************************************************************************
  * Name: esp32s3_interrupt
  *
  * Description:
@@ -881,41 +970,17 @@ static int esp32s3_interrupt(int irq, void *context, void *arg)
 
       if ((enabled & SDMMC_INT_CDET) != 0)
         {
-          sdio_statset_t cdstatus;
+          /* Do not trust the instantaneous level here: the card-detect
+           * line can glitch briefly during peripheral power-up, which
+           * would unregister a working card.  Sample the level from a
+           * deferred, debounced worker instead.
+           */
 
-          /* Update card status */
-
-          cdstatus = priv->cdstatus;
-          if ((esp32s3_getreg(ESP32S3_SDMMC_CDETECT) &
-              SDMMC_CDETECT_NOTPRESENT(priv->slot)) == 0)
+          if (!priv->cdwork_pending)
             {
-              priv->cdstatus |= SDIO_STATUS_PRESENT;
-
-#ifdef CONFIG_MMCSD_HAVE_WRITEPROTECT
-              if ((esp32s3_getreg(ESP32S3_SDMMC_WRTPRT) &
-                  SDMMC_WRTPRT_PROTECTED(priv->slot)) != 0)
-                {
-                  priv->cdstatus |= SDIO_STATUS_WRPROTECTED;
-                }
-              else
-#endif
-                {
-                  priv->cdstatus &= ~SDIO_STATUS_WRPROTECTED;
-                }
-            }
-          else
-            {
-              priv->cdstatus &=
-                ~(SDIO_STATUS_PRESENT | SDIO_STATUS_WRPROTECTED);
-            }
-
-          mcinfo("cdstatus OLD: %02x NEW: %02x\n", cdstatus, priv->cdstatus);
-
-          /* Perform any requested callback if the status has changed */
-
-          if (cdstatus != priv->cdstatus)
-            {
-              esp32s3_callback(priv);
+              priv->cdwork_pending = true;
+              work_queue(HPWORK, &priv->cdwork, esp32s3_cd_debounce, priv,
+                         MSEC2TICK(50));
             }
         }
 #endif
@@ -1273,17 +1338,11 @@ static sdio_statset_t esp32s3_status(struct sdio_dev_s *dev)
 {
   struct esp32s3_dev_s *priv = (struct esp32s3_dev_s *)dev;
 
-#ifdef CONFIG_MMCSD_HAVE_CARDDETECT
-  if ((esp32s3_getreg(ESP32S3_SDMMC_CDETECT) &
-       SDMMC_CDETECT_NOTPRESENT(priv->slot)) == 0)
-    {
-      priv->cdstatus |= SDIO_STATUS_PRESENT;
-    }
-  else
-    {
-      priv->cdstatus &= ~SDIO_STATUS_PRESENT;
-    }
-#endif
+  /* Return the debounced card status.  The live CDETECT/WRTPRT levels are
+   * sampled only by esp32s3_update_cdstatus() (at attach time and from the
+   * debounced card-detect worker), so callers of SDIO_PRESENT cannot race
+   * with a momentary card-detect glitch and drop a working card.
+   */
 
   mcinfo("cdstatus=%02x\n", priv->cdstatus);
 
@@ -1653,6 +1712,12 @@ static int esp32s3_attach(struct sdio_dev_s *dev)
 
       esp32s3_putreg(SDCARD_INT_CDET, ESP32S3_SDMMC_INTMASK);
 
+      /* Seed the debounced card status from the live level so the first
+       * probe sees the card without waiting for a card-detect edge.
+       */
+
+      esp32s3_update_cdstatus(priv);
+
       /* Enable SD card interrupts at the NVIC.  They can now be enabled at
        * the SD card controller as needed.
        */
@@ -1957,11 +2022,7 @@ static int esp32s3_cancel(struct sdio_dev_s *dev)
   wd_cancel(&priv->waitwdog);
 
 #if defined(CONFIG_ESP32S3_SDMMC_DMA) && defined(CONFIG_ESP32S3_SPIRAM)
-  if (!esp32s3_ptr_dma_capable(priv->buffer) && priv->dma_buf)
-    {
-      kmm_free(priv->dma_buf);
-      priv->dma_buf = NULL;
-    }
+  priv->bounce_len = 0;
 #endif
 
   /* Mark no transfer in progress */
@@ -2469,15 +2530,18 @@ out:
   leave_critical_section(flags);
 
 #if defined(CONFIG_ESP32S3_SDMMC_DMA) && defined(CONFIG_ESP32S3_SPIRAM)
-  if (!esp32s3_ptr_dma_capable(priv->buffer) && priv->dma_buf)
+  if (priv->bounce_len != 0)
     {
       if (!priv->wrdir && wkupevent == SDIOWAIT_TRANSFERDONE)
         {
-          memcpy(priv->buffer, priv->dma_buf, priv->dma_buf_size);
+          /* Copy what the DMA engine wrote into the internal bounce buffer
+           * back to the client buffer, which may live in PSRAM.
+           */
+
+          memcpy(priv->buffer, g_bounce_buf, priv->bounce_len);
         }
 
-      kmm_free(priv->dma_buf);
-      priv->dma_buf = NULL;
+      priv->bounce_len = 0;
     }
 #endif
 
@@ -2569,19 +2633,25 @@ static int esp32s3_fill_dma_desc(struct esp32s3_dev_s *priv)
 #ifdef CONFIG_ESP32S3_SPIRAM
   if (!esp32s3_ptr_dma_capable(priv->buffer))
     {
-      priv->dma_buf = kmm_memalign(16, buflen);
-      if (!priv->dma_buf)
+      /* The client buffer (typically a task stack or heap allocation in
+       * PSRAM) is outside the SDMMC DMA address range.  Route the transfer
+       * through the static internal bounce buffer instead.  The mmcsd layer
+       * bounds every request to ESP32S3_MULTIBLOCK_LIMIT blocks; refuse
+       * anything larger rather than silently corrupt it.
+       */
+
+      if (buflen > sizeof(g_bounce_buf))
         {
           return -ENOMEM;
         }
 
-      priv->dma_buf_size = buflen;
-      buffer = (uint32_t)priv->dma_buf;
-
       if (priv->wrdir)
         {
-          memcpy(priv->dma_buf, priv->buffer, buflen);
+          memcpy(g_bounce_buf, priv->buffer, buflen);
         }
+
+      priv->bounce_len = buflen;
+      buffer = (uint32_t)g_bounce_buf;
     }
 #endif
 

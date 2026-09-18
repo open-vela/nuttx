@@ -32,7 +32,7 @@
 
 #include <nuttx/mutex.h>
 
-#include "esp32s3_gpio.h"
+#include "esp32s3_rtc_gpio.h"
 #include "esp32s3_dma.h"
 #include "esp32s3_irq.h"
 #include "esp32s3_adc.h"
@@ -417,21 +417,23 @@ static inline void adc_samplecfg(int channel)
 {
   uint32_t regval;
 
-  /* set (Frequency division) (inversion adc) */
+  /* Set frequency division and disable ADC1 data inversion. */
 
   regval = getreg32(SENS_SAR_READER1_CTRL_REG);
-  regval &= ~(SENS_SAR1_CLK_DIV_M);
+  regval &= ~(SENS_SAR1_CLK_DIV_M | SENS_SAR1_DATA_INV_M);
   regval |= (1 << SENS_SAR1_CLK_DIV_S);
   putreg32(regval, SENS_SAR_READER1_CTRL_REG);
 
-  /* Enable ADC1, its sampling attenuation */
+  /* Set ADC1 sampling attenuation. */
 
   regval = getreg32(SENS_SAR_ATTEN1_REG);
-  regval &= ~(ADC_ATTEN_DEF << (channel * 2));
-  regval |= ADC_ATTEN_DEF << (channel * 2);
+  regval &= ~(0x3 << (channel * 2));
+  regval |= (ADC_ATTEN_DEF & 0x3) << (channel * 2);
   putreg32(regval, SENS_SAR_ATTEN1_REG);
 
-  /* Enable ADC1, its sampling channel and attenuation */
+  /* Select the RTC controller and configure its sampling channel. */
+
+  resetbits(SENS_SAR1_DIG_FORCE_M, SENS_SAR_MEAS1_MUX_REG);
 
   regval  = getreg32(SENS_SAR_MEAS1_CTRL2_REG);
   regval &= ~(SENS_SAR1_EN_PAD_M | SENS_SAR1_EN_PAD_FORCE_M |
@@ -460,8 +462,14 @@ static uint16_t adc_read(void)
   uint16_t adc;
   uint32_t regval;
 
-  /* Trigger ADC1 sampling */
+  /* Wait until ADC1 is idle, then trigger a conversion with a rising edge. */
 
+  while (getreg32(SENS_SAR_SLAVE_ADDR1_REG) &
+         SENS_SARADC_MEAS_STATUS_M)
+    {
+    }
+
+  resetbits(SENS_MEAS1_START_SAR, SENS_SAR_MEAS1_CTRL2_REG);
   setbits(SENS_MEAS1_START_SAR, SENS_SAR_MEAS1_CTRL2_REG);
 
   /* Wait until ADC1 sampling is done */
@@ -713,11 +721,17 @@ static int adc_setup(struct adc_dev_s *dev)
 
   adc_enable_clk();
 
-  /* Disable GPIO input and output */
+  /* Route the pad to the RTC/analog function and disable digital I/O. */
 
   ainfo("pin: %" PRIu8 "\n", priv->pin);
 
-  esp32s3_configgpio(priv->pin, INPUT | FUNCTION_1);
+  ret = esp32s3_configrtcio(priv->pin, RTC_FUNCTION_RTCIO);
+  if (ret < 0)
+    {
+      adc_disable_clk();
+      aerr("Failed to configure RTC GPIO ret=%d\n", ret);
+      return ret;
+    }
 
   /* Start calibration only once  */
 

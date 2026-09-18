@@ -267,6 +267,11 @@ ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms: ${ESP_HAL_3RDPARTY_VERSION}"
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) checkout --quiet $(ESP_HAL_3RDPARTY_VERSION)
 endif
+	$(Q) if git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply --check \
+		../esp-hal-3rdparty-spinlock.patch; then \
+		git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply \
+			../esp-hal-3rdparty-spinlock.patch; \
+	fi
 
 # Silent preprocessor warnings
 

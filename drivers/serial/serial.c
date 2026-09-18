@@ -267,6 +267,8 @@ static int uart_putxmitchar(FAR uart_dev_t *dev, int ch, bool oktoblock)
 
       else if (oktoblock)
         {
+          bool flushed = false;
+
           /* The following steps must be atomic with respect to serial
            * interrupt handling.
            */
@@ -316,12 +318,40 @@ static int uart_putxmitchar(FAR uart_dev_t *dev, int ch, bool oktoblock)
 #endif
               uart_enabletxint(dev);
               uart_spinunlock(dev, true, flags);
-              ret = nxsem_wait(&dev->xmitsem);
+
+              if (dev->xmit_timeout > 0)
+                {
+                  ret = nxsem_tickwait(&dev->xmitsem,
+                                       dev->xmit_timeout);
+                }
+              else
+                {
+                  ret = nxsem_wait(&dev->xmitsem);
+                }
+
               flags = uart_spinlock(dev, true);
               uart_disabletxint(dev);
+
+              /* A device-specific timeout allows a console whose hardware
+               * peer has stopped consuming data to discard stale output.
+               * This writer still owns xmit.lock, so no producer can race
+               * the flush; the UART spinlock excludes the TX consumer.
+               */
+
+              if (ret == -ETIMEDOUT)
+                {
+                  dev->xmit.tail = dev->xmit.head;
+                  flushed = true;
+                  ret = OK;
+                }
             }
 
           uart_spinunlock(dev, true, flags);
+
+          if (flushed)
+            {
+              uart_datasent(dev);
+            }
 
 #ifdef CONFIG_SERIAL_REMOVABLE
           /* Check if the removable device was disconnected while we were

@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <debug.h>
 
+#include <nuttx/arch.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/i2c/i2c_master.h>
@@ -68,13 +69,13 @@
 
 #define QMA7981_BW_52HZ             0xe2
 
-/* Valid CHIP_ID range observed across silicon revisions e0..e9.
- * Datasheet does not publish a fixed value; we accept this range to
- * tolerate v1 (0xe0..0xe7) and v2 (0xe8..0xe9) parts.
+/* Valid CHIP_ID values.  ESP32-S3-EYE board revisions may contain either
+ * QMA7981 (0xe0..0xe9) or the register-compatible QMA6100P (0x90).
  */
 
 #define QMA7981_CHIP_ID_MIN         0xe0
 #define QMA7981_CHIP_ID_MAX         0xe9
+#define QMA6100P_CHIP_ID            0x90
 
 #define QMA7981_I2C_FREQUENCY       400000
 
@@ -178,36 +179,92 @@ static int qma7981_write_reg(FAR struct qma7981_dev_s *priv,
 static int qma7981_chip_init(FAR struct qma7981_dev_s *priv)
 {
   uint8_t chip_id = 0;
+  uint8_t power_mode = 0;
   int ret;
 
-  /* Read CHIP_ID to confirm the device responds */
+  /* Read CHIP_ID to confirm the device responds. */
 
   ret = qma7981_read_reg(priv, QMA7981_REG_CHIP_ID, &chip_id, 1);
   if (ret < 0)
     {
-      snerr("ERROR: failed to read QMA7981 CHIP_ID\n");
+      snerr("ERROR: failed to read QMA accelerometer CHIP_ID\n");
       return ret;
     }
 
-  if (chip_id < QMA7981_CHIP_ID_MIN || chip_id > QMA7981_CHIP_ID_MAX)
+  if ((chip_id < QMA7981_CHIP_ID_MIN ||
+       chip_id > QMA7981_CHIP_ID_MAX) &&
+      chip_id != QMA6100P_CHIP_ID)
     {
-      snerr("ERROR: unexpected QMA7981 CHIP_ID 0x%02x\n", chip_id);
+      snerr("ERROR: unsupported QMA accelerometer CHIP_ID 0x%02x\n",
+            chip_id);
       return -ENODEV;
     }
 
-  sninfo("QMA7981 detected, CHIP_ID=0x%02x\n", chip_id);
+  sninfo("%s detected, CHIP_ID=0x%02x\n",
+         chip_id == QMA6100P_CHIP_ID ? "QMA6100P" : "QMA7981",
+         chip_id);
 
-  /* Soft-reset: write trigger then release. */
+  /* Both supported parts use the same basic register map.  A reset needs
+   * several milliseconds to reload NVM; writing configuration immediately
+   * after the reset can otherwise leave the device in standby.
+   */
 
-  qma7981_write_reg(priv, QMA7981_REG_SR, QMA7981_SOFT_RESET_TRIGGER);
-  up_udelay(100);
-  qma7981_write_reg(priv, QMA7981_REG_SR, QMA7981_SOFT_RESET_RELEASE);
+  ret = qma7981_write_reg(priv, QMA7981_REG_SR,
+                          QMA7981_SOFT_RESET_TRIGGER);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
-  /* Configure: active mode, ±8 g range, ~52 Hz ODR */
+  up_mdelay(5);
+  ret = qma7981_write_reg(priv, QMA7981_REG_SR,
+                          QMA7981_SOFT_RESET_RELEASE);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
-  qma7981_write_reg(priv, QMA7981_REG_PM,  QMA7981_PM_ACTIVE_100KHZ);
-  qma7981_write_reg(priv, QMA7981_REG_FSR, QMA7981_FSR_8G);
-  qma7981_write_reg(priv, QMA7981_REG_BW,  QMA7981_BW_52HZ);
+  up_mdelay(10);
+
+  /* Configure the range and bandwidth in standby, then enter active mode. */
+
+  ret = qma7981_write_reg(priv, QMA7981_REG_FSR, QMA7981_FSR_8G);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = qma7981_write_reg(priv, QMA7981_REG_BW, QMA7981_BW_52HZ);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = qma7981_write_reg(priv, QMA7981_REG_PM,
+                          QMA7981_PM_ACTIVE_100KHZ);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  up_mdelay(2);
+
+  /* Read the power register back so a silently rejected active-mode write
+   * cannot produce a registered device that returns permanent zeroes.
+   */
+
+  ret = qma7981_read_reg(priv, QMA7981_REG_PM, &power_mode, 1);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  if ((power_mode & QMA7981_PM_ACTIVE_100KHZ) == 0)
+    {
+      snerr("ERROR: QMA accelerometer did not enter active mode "
+            "(PM=0x%02x)\n", power_mode);
+      return -EIO;
+    }
 
   return OK;
 }
@@ -290,11 +347,9 @@ int qma7981_register(FAR const char *devpath,
   ret = qma7981_chip_init(priv);
   if (ret < 0)
     {
-      snwarn("WARNING: QMA7981 not detected on bus (errno %d).  "
-             "Driver will register but read() will fail with EIO.  "
-             "Check that the EYE board has the accelerometer "
-             "populated and that I2C0 (SDA=GPIO4, SCL=GPIO5) is "
-             "wired correctly.\n", ret);
+      snerr("ERROR: QMA accelerometer initialization failed: %d\n", ret);
+      kmm_free(priv);
+      return ret;
     }
 
   ret = register_driver(devpath, &g_qma7981_fops, 0666, priv);

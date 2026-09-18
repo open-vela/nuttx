@@ -206,8 +206,13 @@ static void esp32s3_cam_setup_dma(struct esp32s3_cam_s *priv)
 static void frame_complete_worker(void *arg)
 {
   struct esp32s3_cam_s *priv = (struct esp32s3_cam_s *)arg;
+  imgdata_capture_t callback;
+  void *callback_arg;
+  int ret;
 
-  if (priv->cb == NULL || priv->fb == NULL)
+  callback = priv->cb;
+  callback_arg = priv->cb_arg;
+  if (callback == NULL || priv->fb == NULL)
     {
       return;
     }
@@ -220,7 +225,24 @@ static void frame_complete_worker(void *arg)
       memcpy(priv->v4l2_buf, priv->fb, priv->fb_size);
     }
 
-  priv->cb(0, priv->fb_size, &priv->frame_ts, priv->cb_arg);
+  callback(0, priv->fb_size, &priv->frame_ts, callback_arg);
+
+  /* The VSYNC ISR stops CAM and GDMA at every frame boundary.  The capture
+   * upper-half selects the next destination buffer from inside the callback,
+   * but it only calls IMGDATA_SET_BUF; it expects the imgdata lower-half to
+   * keep streaming.  Rearm the internal DMA buffer after that buffer switch.
+   * If the callback stopped the stream it clears cb, so do not restart.
+   */
+
+  if (priv->cb != NULL && !priv->capturing)
+    {
+      ret = esp32s3_cam_start_capture(&priv->data, 0, NULL, NULL,
+                                      priv->cb, priv->cb_arg);
+      if (ret < 0)
+        {
+          snerr("ERROR: Failed to rearm CAM capture: %d\n", ret);
+        }
+    }
 }
 
 /****************************************************************************
@@ -358,7 +380,12 @@ static void esp32s3_cam_gpio_config(void)
 
   esp32s3_configgpio(CONFIG_ESP32S3_CAM_VSYNC_PIN, INPUT);
   esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_VSYNC_PIN,
-                         CAM_V_SYNC_IDX, true);
+                         CAM_V_SYNC_IDX,
+#ifdef CONFIG_ESP32S3_CAM_VSYNC_INVERT
+                         true);
+#else
+                         false);
+#endif
 
   /* HREF (H_ENABLE) input */
 
@@ -759,11 +786,17 @@ static int esp32s3_cam_start_capture(struct imgdata_s *data,
 
   priv->capturing = true;
 
+  /* Keep the VSYNC polarity stable while capture is active.  Dynamically
+   * toggling the GPIO matrix input here can synthesize a false frame edge.
+   */
+
   esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_VSYNC_PIN,
-                         CAM_V_SYNC_IDX, false);
-  up_udelay(10);
-  esp32s3_gpio_matrix_in(CONFIG_ESP32S3_CAM_VSYNC_PIN,
-                         CAM_V_SYNC_IDX, true);
+                         CAM_V_SYNC_IDX,
+#ifdef CONFIG_ESP32S3_CAM_VSYNC_INVERT
+                         true);
+#else
+                         false);
+#endif
 
   return OK;
 }
@@ -777,6 +810,11 @@ static int esp32s3_cam_stop_capture(struct imgdata_s *data)
   struct esp32s3_cam_s *priv = (struct esp32s3_cam_s *)data;
   uint32_t regval;
 
+  /* Block a pending frame worker from rearming CAM/GDMA. */
+
+  priv->cb = NULL;
+  priv->cb_arg = NULL;
+
   regval = getreg32(LCD_CAM_CAM_CTRL1_REG);
   regval &= ~LCD_CAM_CAM_START_M;
   putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
@@ -785,12 +823,33 @@ static int esp32s3_cam_stop_capture(struct imgdata_s *data)
   regval |= LCD_CAM_CAM_UPDATE_REG_M;
   putreg32(regval, LCD_CAM_CAM_CTRL_REG);
 
+  SET_GDMA_CH_BITS(DMA_IN_LINK_CH0_REG,
+                   priv->dma_channel,
+                   DMA_INLINK_STOP_CH0_M);
   priv->capturing = false;
 
   work_cancel_sync(LPWORK, &priv->frame_work);
 
+  /* The worker might already have passed its rearm check when cb was
+   * cleared.  It is quiescent now, so clear its callback and stop the
+   * hardware once more before returning STREAMOFF to the caller.
+   */
+
   priv->cb = NULL;
   priv->cb_arg = NULL;
+
+  regval = getreg32(LCD_CAM_CAM_CTRL1_REG);
+  regval &= ~LCD_CAM_CAM_START_M;
+  putreg32(regval, LCD_CAM_CAM_CTRL1_REG);
+
+  regval = getreg32(LCD_CAM_CAM_CTRL_REG);
+  regval |= LCD_CAM_CAM_UPDATE_REG_M;
+  putreg32(regval, LCD_CAM_CAM_CTRL_REG);
+
+  SET_GDMA_CH_BITS(DMA_IN_LINK_CH0_REG,
+                   priv->dma_channel,
+                   DMA_INLINK_STOP_CH0_M);
+  priv->capturing = false;
 
   return OK;
 }

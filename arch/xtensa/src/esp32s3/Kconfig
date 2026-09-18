@@ -775,6 +775,26 @@ config ESP32S3_USBSERIAL
 	select OTHER_UART_SERIALDRIVER
 	select ARCH_HAVE_SERIAL_TERMIOS
 
+config ESP32S3_USBSERIAL_TXBUFSIZE
+	int "USB-Serial software TX buffer size"
+	default 16384
+	range 64 32767
+	depends on ESP32S3_USBSERIAL
+	---help---
+		Size of the serial upper-half transmit ring.  The USB Serial/JTAG
+		endpoint stops draining when no host has the port open.  This ring
+		retains transient output while the host is consuming data.
+
+config ESP32S3_USBSERIAL_TXSTALL_TIMEOUT
+	int "USB-Serial TX stall timeout (milliseconds)"
+	default 1000
+	range 100 60000
+	depends on ESP32S3_USBSERIAL
+	---help---
+		Maximum time a writer waits when the software TX ring is full.  If the
+		USB host does not consume the IN endpoint during that interval, stale
+		buffered output is dropped so console logging cannot stop boot.
+
 config ESP32S3_OTG
 	bool "USB OTG"
 	default n
@@ -1691,8 +1711,23 @@ config ESP32S3_WIFI_DYNAMIC_RXBUF_NUM
 	int "Wi-Fi dynamic RX buffer number"
 	default 32
 
+config ESP32S3_WIFI_STATIC_TXBUF
+	bool "Use static Wi-Fi TX buffers"
+	default n
+	---help---
+		Allocate fixed-size TX buffers during Wi-Fi initialization.  This
+		prevents transient packet-copy allocations from failing when internal
+		heap is fragmented by memory-intensive workloads such as TLS.
+
+config ESP32S3_WIFI_STATIC_TXBUF_NUM
+	int "Wi-Fi static TX buffer number"
+	depends on ESP32S3_WIFI_STATIC_TXBUF
+	range 1 64
+	default 16
+
 config ESP32S3_WIFI_DYNAMIC_TXBUF_NUM
 	int "Wi-Fi dynamic TX buffer number"
+	depends on !ESP32S3_WIFI_STATIC_TXBUF
 	default 32
 
 config ESP32S3_WIFI_TX_AMPDU

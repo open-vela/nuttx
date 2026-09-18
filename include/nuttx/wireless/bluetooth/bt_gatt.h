@@ -41,6 +41,7 @@
  ****************************************************************************/
 
 #include <sys/param.h>
+#include <stdbool.h>
 #include <nuttx/wireless/bluetooth/bt_uuid.h>
 
 /****************************************************************************
@@ -441,6 +442,9 @@ typedef CODE uint8_t
 
 struct bt_conn_s; /* Forward reference */
 
+typedef CODE void (*bt_gatt_connection_func_t)(
+  FAR struct bt_conn_s *conn, bool connected, FAR void *user_data);
+
 typedef CODE void (*bt_gatt_rsp_func_t)(FAR struct bt_conn_s *conn,
                    uint8_t err);
 
@@ -644,6 +648,13 @@ struct bt_gatt_discover_params_s
  ****************************************************************************/
 
 void bt_gatt_register(FAR const struct bt_gatt_attr_s *attrs, size_t count);
+
+/* Register one application connection lifecycle callback.  Passing NULL
+ * removes the current callback.  The callback runs in Bluetooth host context
+ * and must not block. */
+
+void bt_gatt_set_connection_callback(bt_gatt_connection_func_t callback,
+                                     FAR void *user_data);
 
 /****************************************************************************
  * Name: bt_gatt_foreach_attr

@@ -52,6 +52,10 @@
 
 #include "esp32s3_lowputc.h"
 
+#ifdef CONFIG_ESP32S3_USBSERIAL
+#  include "esp32s3_usbserial.h"
+#endif
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -988,6 +992,8 @@ void xtensa_lowputc(char ch)
   /* Then send the character */
 
   esp32s3_lowputc_send_byte(priv, ch);
+#elif defined(CONFIG_ESP32S3_USBSERIAL)
+  esp32s3_usbserial_write(ch);
 #endif /* CONSOLE_UART */
 }
 
@@ -1002,6 +1008,15 @@ void xtensa_lowputc(char ch)
 void esp32s3_lowsetup(void)
 {
 #ifndef CONFIG_SUPPRESS_UART_CONFIG
+
+#ifdef CONFIG_ESP32S3_USBSERIAL
+  /* esp_perip_clk_init() disables and resets SYSTEM_USB_CLK_EN.  Restore
+   * the USB Serial/JTAG peripheral before early console output or opening
+   * /dev/console.
+   */
+
+  periph_module_enable(PERIPH_USB_MODULE);
+#endif
 
 #ifdef CONFIG_ESP32S3_UART0
   esp32s3_lowputc_enable_sysclk(&g_uart0_config);

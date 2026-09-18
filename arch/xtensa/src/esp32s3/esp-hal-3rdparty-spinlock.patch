@@ -1,0 +1,11 @@
+diff --git a/components/esp_hw_support/clk_ctrl_os.c b/components/esp_hw_support/clk_ctrl_os.c
+--- a/components/esp_hw_support/clk_ctrl_os.c
++++ b/components/esp_hw_support/clk_ctrl_os.c
+@@ -24,6 +24,6 @@
+             g_flags = UINT32_MAX; \
+         } while(0)
+-#define LOCK_INITIALIZER_UNLOCKED       0
++#define LOCK_INITIALIZER_UNLOCKED       SP_UNLOCKED
+ 
+ typedef spinlock_t lock_type_t;
+ static irqstate_t g_flags = UINT32_MAX;

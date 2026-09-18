@@ -35,6 +35,7 @@
 #endif
 
 #include <nuttx/arch.h>
+#include <nuttx/clock.h>
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/serial/serial.h>
@@ -53,9 +54,26 @@
  * Pre-processor Macros
  ****************************************************************************/
 
-/* The hardware buffer has a fixed size of 64 bytes */
+/* The hardware endpoint buffer has a fixed size of 64 bytes.  Keep a
+ * larger software TX ring so console output cannot stall boot merely
+ * because no host has opened the USB serial port yet.
+ */
 
 #define ESP32S3_USBCDC_BUFFERSIZE 64
+
+#ifndef CONFIG_ESP32S3_USBSERIAL_TXBUFSIZE
+#  define CONFIG_ESP32S3_USBSERIAL_TXBUFSIZE 16384
+#endif
+
+#ifndef CONFIG_ESP32S3_USBSERIAL_TXSTALL_TIMEOUT
+#  define CONFIG_ESP32S3_USBSERIAL_TXSTALL_TIMEOUT 1000
+#endif
+
+/* uart_irqwrite() has no timeout and polls txready() with interrupts locked.
+ * Bound that polling path so interrupt/idle logging cannot hang the CPU.
+ */
+
+#define ESP32S3_USBCDC_TXPOLL_LIMIT 1000
 
 /****************************************************************************
  * Private Types
@@ -63,10 +81,12 @@
 
 struct esp32s3_priv_s
 {
-  const uint8_t  periph;        /* peripheral ID */
-  const uint8_t  irq;           /* IRQ number assigned to the peripheral */
-  int            cpu;           /* CPU id */
-  int            cpuint;        /* CPU interrupt assigned */
+  const uint8_t  periph;      /* peripheral ID */
+  const uint8_t  irq;         /* IRQ number assigned to the peripheral */
+  int            cpu;         /* CPU id */
+  int            cpuint;      /* CPU interrupt assigned */
+  volatile bool  drop_output; /* Drop direct writes until host recovers */
+  volatile uint32_t txpolls;  /* Consecutive direct TX-ready polls */
 };
 
 /****************************************************************************
@@ -95,7 +115,7 @@ static int  esp32s3_ioctl(struct file *filep, int cmd, unsigned long arg);
  ****************************************************************************/
 
 static char g_rxbuffer[ESP32S3_USBCDC_BUFFERSIZE];
-static char g_txbuffer[ESP32S3_USBCDC_BUFFERSIZE];
+static char g_txbuffer[CONFIG_ESP32S3_USBSERIAL_TXBUFSIZE];
 
 static struct esp32s3_priv_s g_usbserial_priv =
 {
@@ -127,7 +147,8 @@ static struct uart_ops_s g_uart_ops =
 
 uart_dev_t g_uart_usbserial =
 {
-  .isconsole = true,
+  .isconsole    = true,
+  .xmit_timeout = MSEC2TICK(CONFIG_ESP32S3_USBSERIAL_TXSTALL_TIMEOUT),
   .recv      =
     {
       .size    = ESP32S3_USBCDC_BUFFERSIZE,
@@ -135,7 +156,7 @@ uart_dev_t g_uart_usbserial =
     },
   .xmit      =
     {
-      .size    = ESP32S3_USBCDC_BUFFERSIZE,
+      .size    = CONFIG_ESP32S3_USBSERIAL_TXBUFSIZE,
       .buffer  = g_txbuffer,
     },
   .ops       = &g_uart_ops,
@@ -171,6 +192,7 @@ static int esp32s3_interrupt(int irq, void *context, void *arg)
     {
       putreg32(USB_SERIAL_JTAG_SERIAL_IN_EMPTY_INT_CLR,
                USB_SERIAL_JTAG_INT_CLR_REG);
+
       uart_xmitchars(dev);
     }
 
@@ -367,11 +389,38 @@ static bool esp32s3_txempty(struct uart_dev_s *dev)
 
 static bool esp32s3_txready(struct uart_dev_s *dev)
 {
+  struct esp32s3_priv_s *priv = dev->priv;
   uint32_t regval;
 
   regval = getreg32(USB_SERIAL_JTAG_EP1_CONF_REG);
 
-  return regval & USB_SERIAL_JTAG_SERIAL_IN_EP_DATA_FREE;
+  if ((regval & USB_SERIAL_JTAG_SERIAL_IN_EP_DATA_FREE) != 0)
+    {
+      /* Hardware readiness proves that a host is consuming again. */
+
+      priv->txpolls = 0;
+      priv->drop_output = false;
+      return true;
+    }
+
+  if (priv->drop_output)
+    {
+      return true;
+    }
+
+  /* The serial upper half directly polls this method from interrupt and
+   * idle contexts.  Report synthetic readiness after a bounded wait; send()
+   * will then discard output rather than write to the busy endpoint.
+   */
+
+  if (++priv->txpolls >= ESP32S3_USBCDC_TXPOLL_LIMIT)
+    {
+      priv->txpolls = 0;
+      priv->drop_output = true;
+      return true;
+    }
+
+  return false;
 }
 
 /****************************************************************************
@@ -384,6 +433,18 @@ static bool esp32s3_txready(struct uart_dev_s *dev)
 
 static void esp32s3_send(struct uart_dev_s *dev, int ch)
 {
+  struct esp32s3_priv_s *priv = dev->priv;
+
+  /* txready() uses synthetic readiness to bound direct writes when no host
+   * consumes the endpoint.  Never touch the full hardware FIFO in that
+   * state; real DATA_FREE automatically clears drop_output.
+   */
+
+  if (priv->drop_output)
+    {
+      return;
+    }
+
   /* Write the character to the buffer. */
 
   putreg32(ch, USB_SERIAL_JTAG_EP1_REG);
@@ -474,8 +535,30 @@ static int esp32s3_ioctl(struct file *filep, int cmd, unsigned long arg)
 
 void esp32s3_usbserial_write(char ch)
 {
-  while (!esp32s3_txready(&g_uart_usbserial));
+  irqstate_t flags;
+  unsigned int retries = 1000;
+
+  /* Serialize the complete readiness-to-commit transaction with the UART
+   * upper half and TX ISR.  The recursive lock is statically zero-initialized
+   * and is therefore also usable before uart_register() during early boot.
+   */
+
+  flags = uart_spinlock(&g_uart_usbserial, false);
+
+  /* USB Serial/JTAG stops reporting TX space when no host consumes the
+   * endpoint.  Never let diagnostic output block the entire boot path.
+   */
+
+  while (!esp32s3_txready(&g_uart_usbserial))
+    {
+      if (retries-- == 0)
+        {
+          uart_spinunlock(&g_uart_usbserial, false, flags);
+          return;
+        }
+    }
 
   esp32s3_send(&g_uart_usbserial, ch);
+  uart_spinunlock(&g_uart_usbserial, false, flags);
 }
 
