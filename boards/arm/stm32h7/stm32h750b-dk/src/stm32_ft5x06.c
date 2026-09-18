@@ -28,6 +28,8 @@
 #include <debug.h>
 #include <errno.h>
 
+#include <nuttx/irq.h>
+#include <nuttx/spinlock.h>
 #include <nuttx/input/ft5x06.h>
 #include <arch/board/board.h>
 
@@ -40,7 +42,7 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-#define FT5X06_FREQUENCY 100000  /* For now, will boost later */
+#define FT5X06_FREQUENCY 100000  /* Board-validated FT5336 bus rate */
 
 #ifdef CONFIG_INPUT_FT5X06
 #ifndef CONFIG_INPUT
@@ -177,9 +179,9 @@ static void stm32_ft5x06_enable(const struct ft5x06_config_s *config,
   flags = enter_critical_section();
   if (enable)
     {
-      /* Configure the EXTI interrupt using the SAVED handler */
+      /* FT5X06 INT is active-low: trigger when a touch asserts it. */
 
-      stm32_gpiosetevent(GPIO_FT5X06_INT, true, false, true,
+      stm32_gpiosetevent(GPIO_FT5X06_INT, false, true, true,
                          g_priv_config.handler, g_priv_config.arg);
     }
   else

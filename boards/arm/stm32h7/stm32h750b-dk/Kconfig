@@ -5,4 +5,15 @@
 
 if ARCH_BOARD_STM32H750B_DK
 
+config STM32H750B_DK_QSPI_BOOT
+	bool "Link Cortex-M7 image for external QSPI boot"
+	default n
+	depends on ARCH_CHIP_STM32H7_CORTEXM7
+	---help---
+		Build the main NuttX image for the STM32H750B-DK external
+		dual-QSPI memory-mapped window at 0x90000000 instead of the
+		128 KiB on-die Flash at 0x08000000. This image needs a small
+		internal-Flash boot stub that initializes QSPI memory-mapped
+		mode before jumping to the external vector table.
+
 endif # ARCH_BOARD_STM32H750B_DK

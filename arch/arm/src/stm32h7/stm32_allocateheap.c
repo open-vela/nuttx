@@ -423,7 +423,14 @@ void arm_addregion(void)
 #ifdef BOARD_SDRAM2_SIZE
   if (mm_regions < CONFIG_MM_REGIONS)
     {
+#ifdef BOARD_SDRAM2_HEAP_OFFSET
+      static_assert(BOARD_SDRAM2_HEAP_OFFSET < BOARD_SDRAM2_SIZE,
+                    "SDRAM2 heap offset exceeds the available SDRAM");
+      addregion (STM32_FMC_BANK6 + BOARD_SDRAM2_HEAP_OFFSET,
+                 BOARD_SDRAM2_SIZE - BOARD_SDRAM2_HEAP_OFFSET, "SDRAM2");
+#else
       addregion (STM32_FMC_BANK6, BOARD_SDRAM2_SIZE, "SDRAM2");
+#endif
       mm_regions++;
     }
 #endif

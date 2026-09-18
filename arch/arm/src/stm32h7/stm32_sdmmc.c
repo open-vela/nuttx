@@ -1201,6 +1201,96 @@ static void stm32_datadisable(struct stm32_dev_s *priv)
  ****************************************************************************/
 
 #if !defined(CONFIG_STM32H7_SDMMC_IDMA)
+/* PIO copies must not walk off SRAM. 2026-09-14 board watch: hpwork
+ * stm32_recvfifo imprecise busfault writing 0x38010004 (past SRAM4).
+ *
+ * Keep this list in step with the memory map: a buffer the system really
+ * hands out but that is missing here is dropped mid-transfer, and a dropped
+ * block write leaves the card answering ETIMEDOUT to everything after it.
+ */
+
+#define STM32_SDMMC_XIP_WINDOW  (256 * 1024 * 1024)  /* FMC bank 4, QUADSPI */
+
+
+static bool stm32_sdmmc_userbuf_ok(FAR const void *p, size_t n)
+{
+  const uintptr_t a = (uintptr_t)p;
+  uintptr_t e;
+
+  if (p == NULL || n == 0)
+    {
+      return false;
+    }
+
+  e = a + n;
+  if (e < a)
+    {
+      return false;
+    }
+
+  if (a >= STM32_DTCRAM_BASE &&
+      e <= (uintptr_t)STM32_DTCRAM_BASE + STM32H7_DTCM_SRAM_SIZE)
+    {
+      return true;
+    }
+
+  if (a >= STM32_AXISRAM_BASE &&
+      e <= (uintptr_t)STM32_AXISRAM_BASE + STM32H7_SRAM_SIZE)
+    {
+      return true;
+    }
+
+  if (a >= STM32_SRAM123_BASE &&
+      e <= (uintptr_t)STM32_SRAM123_BASE + STM32H7_SRAM123_SIZE)
+    {
+      return true;
+    }
+
+  if (a >= STM32_SRAM4_BASE &&
+      e <= (uintptr_t)STM32_SRAM4_BASE + STM32H7_SRAM4_SIZE)
+    {
+      return true;
+    }
+
+  /* A write sources its data from whatever the caller passed, which is not
+   * always RAM: const objects live in the XIP flash image.  The agent skill
+   * seeds are written straight from such constants at boot, and rejecting
+   * them aborted the transfer mid-block.
+   */
+
+  if (a >= STM32_FMC_BANK4 &&
+      e <= (uintptr_t)STM32_FMC_BANK4 + STM32_SDMMC_XIP_WINDOW)
+    {
+      return true;
+    }
+
+  /* External SDRAM counts too.  The PIO path copies through the CPU, so any
+   * address the CPU can reach is usable, and this board registers SDRAM
+   * with the kernel heap (BOARD_SDRAM2_HEAP_OFFSET reserves the LVGL
+   * framebuffers first).  Filesystem sector buffers are kmm_malloc'd and do
+   * land there; rejecting them aborts the transfer mid-block, after which
+   * the card answers ETIMEDOUT to everything.
+   */
+
+#ifdef BOARD_SDRAM1_SIZE
+  if (a >= STM32_FMC_BANK5 &&
+      e <= (uintptr_t)STM32_FMC_BANK5 + BOARD_SDRAM1_SIZE)
+    {
+      return true;
+    }
+#endif
+
+#ifdef BOARD_SDRAM2_SIZE
+  if (a >= STM32_FMC_BANK6 &&
+      e <= (uintptr_t)STM32_FMC_BANK6 + BOARD_SDRAM2_SIZE)
+    {
+      return true;
+    }
+#endif
+
+  return false;
+}
+
 static void stm32_sendfifo(struct stm32_dev_s *priv)
 {
   union
@@ -1215,13 +1305,31 @@ static void stm32_sendfifo(struct stm32_dev_s *priv)
          (sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) &
           STM32_SDMMC_STA_TXFIFOF) == 0)
     {
+      size_t chunk = priv->remaining >= sizeof(uint32_t) ?
+                     sizeof(uint32_t) : priv->remaining;
+
+      if (!stm32_sdmmc_userbuf_ok(priv->buffer, chunk))
+        {
+          /* syslog, not mcerr: mcerr needs CONFIG_DEBUG_MEMCARD_ERROR and
+           * CONFIG_DEBUG_ERROR, neither of which is set here, so a dropped
+           * transfer used to leave no trace at all.
+           */
+
+          syslog(LOG_ERR, "ERROR: TX buf %p rem %zu outside SRAM, drop\n",
+                 priv->buffer, priv->remaining);
+          priv->remaining = 0;
+          break;
+        }
+
       /* Is there a full word remaining in the user buffer? */
 
       if (priv->remaining >= sizeof(uint32_t))
         {
           /* Yes, transfer the word to the TX FIFO */
 
-          data.w           = *priv->buffer++;
+          memcpy(&data.w, priv->buffer, sizeof(uint32_t));
+          priv->buffer     = (FAR uint32_t *)((uintptr_t)priv->buffer +
+                                              sizeof(uint32_t));
           priv->remaining -= sizeof(uint32_t);
         }
       else
@@ -1230,7 +1338,7 @@ static void stm32_sendfifo(struct stm32_dev_s *priv)
            * padding with zero as necessary to extend to a full word.
            */
 
-          uint8_t *ptr = (uint8_t *)priv->remaining;
+          uint8_t *ptr = (uint8_t *)priv->buffer;
           int i;
 
           data.w = 0;
@@ -1289,7 +1397,17 @@ static void stm32_recvfifo(struct stm32_dev_s *priv)
         {
           /* Transfer the whole word to the user buffer */
 
-          *priv->buffer++  = data.w;
+          if (!stm32_sdmmc_userbuf_ok(priv->buffer, sizeof(uint32_t)))
+            {
+              syslog(LOG_ERR, "ERROR: RX buf %p rem %zu outside SRAM, drop\n",
+                     priv->buffer, priv->remaining);
+              priv->remaining = 0;
+              break;
+            }
+
+          memcpy(priv->buffer, &data.w, sizeof(uint32_t));
+          priv->buffer     = (FAR uint32_t *)((uintptr_t)priv->buffer +
+                                              sizeof(uint32_t));
           priv->remaining -= sizeof(uint32_t);
         }
       else
@@ -1298,6 +1416,14 @@ static void stm32_recvfifo(struct stm32_dev_s *priv)
 
           uint8_t *ptr = (uint8_t *)priv->buffer;
           int i;
+
+          if (!stm32_sdmmc_userbuf_ok(ptr, priv->remaining))
+            {
+              syslog(LOG_ERR, "ERROR: RX tail %p rem %zu outside SRAM, drop\n",
+                     ptr, priv->remaining);
+              priv->remaining = 0;
+              break;
+            }
 
           for (i = 0; i < (int)priv->remaining; i++)
             {
@@ -1549,6 +1675,23 @@ static void stm32_endtransfer(struct stm32_dev_s *priv,
 static void stm32_sdmmc_fifo_monitor(void *arg)
 {
   struct stm32_dev_s *priv = (struct stm32_dev_s *)arg;
+  irqstate_t flags;
+  bool requeue;
+
+  /* This runs on the work queue, and the SDMMC interrupt handler calls
+   * stm32_recvfifo() on the same buffer/remaining pair.  The handler can
+   * preempt this thread between the test and the decrement, and the second
+   * decrement then takes remaining below zero.  It is a size_t, so it wraps
+   * to a huge value, the "remaining < FIFO_SIZE / 2" guard stops meaning
+   * anything, and buffer walks off the end of SRAM4.  2026-09-15:
+   * remaining=0xFFFFFDF4, buffer=0x38010000, followed immediately by a
+   * hardfault in wd_start_abstick once mmcsd_write used the waitwdog that
+   * shares this struct.
+   *
+   * Decide and update inside one critical section.
+   */
+
+  flags = enter_critical_section();
 
   if (priv->receivecnt && priv->remaining &&
       priv->remaining < FIFO_SIZE_IN_BYTES / 2)
@@ -1558,11 +1701,20 @@ static void stm32_sdmmc_fifo_monitor(void *arg)
       stm32_recvfifo(priv);
     }
 
-  /* Check for the lame FIFO condition */
+  /* Check for the lame FIFO condition. remaining==0 means the user
+   * buffer is done; re-queueing then livelocks HPWORK every tick.
+   */
 
-  if (sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0 &&
-      sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) ==
-      STM32_SDMMC_STA_DPSMACT)
+  requeue = (priv->remaining != 0 &&
+             sdmmc_getreg32(priv, STM32_SDMMC_DCOUNT_OFFSET) != 0 &&
+             sdmmc_getreg32(priv, STM32_SDMMC_STA_OFFSET) ==
+             STM32_SDMMC_STA_DPSMACT);
+
+  leave_critical_section(flags);
+
+  /* Queue outside the critical section: work_queue wakes a thread. */
+
+  if (requeue)
     {
       work_queue(HPWORK, &priv->cbfifo,
                  stm32_sdmmc_fifo_monitor, arg, 1);
