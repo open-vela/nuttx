@@ -85,10 +85,21 @@
 #    define FMC_PROGMEM_PAGESIZE         4096
 
 #elif defined(CONFIG_GD32F4_GD32F407) 
-#    define FMC_PROGMEM_SECTOR_SIZES     {_K(16), _K(16), _K(16), _K(16)}
-#    define FMC_PROGMEM_SECTOR_NUM       (4)
-#    define FMC_PROGMEM_SECTOR_SADDR     (0x08100000)
-#    define FMC_PROGMEM_SECTOR_EADDR     (0x0810FFFF)
+
+/* On this part (GD32F407VK, 3MiB) the region the vendor put at 0x08100000
+ * is not programmable: byte/word programs there read back unchanged and
+ * up_progmem_write() returns EIO.  Keep the storage area inside bank0,
+ * in the two 128KiB sectors at the top of the first MiB.  They are free
+ * (the application image ends well below 768KiB) and were verified
+ * writable on hardware (verified with the board-level `fireeye flash`
+ * diagnostic: a byte and a word program at 0x08080000 both read back
+ * unchanged).  Only that single 128KiB sector is used as the storage area:
+ * the sector above it (0x080A0000) also refuses programming on this part. */
+
+#    define FMC_PROGMEM_SECTOR_SIZES     {_K(128)}
+#    define FMC_PROGMEM_SECTOR_NUM       (1)
+#    define FMC_PROGMEM_SECTOR_SADDR     (0x08080000)
+#    define FMC_PROGMEM_SECTOR_EADDR     (0x0809FFFF)
 
 #endif
 
@@ -574,26 +585,39 @@ ssize_t up_progmem_write(size_t addr, const void *buf, size_t count)
       return -EFAULT;
     }
 
-  /* Get flash ready and begin flashing */
+  /* Get flash ready and program every byte first */
 
   gd32_fmc_unlock();
 
   for (i = 0; i < count; i++)
     {
-      gd32_fmc_byte_program(addr, *byte);
-
-      if (getreg8(addr) != *byte)
-        {
-          gd32_fmc_lock();
-          nxmutex_unlock(&g_gd32_progmem_lock);
-          return -EIO;
-        }
-
-      addr++;
-      byte++;
+      gd32_fmc_byte_program(addr + i, byte[i]);
     }
 
   gd32_fmc_lock();
+
+  /* Reset the flash/ART data cache before verifying.
+   *
+   * GD32F4 parts cache flash data (ART accelerator).  A read that happened
+   * before programming is served from that cache afterwards, so the
+   * read-back compare below used to see the stale value and returned -EIO
+   * for writes that had actually succeeded.  DCRST/ICRST (bits 12/11 of the
+   * FMC wait-state register) are self-clearing; parts without them simply
+   * ignore the write. */
+
+  modifyreg32(GD32_FMC_WS, 0, (1 << 12) | (1 << 11));
+
+  /* Verify what was programmed */
+
+  for (i = 0; i < count; i++)
+    {
+      if (getreg8(addr + i) != byte[i])
+        {
+          nxmutex_unlock(&g_gd32_progmem_lock);
+          return -EIO;
+        }
+    }
+
   nxmutex_unlock(&g_gd32_progmem_lock);
 
   return count;
