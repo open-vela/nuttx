@@ -38,6 +38,14 @@
 
 #include <nuttx/fs/fs.h>
 
+#ifdef CONFIG_I2C_DRIVER
+#  include <nuttx/i2c/i2c_master.h>
+#endif
+
+#ifdef CONFIG_INPUT_GT9XX
+#  include <nuttx/input/gt9xx.h>
+#endif
+
 #ifdef CONFIG_ESPRESSIF_MIPI_DSI
 #  include <nuttx/video/mipi_dsi.h>
 #  include <nuttx/kmalloc.h>
@@ -70,8 +78,13 @@
 #  include "espressif/esp_rtc.h"
 #endif
 
-#if defined(CONFIG_DEV_GPIO) || defined(CONFIG_ESPRESSIF_MIPI_DSI)
+#if defined(CONFIG_DEV_GPIO) || defined(CONFIG_ESPRESSIF_MIPI_DSI) || \
+    defined(CONFIG_INPUT_GT9XX)
 #  include "espressif/esp_gpio.h"
+#endif
+
+#if defined(CONFIG_INPUT_GT9XX) && defined(CONFIG_ESPRESSIF_I2C0)
+#  include "espressif/esp_i2c.h"
 #endif
 
 #ifdef CONFIG_INPUT_BUTTONS
@@ -88,6 +101,146 @@
 
 #ifdef CONFIG_ESPRESSIF_I2S
 #  include "esp_board_i2s.h"
+#endif
+
+#if defined(CONFIG_I2C_DRIVER) && defined(CONFIG_ESPRESSIF_I2C0)
+#  define BOARD_GT911_I2C_ADDR       0x5d
+#  define BOARD_GT911_PRODUCT_ID_REG 0x8140
+#  define BOARD_GT911_INT_GPIO       22
+#  define BOARD_GT911_RST_GPIO       23
+
+static void board_gt911_probe(void)
+{
+  int fd;
+  int ret;
+  uint8_t regaddr[2] =
+    {
+      BOARD_GT911_PRODUCT_ID_REG >> 8,
+      BOARD_GT911_PRODUCT_ID_REG & 0xff
+    };
+  uint8_t product_id[4] = {0};
+  struct i2c_msg_s msgv[2] =
+    {
+      {
+        .frequency = I2C_SPEED_STANDARD,
+        .addr      = BOARD_GT911_I2C_ADDR,
+        .flags     = I2C_M_NOSTOP,
+        .buffer    = regaddr,
+        .length    = sizeof(regaddr)
+      },
+      {
+        .frequency = I2C_SPEED_STANDARD,
+        .addr      = BOARD_GT911_I2C_ADDR,
+        .flags     = I2C_M_READ,
+        .buffer    = product_id,
+        .length    = sizeof(product_id)
+      }
+    };
+  struct i2c_transfer_s transfer =
+    {
+      .msgv = msgv,
+      .msgc = 2
+    };
+
+  fd = open("/dev/i2c0", O_RDONLY);
+  if (fd < 0)
+    {
+      syslog(LOG_WARNING, "GT911 probe: open /dev/i2c0 failed: %d\n",
+             errno);
+      return;
+    }
+
+  ret = ioctl(fd, I2CIOC_TRANSFER,
+              (unsigned long)((uintptr_t)&transfer));
+  close(fd);
+
+  if (ret < 0)
+    {
+      syslog(LOG_WARNING, "GT911 probe @0x%02x failed: %d\n",
+             BOARD_GT911_I2C_ADDR, ret);
+    }
+  else
+    {
+      syslog(LOG_INFO,
+             "GT911 probe @0x%02x ID=%02x %02x %02x %02x\n",
+             BOARD_GT911_I2C_ADDR,
+             product_id[0], product_id[1],
+             product_id[2], product_id[3]);
+    }
+}
+
+#ifdef CONFIG_INPUT_GT9XX
+static int board_gt911_irq_attach(
+  const struct gt9xx_board_s *state, xcpt_t isr, void *arg)
+{
+  int irq = ESP_PIN2IRQ(BOARD_GT911_INT_GPIO);
+
+  UNUSED(state);
+  esp_configgpio(BOARD_GT911_INT_GPIO, INPUT_PULLUP);
+  esp_gpioirqdisable(irq);
+  return esp_gpioirqattach(irq, isr, arg);
+}
+
+static void board_gt911_irq_enable(const struct gt9xx_board_s *state,
+                                   bool enable)
+{
+  int irq = ESP_PIN2IRQ(BOARD_GT911_INT_GPIO);
+
+  UNUSED(state);
+  if (enable)
+    {
+      esp_gpioirqenable(irq, FALLING);
+    }
+  else
+    {
+      esp_gpioirqdisable(irq);
+    }
+}
+
+static int board_gt911_set_power(const struct gt9xx_board_s *state,
+                                 bool on)
+{
+  UNUSED(state);
+  UNUSED(on);
+
+  /* The touch board has its own power path.  Keep RESET_TP released and do
+   * not pulse it here: the controller is already responding at 0x5d, and a
+   * reset/address strap sequence has not been needed for this board. */
+
+  esp_configgpio(BOARD_GT911_RST_GPIO, OUTPUT);
+  esp_gpiowrite(BOARD_GT911_RST_GPIO, true);
+  return OK;
+}
+
+static const struct gt9xx_board_s g_board_gt911 =
+{
+  .irq_attach = board_gt911_irq_attach,
+  .irq_enable = board_gt911_irq_enable,
+  .set_power  = board_gt911_set_power
+};
+
+static int board_gt911_register(void)
+{
+  struct i2c_master_s *i2c;
+  int ret;
+
+  i2c = esp_i2cbus_initialize(ESPRESSIF_I2C0);
+  if (i2c == NULL)
+    {
+      return -ENODEV;
+    }
+
+  ret = gt9xx_register("/dev/input0", i2c, BOARD_GT911_I2C_ADDR,
+                       &g_board_gt911);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "GT911 registration failed: %d\n", ret);
+    }
+
+  return ret;
+}
+#endif
+
 #endif
 
 #ifdef CONFIG_ESPRESSIF_SPI
@@ -749,6 +902,19 @@ int esp_bringup(void)
     {
       syslog(LOG_ERR, "Failed to initialize I2C driver: %d\n", ret);
     }
+#if defined(CONFIG_ESPRESSIF_I2C0)
+  else
+    {
+      board_gt911_probe();
+#ifdef CONFIG_INPUT_GT9XX
+      ret = board_gt911_register();
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "Failed to register GT911: %d\n", ret);
+        }
+#endif
+    }
+#endif
 #endif
 
 #ifdef CONFIG_ESPRESSIF_MIPI_DSI
