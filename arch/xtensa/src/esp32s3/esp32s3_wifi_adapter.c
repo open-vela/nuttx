@@ -33,6 +33,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <math.h>
+#include <nuttx/tls_task.h>
 #include <clock/clock.h>
 #include <sys/param.h>
 #include <sys/time.h>
@@ -42,6 +43,7 @@
 #include <nuttx/kmalloc.h>
 #include <nuttx/mqueue.h>
 #include <nuttx/spinlock.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/irq.h>
 #include <nuttx/mutex.h>
 #include <nuttx/kthread.h>
@@ -4663,6 +4665,14 @@ int esp_wifi_adapter_init(void)
   wifi_cfg.static_rx_buf_num  = CONFIG_ESP32S3_WIFI_STATIC_RXBUF_NUM;
   wifi_cfg.dynamic_rx_buf_num = CONFIG_ESP32S3_WIFI_DYNAMIC_RXBUF_NUM;
   wifi_cfg.dynamic_tx_buf_num = CONFIG_ESP32S3_WIFI_DYNAMIC_TXBUF_NUM;
+
+  /* ZXB-WIFI-TX: board uses SPI RAM but NuttX port does not expose
+   * CONFIG_SPIRAM to esp_wifi, so cache_tx_buf_num defaults to 0 and
+   * management frames (probe/auth) fail to TX during AP connect.
+   * Explicitly enable the internal cached TX buffer pool.
+   */
+
+  wifi_cfg.cache_tx_buf_num = 16;
 
   ret = esp_wifi_init(&wifi_cfg);
   if (ret)

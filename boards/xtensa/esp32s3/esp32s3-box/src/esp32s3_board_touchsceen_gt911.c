@@ -26,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <stdio.h>
 #include <syslog.h>
 #include <assert.h>
 #include <errno.h>
@@ -83,6 +84,18 @@ struct gt911_dev_s
   spinlock_t          lock;                 /* Device specific lock. */
 
   uint8_t buffer[GT911_BUFFER_SIZE];        /* Read buffer */
+
+  /* Diag counters (read-only debug; flat build app calls
+   * gt911_diag_snapshot)
+   */
+
+  uint32_t            diag_polls;           /* worker polls */
+  uint32_t            diag_i2c_err;         /* I2C transfer failures */
+  uint32_t            diag_down;            /* TOUCH_DOWN samples sent */
+  uint32_t            diag_up;              /* TOUCH_UP samples sent */
+  uint8_t             diag_last_status;     /* last 0x814E status byte */
+  uint16_t            diag_last_x;          /* last mapped x */
+  uint16_t            diag_last_y;          /* last mapped y */
 };
 
 /* This structure describes the frame of touchpoint */
@@ -277,29 +290,65 @@ static void gt911_touch_event(struct gt911_dev_s *dev)
 {
   struct gt911_data_s *data = (struct gt911_data_s *)dev->buffer;
   struct gt911_touchpoint_s *tp = data->touchpoint;
-  struct touch_sample_s sample;
-  struct touch_point_s *point = sample.point;
 
-  memset(&sample, 0, sizeof(sample));
-  sample.npoints = 1;
+  /* Key mechanism (NuttX touchscreen upper layer): touch_event() writes to
+   * queue based on sample->npoints (circbuf element size =
+   * SIZEOF_TOUCH_SAMPLE_S(maxpoint)), LVGL-side read() expects to read full
+   * in one go SIZEOF_TOUCH_SAMPLE_S(maxpoint) bytes. If npoints is less than
+   * maxpoint, queue elements are not fully written, LVGL determines
+   * 'incomplete read'. and ignores all touches! Therefore, sample must be
+   * constructed with a maxpoint-sized buffer, npoints =
+   * GT911_TOUCHPOINTS(=maxpoint), valid points filled in point[0], Remaining
+   * points flags=0 (invalid, LVGL skips).
+   */
 
-  point->x         = tp->x;
-  point->y         = tp->y;
+  uint8_t sample_buf[SIZEOF_TOUCH_SAMPLE_S(GT911_TOUCHPOINTS)];
+  struct touch_sample_s *sample =
+    (struct touch_sample_s *)sample_buf;
+  struct touch_point_s *point = sample->point;
+
+  memset(sample_buf, 0, sizeof(sample_buf));
+  sample->npoints = GT911_TOUCHPOINTS;
+
+  /* Coordinate direction adaptation: GT911 sensor native 320×480 (portrait)
+   * coordinates, Panel is 480×320 landscape (LANDSCAPE+MV=1). Swap X/Y and
+   * invert Y, mapping to LVGL's 480×320 coordinate system. If orientation
+   * still incorrect, adjust swap/flip combination here (4 options):
+   * Landscape mapping = (x,y) → (319-y, x) or (y, x) = (319-y, 479-x) or
+   * (y, 479-x) Currently using the (x,y)->(y, 319-x) variant, fine-tuned per
+   * real device.
+   */
+
+  point->x         = tp->y;
+  point->y         = 319 - tp->x;
   point->pressure  = tp->pressure;
   point->flags     = TOUCH_POS_VALID | TOUCH_PRESSURE_VALID;
+
+  dev->diag_last_status = data->buffer_status;
+  dev->diag_last_x      = point->x;
+  dev->diag_last_y      = point->y;
 
   if (data->buffer_status)
     {
       point->flags |= TOUCH_DOWN;
       dev->has_report = true;
+      dev->diag_down++;
+
+      /* ⚠️ 2026-08-21: Removed [Touch] down debug printf—prints for
+       * every touch event will flood the USB-Serial-JTAG console
+       * (intertwined with audio debug output into garbled text, and large
+       * amounts UART output may freeze the console). Touch events themselves
+       * queue normally, no functional impact.
+       */
     }
   else
     {
       point->flags |= TOUCH_UP;
       dev->has_report = false;
+      dev->diag_up++;
     }
 
-  touch_event(dev->touch_lower.priv, &sample);
+  touch_event(dev->touch_lower.priv, sample);
 }
 
 /****************************************************************************
@@ -352,10 +401,13 @@ static void gt911_worker(void *arg)
   clock_t delay = GT911_WORK_DELAY;
   bool touched = false;
 
+  dev->diag_polls++;
+
   ret = gt911_read_reg(dev, GT911_READ_XY_REG, dev->buffer, 1);
   if (ret != 0)
     {
       ierr("ERROR: I2C_TRANSFER() failed: %d\n", ret);
+      dev->diag_i2c_err++;
       goto exit;
     }
 
@@ -368,6 +420,7 @@ static void gt911_worker(void *arg)
       if (ret != 0)
         {
           ierr("ERROR: I2C_TRANSFER() failed: %d\n", ret);
+          dev->diag_i2c_err++;
           goto exit;
         }
 
@@ -382,6 +435,7 @@ static void gt911_worker(void *arg)
   if (ret != 0)
     {
       ierr("ERROR: I2C_TRANSFER() failed: %d\n", ret);
+      dev->diag_i2c_err++;
       goto exit;
     }
 
@@ -404,6 +458,37 @@ exit:
  ****************************************************************************/
 
 /****************************************************************************
+ * Name: gt911_diag_snapshot
+ *
+ * Description:
+ *   Debug helper (flat build): snapshot GT911 driver counters for the UI
+ *   app to correlate producer/consumer liveness.  Array layout:
+ *     [0]=polls [1]=i2c_err [2]=down [3]=up [4]=last_status
+ *     [5]=last_x [6]=last_y [7]=has_report
+ *
+ ****************************************************************************/
+
+int gt911_diag_snapshot(uint32_t out[8])
+{
+  struct gt911_dev_s *dev = &g_gt911_dev;
+
+  if (out == NULL)
+    {
+      return -EINVAL;
+    }
+
+  out[0] = dev->diag_polls;
+  out[1] = dev->diag_i2c_err;
+  out[2] = dev->diag_down;
+  out[3] = dev->diag_up;
+  out[4] = dev->diag_last_status;
+  out[5] = dev->diag_last_x;
+  out[6] = dev->diag_last_y;
+  out[7] = dev->has_report ? 1u : 0u;
+  return 0;
+}
+
+/****************************************************************************
  * Name: board_touchscreen_initialize
  *
  * Description:
@@ -422,27 +507,83 @@ int board_touchscreen_initialize(void)
   int ret;
   struct gt911_dev_s *dev = &g_gt911_dev;
 
+  /* Step 1: Reset+INT sequence to set I2C address
+   * According to GT911 datasheet:
+   * 1. RST output LOW
+   * 2. INT output LOW (hold >100μs)
+   * 3. RST output HIGH (release reset)
+   * 4. Wait >5ms
+   * 5. INT switch to floating input (external pull-up makes it HIGH)
+   */
+
+  /* Configure RST (GPIO48) and INT (GPIO3) as outputs */
+
+  esp32s3_configgpio(48, OUTPUT);  /* RST */
+  esp32s3_configgpio(3, OUTPUT);   /* INT */
+
+  /* RST = LOW, INT = LOW */
+
+  esp32s3_gpiowrite(48, false);   /* RST = LOW */
+  esp32s3_gpiowrite(3, false);    /* INT = LOW */
+  up_udelay(200);                 /* Wait >100μs */
+
+  /* RST = HIGH (release reset) */
+
+  esp32s3_gpiowrite(48, true);    /* RST = HIGH */
+  up_mdelay(10);                  /* Wait >5ms */
+
+  /* INT switch to floating input (external pull-up) */
+
+  esp32s3_configgpio(3, INPUT);   /* INT = floating input */
+  up_mdelay(50);                  /* Wait for GT911 to initialize */
+
+  /* Step 2: Initialize I2C bus */
+
   dev->i2c = esp32s3_i2cbus_initialize(TOUCHSCEEN_I2C);
   if (!dev->i2c)
     {
-      syslog(LOG_ERR, "ERROR: Failed to initialize I2C port %d\n",
+      printf("[Touch] ERROR: Failed to initialize I2C port %d\n",
              TOUCHSCEEN_I2C);
       return -ENODEV;
     }
+
+  /* Step 3: Probe GT911 by reading product ID */
+
+  uint8_t pid[4];
+  ret = gt911_read_reg(dev, GT911_PRODUCT_ID_REG, pid, 4);
+  if (ret < 0)
+    {
+      printf("[Touch] ERROR: Failed to read product ID: %d\n", ret);
+      return ret;
+    }
+
+  printf("[Touch] GT911 detected: PID='%c%c%c%c'\n",
+         pid[0], pid[1], pid[2], pid[3]);
+
+  /* Step 4: Register touch device Must set maxpoint! TSIOC_GETMAXPOINTS
+   * returns lower->maxpoint, If unset, LVGL receives 0 and determines
+   * "unsupported maxpoint", refusing to create indev.
+   */
+
+  dev->touch_lower.maxpoint = GT911_TOUCHPOINTS;
 
   ret = touch_register(&dev->touch_lower, GT911_PATH,
                        GT911_SAMPLE_CACHES);
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ERROR: touch_register() failed: %d\n", ret);
+      printf("[Touch] ERROR: touch_register() failed: %d\n", ret);
       return ret;
     }
+
+  printf("[Touch] registered at %s\n", GT911_PATH);
+
+  /* Step 5: Start worker queue */
 
   ret = work_queue(LPWORK, &dev->work, gt911_worker,
                    dev, GT911_WORK_DELAY);
   if (ret != 0)
     {
-      syslog(LOG_ERR, "ERROR: work_queue() failed: %d\n", ret);
+      printf("[Touch] ERROR: work_queue() failed: %d\n", ret);
       return ret;
     }
 

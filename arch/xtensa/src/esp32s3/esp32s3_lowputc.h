@@ -80,6 +80,10 @@ enum uart_stop_length
 
 /* Default FIFOs size */
 
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
 #define UART_TX_FIFO_SIZE 128
 #define UART_RX_FIFO_SIZE 128
 
@@ -489,5 +493,16 @@ void esp32s3_lowputc_restore_pins(const struct esp32s3_uart_s *priv);
  ****************************************************************************/
 
 void esp32s3_lowsetup(void);
+
+/* 2026-09-09 M2 (soil↔capture pin exclusion): camera (DVP
+ * Y9=IO40/VSYNC=IO42) and UART0 (soil RS485 TX=42/RX=40) shares GPIO. After
+ * photo capture exit, call this function to restore IO42/40 reroute from
+ * camera input state back to UART0 (equivalent to esp32s3_lowsetup pin
+ * configuration). This is a last-writer-wins situation with the pin
+ * configuration of esp32s3_cam_dvp.
+ */
+#ifdef CONFIG_ESP32S3_UART0
+void esp32s3_uart0_reclaim_pins(void);
+#endif
 
 #endif /* __ARCH_XTENSA_SRC_ESP32S3_ESP32S3_LOWPUTC_H */

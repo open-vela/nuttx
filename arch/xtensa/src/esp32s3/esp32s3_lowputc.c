@@ -1020,3 +1020,25 @@ void esp32s3_lowsetup(void)
 
 #endif /* !CONFIG_SUPPRESS_UART_CONFIG */
 }
+
+#ifdef CONFIG_ESP32S3_UART0
+/****************************************************************************
+ * Name: esp32s3_uart0_reclaim_pins
+ *
+ * Description:
+ * 2026-09-09 M2 (soil↔capture pin exclusion): remove IO42(TX)/IO40(RX)
+ * from camera DVP
+ * Input mode switched back to UART0. After camera init configures these two
+ * pins as DVP input, soil UART0
+ * the send/receive becomes invalid; after exiting capture (cam_dvp_stop +
+ * sensor soft reset), call this function to restore
+ * UART0. This is a last-writer-wins situation in the GPIO matrix, mutually
+ * exclusive with DVP pin configuration.
+ ****************************************************************************/
+
+void esp32s3_uart0_reclaim_pins(void)
+{
+  esp32s3_lowputc_enable_sysclk(&g_uart0_config);
+  esp32s3_lowputc_config_pins(&g_uart0_config);
+}
+#endif /* CONFIG_ESP32S3_UART0 */

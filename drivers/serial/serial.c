@@ -58,6 +58,18 @@
 #include <nuttx/spinlock.h>
 #include <nuttx/mutex.h>
 
+/* ⚠ 2026-09-15: Console (this board's console is the chip's built-in USB
+ * serial port) when host does not When data is read away (only USB power
+ * plugged, or serial tool closed but port still open), TX FIFO will keep is
+ * full. NuttX originally waited indefinitely / entered an infinite loop
+ * here, causing any printf to hang (Phenomenon: UI freezes, network drops,
+ * heartbeat stops, wifi scan never comes out; in practice, reading the
+ * serial port just Recover immediately). Console changed to timed wait,
+ * discards buffered output after exceeding this milliseconds.
+ */
+
+#define CONSOLE_TXWAIT_MSEC 200
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -254,7 +266,8 @@ static int uart_putxmitchar(FAR uart_dev_t *dev, int ch, bool oktoblock)
 
       if (nexthead != dev->xmit.tail)
         {
-          /* No.. not full.  Add the character to the TX buffer and return. */
+          /* No.. not full. Add the character to the TX buffer and return.
+           */
 
           dev->xmit.buffer[dev->xmit.head] = ch;
           dev->xmit.head = nexthead;
@@ -316,9 +329,40 @@ static int uart_putxmitchar(FAR uart_dev_t *dev, int ch, bool oktoblock)
 #endif
               uart_enabletxint(dev);
               uart_spinunlock(dev, true, flags);
-              ret = nxsem_wait(&dev->xmitsem);
-              flags = uart_spinlock(dev, true);
-              uart_disabletxint(dev);
+
+              if (dev->isconsole)
+                {
+                  /* Console, when host doesn't read data, this semaphore
+                   * will never be acquired, change to time-limited Wait: on
+                   * timeout, treat as "send complete", discard the entire
+                   * backlogged outgoing data, release caller continues to
+                   * run. Behavior is completely unchanged when someone is
+                   * watching the serial port.
+                   */
+
+                  ret = nxsem_tickwait(&dev->xmitsem,
+                                       MSEC2TICK(CONSOLE_TXWAIT_MSEC));
+
+                  flags = uart_spinlock(dev, true);
+                  uart_disabletxint(dev);
+
+                  if (ret == -ETIMEDOUT)
+                    {
+                      ret = OK;
+
+                      if (nexthead == dev->xmit.tail)
+                        {
+                          dev->xmit.head = dev->xmit.tail;
+                        }
+                    }
+                }
+              else
+                {
+                  ret = nxsem_wait(&dev->xmitsem);
+
+                  flags = uart_spinlock(dev, true);
+                  uart_disabletxint(dev);
+                }
             }
 
           uart_spinunlock(dev, true, flags);
@@ -374,8 +418,23 @@ static inline void uart_putchars(FAR uart_dev_t *dev,
 
   while (len > 0)
     {
+      clock_t start = clock_systime_ticks();
+
       while (!uart_txready(dev))
         {
+          /* When host does not read console data, txready remains false;
+           * originally caused infinite loop, Moreover, the call point
+           * usually has interrupts disabled — hitting it means the entire
+           * system locks up. Set an upper limit for the console, If
+           * unavailable, discard remaining output.
+           */
+
+          if (dev->isconsole &&
+              clock_systime_ticks() - start >=
+              MSEC2TICK(CONSOLE_TXWAIT_MSEC))
+            {
+              return;
+            }
         }
 
       if (dev->ops->sendbuf)
@@ -526,9 +585,32 @@ static int uart_tcdrain(FAR uart_dev_t *dev,
 #endif
               uart_enabletxint(dev);
               uart_spinunlock(dev, true, flags);
-              ret = nxsem_wait(&dev->xmitsem);
-              flags = uart_spinlock(dev, true);
-              uart_disabletxint(dev);
+
+              if (dev->isconsole)
+                {
+                  /* Same as above: when console is stuck, tcdrain will also
+                   * wait indefinitely, discarded after timeout
+                   */
+
+                  ret = nxsem_tickwait(&dev->xmitsem,
+                                       MSEC2TICK(CONSOLE_TXWAIT_MSEC));
+
+                  flags = uart_spinlock(dev, true);
+                  uart_disabletxint(dev);
+
+                  if (ret == -ETIMEDOUT)
+                    {
+                      ret = OK;
+                      dev->xmit.head = dev->xmit.tail;
+                    }
+                }
+              else
+                {
+                  ret = nxsem_wait(&dev->xmitsem);
+
+                  flags = uart_spinlock(dev, true);
+                  uart_disabletxint(dev);
+                }
             }
         }
 
@@ -1005,7 +1087,8 @@ static ssize_t uart_read(FAR struct file *filep,
 
           if (dev->tc_lflag & ECHO)
             {
-              /* Check for the beginning of a VT100 escape sequence, 3 byte */
+              /* Check for the beginning of a VT100 escape sequence, 3 byte
+               */
 
               if (ch == ASCII_ESC)
                 {
@@ -2160,7 +2243,8 @@ int uart_register(FAR const char *path, FAR uart_dev_t *dev)
 
 void uart_datareceived(FAR uart_dev_t *dev)
 {
-  /* Notify all poll/select waiters that they can read from the recv buffer */
+  /* Notify all poll/select waiters that they can read from the recv buffer
+   */
 
   uart_poll_notify(dev, 0, CONFIG_SERIAL_NPOLLWAITERS, POLLIN);
 

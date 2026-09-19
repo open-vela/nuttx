@@ -40,11 +40,16 @@
 #include "esp_attr.h"
 #include "esp32s3_psram.h"
 #include "esp32s3_spiram.h"
+#include "esp32s3_himem.h"
 #include "hardware/esp32s3_soc.h"
 #include "hardware/esp32s3_cache_memory.h"
 #include "hardware/esp32s3_iomux.h"
 
 #include "soc/extmem_reg.h"
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
 
 #define PSRAM_MODE PSRAM_VADDR_MODE_NORMAL
 
@@ -721,6 +726,64 @@ uint32_t esp_spiram_allocable_vaddr_start(void)
 uint32_t esp_spiram_allocable_vaddr_end(void)
 {
   return g_allocable_vaddr_end;
+}
+
+/****************************************************************************
+ * Name: esp32s3_psram_static_base
+ *
+ * Description:
+ * Base address of the PSRAM static carve (top
+ * ESP32S3_PSRAM_STATIC_CARVE_SIZE
+ * bytes of the mapped PSRAM, below any himem bank-switch reservation).
+ ****************************************************************************/
+
+uint32_t esp32s3_psram_static_base(void)
+{
+  return esp_spiram_allocable_vaddr_end() -
+         esp_himem_reserved_area_size() -
+         ESP32S3_PSRAM_STATIC_CARVE_SIZE;
+}
+
+/****************************************************************************
+ * Name: esp32s3_psram_static_alloc
+ *
+ * Description:
+ *   Deterministic PSRAM allocation from the static carve (bump allocator,
+ *   64B aligned, never freed).  Used by drivers whose buffers must not eat
+ *   the internal DRAM that esp_wifi depends on (camera RX/shadow ...).
+ *
+ ****************************************************************************/
+
+void *esp32s3_psram_static_alloc(size_t size)
+{
+  static uintptr_t s_offset;
+  uintptr_t base;
+  uintptr_t start;
+
+  if (size == 0)
+    {
+      return NULL;
+    }
+
+  size = (size + 63) & ~(size_t)63;
+
+  base = esp32s3_psram_static_base();
+  if (base == 0 || base < esp_spiram_allocable_vaddr_start())
+    {
+      return NULL;
+    }
+
+  if (s_offset + size > ESP32S3_PSRAM_STATIC_CARVE_SIZE)
+    {
+      return NULL;
+    }
+
+  start = base + s_offset;
+  s_offset += size;
+
+  memset((void *)start, 0, size);
+
+  return (void *)start;
 }
 
 #endif

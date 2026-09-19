@@ -520,26 +520,44 @@ static void wlan_transmit(struct wlan_priv_s *priv)
 {
   struct wlan_pktbuf *pktbuf;
   int ret;
+  int txfail = 0;
 
   while ((pktbuf = wlan_txframe(priv)))
     {
       ret = priv->ops->send(pktbuf->buffer, pktbuf->len);
-      if (ret == -ENOMEM)
+      if (ret < 0)
         {
-          wlan_add_txpkt_head(priv, pktbuf);
-          wd_start(&priv->txtimeout, WLAN_TXTOUT,
-                   wlan_txtimeout_expiry, (uint32_t)priv);
-          break;
+          /* [ZXB-TXRETRY] Within a period after WiFi just associated,
+           * esp_wifi_internal_tx may briefly return errors (-EINVAL/-EIO
+           * etc.). Simply dropping packets would cause upper-layer TCP
+           * Assumes data has been handed to the driver, waits for ACK but
+           * never receives it (in unbuffered TCP's send() will hang/report
+           * error). Here, use the same strategy as -ENOMEM: re-insert at the
+           * head of the queue, wait After WLAN_TXTOUT retry, only drop
+           * packet after 3 consecutive failures (leaving for TCP retransmit
+           * fallback), prevent permanent deadlock.
+           */
+
+          if (++txfail < 4)
+            {
+              nwarn("WARN: TX retry %d (ret=%d)\n", txfail, ret);
+              wlan_add_txpkt_head(priv, pktbuf);
+              wd_start(&priv->txtimeout, WLAN_TXTOUT,
+                       wlan_txtimeout_expiry, (uint32_t)priv);
+              break;
+            }
+          else
+            {
+              nwarn("WARN: TX drop after retries (ret=%d)\n", ret);
+              txfail = 0;
+            }
         }
       else
         {
-          if (ret < 0)
-            {
-              nwarn("WARN: Failed to send pkt, ret: %d\n", ret);
-            }
-
-          wlan_free_buffer(priv, pktbuf->buffer);
+          txfail = 0;
         }
+
+      wlan_free_buffer(priv, pktbuf->buffer);
     }
 }
 

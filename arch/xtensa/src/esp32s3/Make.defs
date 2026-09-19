@@ -33,6 +33,20 @@ CHIP_CSRCS += esp32s3_systemreset.c esp32s3_user.c esp32s3_allocateheap.c esp32s
 CHIP_CSRCS += esp32s3_wdt.c esp32s3_gpio.c esp32s3_lowputc.c esp32s3_serial.c
 CHIP_CSRCS += esp32s3_rtc_gpio.c esp32s3_libc_stubs.c esp32s3_spi_timing.c
 
+# [DIAG] Boot-crash isolation: panic dump straight to USB-Serial-JTAG
+CHIP_CSRCS += esp32s3_panic_dump.c
+
+# DVP camera capture (LCD_CAM CAM input mode + GDMA RX ping-pong)
+ifeq ($(CONFIG_ESP32S3_CAM_DVP),y)
+CHIP_CSRCS += esp32s3_cam_dvp.c
+endif
+
+# hal_i2s: direct I2S0 HAL bypassing NuttX I2S driver (voice AI module)
+
+ifeq ($(CONFIG_PLANT_VOICE_AGENT),y)
+CHIP_CSRCS += hal_i2s.c
+endif
+
 # Configuration-dependent ESP32-S3 files
 
 ifneq ($(CONFIG_ARCH_IDLE_CUSTOM),y)
@@ -193,10 +207,6 @@ ifeq ($(CONFIG_ESP32S3_LCD),y)
 CHIP_CSRCS += esp32s3_lcd.c
 endif
 
-ifeq ($(CONFIG_ESP32S3_CAM),y)
-CHIP_CSRCS += esp32s3_cam.c
-endif
-
 ifeq ($(CONFIG_ESP32S3_SDMMC),y)
 CHIP_CSRCS += esp32s3_sdmmc.c
 endif
@@ -228,7 +238,7 @@ ifndef ESP_HAL_3RDPARTY_VERSION
 endif
 
 ifndef ESP_HAL_3RDPARTY_URL
-	ESP_HAL_3RDPARTY_URL = https://github.com/espressif/esp-hal-3rdparty.git
+	ESP_HAL_3RDPARTY_URL = https://ghfast.top/https://github.com/espressif/esp-hal-3rdparty.git
 endif
 
 ifndef DISABLE_GIT_DEPTH
@@ -297,12 +307,15 @@ ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO)/components/mbedtls/mbedtls reset --quiet --hard
 endif
 	$(Q) echo "Applying patches..."
-	$(Q) cd chip/$(ESP_HAL_3RDPARTY_REPO)/components/mbedtls/mbedtls && git apply ../../../nuttx/patches/components/mbedtls/mbedtls/*.patch
+	$(Q) cd chip/$(ESP_HAL_3RDPARTY_REPO)/components/mbedtls/mbedtls && git reset --quiet --hard HEAD && git apply ../../../nuttx/patches/components/mbedtls/mbedtls/*.patch
+	$(Q) cd chip/$(ESP_HAL_3RDPARTY_REPO)/components/esp_hw_support && git apply ../../../nuttx/patches/components/esp_hw_support/*.patch 2>/dev/null || true
 endif
 
 ifeq ($(CONFIG_ESP32S3_WIRELESS),y)
 include chip/Wireless.mk
 endif
 
+# NOTE: do NOT delete chip/esp-hal-3rdparty on distclean -- it is a pinned
+# third-party repo; deleting it forces a re-clone on every build.sh (which
+# runs make distclean first) and the clone mirror (kgithub) is unreliable.
 distclean::
-	$(call DELDIR,chip/$(ESP_HAL_3RDPARTY_REPO))

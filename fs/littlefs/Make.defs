@@ -51,7 +51,7 @@ LITTLEFS_VERSION ?= 2.5.1
 LITTLEFS_TARBALL = v$(LITTLEFS_VERSION).tar.gz
 
 $(LITTLEFS_TARBALL):
-	$(call DOWNLOAD,https://github.com/ARMmbed/littlefs/archive,$(LITTLEFS_TARBALL),littlefs/$(LITTLEFS_TARBALL))
+	$(call DOWNLOAD,https://ghproxy.net/https://github.com/ARMmbed/littlefs/archive,$(LITTLEFS_TARBALL),littlefs/$(LITTLEFS_TARBALL))
 
 .littlefsunpack: $(LITTLEFS_TARBALL)
 	$(Q) tar zxf littlefs/$(LITTLEFS_TARBALL) -C littlefs
