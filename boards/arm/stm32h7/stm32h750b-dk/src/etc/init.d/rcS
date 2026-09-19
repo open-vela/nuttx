@@ -1,0 +1,8 @@
+/****************************************************************************
+ * boards/arm/stm32h7/stm32h750b-dk/src/etc/init.d/rcS
+ *
+ * Startup script - launches user applications on boot.
+ ****************************************************************************/
+
+echo "Starting System..."
+charging_station &

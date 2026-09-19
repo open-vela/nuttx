@@ -39,6 +39,7 @@
 #include <arpa/inet.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/clock.h>
 #include <nuttx/queue.h>
 #include <nuttx/wdog.h>
 #include <nuttx/wqueue.h>
@@ -64,6 +65,11 @@
 #include "stm32_uid.h"
 
 #include <arch/board/board.h>
+
+#ifdef BOARD_ETH_PHY_POLL
+#  define STM32_LINK_POLL_DELAY MSEC2TICK(500)
+#  define STM32_LINK_DEBOUNCE   2
+#endif
 
 /* STM32H7_NETHERNET determines the number of physical interfaces that can
  * be supported by the hardware.  CONFIG_STM32H7_ETHMAC will defined if
@@ -612,6 +618,13 @@ struct stm32_ethmac_s
   struct wdog_s        txtimeout;   /* TX timeout timer */
   struct work_s        irqwork;     /* For deferring interrupt work to the work queue */
   struct work_s        pollwork;    /* For deferring poll work to the work queue */
+#ifdef BOARD_ETH_PHY_POLL
+  struct work_s        linkwork;    /* For polling the PHY link state */
+  uint8_t              linksamples; /* Number of matching PHY samples */
+  bool                 linkstate;   /* Last published PHY link state */
+  bool                 linkcandidate;
+  bool                 linkerror;   /* MDIO failure already reported */
+#endif
 
   /* This holds the information visible to the NuttX network */
 
@@ -756,6 +769,10 @@ static int  stm32_phywrite(uint16_t phydevaddr, uint16_t phyregaddr,
 static inline int stm32_dm9161(struct stm32_ethmac_s *priv);
 #endif
 static int  stm32_phyinit(struct stm32_ethmac_s *priv);
+#ifdef BOARD_ETH_PHY_POLL
+static int  stm32_phylinkread(bool *linkup);
+static void stm32_link_work(void *arg);
+#endif
 #ifdef CONFIG_STM32H7_ETHMAC_REGDEBUG
 static void  stm32_phyregdump(void);
 #endif
@@ -2417,6 +2434,11 @@ static int stm32_ifup(struct net_driver_s *dev)
   struct stm32_ethmac_s *priv = (struct stm32_ethmac_s *)dev->d_private;
   int ret;
 
+  if (priv->ifup)
+    {
+      return OK;
+    }
+
 #ifdef CONFIG_NET_IPv4
   ninfo("Bringing up: %u.%u.%u.%u\n",
         ip4_addr1(dev->d_ipaddr), ip4_addr2(dev->d_ipaddr),
@@ -2443,6 +2465,32 @@ static int stm32_ifup(struct net_driver_s *dev)
   up_enable_irq(STM32_IRQ_ETH);
 
   stm32_checksetup();
+#ifdef BOARD_ETH_PHY_POLL
+  ret = stm32_phylinkread(&priv->linkstate);
+  if (ret < 0 || !priv->linkstate)
+    {
+      priv->linkstate = false;
+      netdev_carrier_off(dev);
+    }
+  else
+    {
+      netdev_carrier_on(dev);
+    }
+
+  priv->linkcandidate = priv->linkstate;
+  priv->linksamples = 0;
+  priv->linkerror = false;
+  ret = work_queue(LPWORK, &priv->linkwork, stm32_link_work, priv,
+                   STM32_LINK_POLL_DELAY);
+  if (ret < 0)
+    {
+      nerr("ERROR: Failed to schedule PHY link work: %d\n", ret);
+      stm32_ifdown(dev);
+      return ret;
+    }
+#else
+  netdev_carrier_on(dev);
+#endif
   return OK;
 }
 
@@ -2471,6 +2519,16 @@ static int stm32_ifdown(struct net_driver_s *dev)
 
   /* Disable the Ethernet interrupt */
 
+  priv->ifup = false;
+#ifdef BOARD_ETH_PHY_POLL
+  work_cancel(LPWORK, &priv->linkwork);
+  priv->linkstate = false;
+  priv->linkcandidate = false;
+  priv->linksamples = 0;
+  priv->linkerror = false;
+#endif
+  netdev_carrier_off(dev);
+
   flags = enter_critical_section();
   up_disable_irq(STM32_IRQ_ETH);
 
@@ -2487,7 +2545,6 @@ static int stm32_ifdown(struct net_driver_s *dev)
 
   /* Mark the device "down" */
 
-  priv->ifup = false;
   leave_critical_section(flags);
   return OK;
 }
@@ -3363,6 +3420,18 @@ static int stm32_phyinit(struct stm32_ethmac_s *priv)
   /* Perform auto-negotiation if so configured */
 
 #ifdef CONFIG_STM32H7_AUTONEG
+#ifdef BOARD_ETH_PHY_POLL
+  /* Start auto-negotiation even when booting without a cable. */
+
+  ret = stm32_phywrite(CONFIG_STM32H7_PHYADDR, MII_MCR,
+                       MII_MCR_ANENABLE, MII_MCR_ANENABLE);
+  if (ret < 0)
+    {
+      nerr("ERROR: Failed to enable auto-negotiation: %d\n", ret);
+      return ret;
+    }
+#endif
+
   /* Wait for link status */
 
   for (timeout = 0; timeout < PHY_RETRY_TIMEOUT; timeout++)
@@ -3384,7 +3453,12 @@ static int stm32_phyinit(struct stm32_ethmac_s *priv)
   if (timeout >= PHY_RETRY_TIMEOUT)
     {
       nerr("ERROR: Timed out waiting for link status: %04x\n", phyval);
+#ifdef BOARD_ETH_PHY_POLL
+      ninfo("Continuing with carrier off until PHY polling finds a link\n");
+      return OK;
+#else
       return -ETIMEDOUT;
+#endif
     }
 
   /* Enable auto-negotiation */
@@ -3524,6 +3598,157 @@ static int stm32_phyinit(struct stm32_ethmac_s *priv)
   return OK;
 }
 
+#ifdef BOARD_ETH_PHY_POLL
+/****************************************************************************
+ * Function: stm32_phylinkread
+ *
+ * Description:
+ *   Read the PHY link state.  MII_MSR link status is latch-low, so the
+ *   register must be read twice to obtain the current value.
+ *
+ ****************************************************************************/
+
+static int stm32_phylinkread(bool *linkup)
+{
+  uint16_t phyval;
+  int ret;
+
+  ret = stm32_phyread(CONFIG_STM32H7_PHYADDR, MII_MSR, &phyval);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = stm32_phyread(CONFIG_STM32H7_PHYADDR, MII_MSR, &phyval);
+  if (ret >= 0)
+    {
+      *linkup = (phyval & MII_MSR_LINKSTATUS) != 0;
+    }
+
+  return ret;
+}
+
+/****************************************************************************
+ * Function: stm32_maclinkconfig
+ *
+ * Description:
+ *   Synchronize the MAC speed and duplex bits after PHY auto-negotiation.
+ *
+ ****************************************************************************/
+
+static void stm32_maclinkconfig(struct stm32_ethmac_s *priv)
+{
+  uint32_t regval;
+  uint32_t enabled;
+
+  regval = stm32_getreg(STM32_ETH_MACCR);
+  enabled = regval & (ETH_MACCR_RE | ETH_MACCR_TE);
+  regval &= ~(ETH_MACCR_RE | ETH_MACCR_TE | ETH_MACCR_DM |
+              ETH_MACCR_FES);
+  stm32_putreg(regval, STM32_ETH_MACCR);
+
+  if (priv->fduplex)
+    {
+      regval |= ETH_MACCR_DM;
+    }
+
+  if (priv->mbps100)
+    {
+      regval |= ETH_MACCR_FES;
+    }
+
+  stm32_putreg(regval | enabled, STM32_ETH_MACCR);
+}
+
+/****************************************************************************
+ * Function: stm32_link_work
+ *
+ * Description:
+ *   Poll and debounce the external PHY link state from LPWORK.
+ *
+ ****************************************************************************/
+
+static void stm32_link_work(void *arg)
+{
+  struct stm32_ethmac_s *priv = (struct stm32_ethmac_s *)arg;
+  bool linkup;
+  int ret;
+
+  net_lock();
+  if (!priv->ifup)
+    {
+      net_unlock();
+      return;
+    }
+
+  ret = stm32_phylinkread(&linkup);
+  if (ret < 0)
+    {
+      if (!priv->linkerror)
+        {
+          nwarn("WARNING: Failed to read PHY link state: %d\n", ret);
+          priv->linkerror = true;
+        }
+
+      goto reschedule;
+    }
+
+  if (priv->linkerror)
+    {
+      ninfo("PHY link status reads recovered\n");
+      priv->linkerror = false;
+    }
+
+  if (linkup != priv->linkcandidate)
+    {
+      priv->linkcandidate = linkup;
+      priv->linksamples = 1;
+    }
+  else if (priv->linksamples < STM32_LINK_DEBOUNCE)
+    {
+      priv->linksamples++;
+    }
+
+  if (priv->linksamples >= STM32_LINK_DEBOUNCE &&
+      linkup != priv->linkstate)
+    {
+      if (linkup)
+        {
+          ret = stm32_phyinit(priv);
+          if (ret < 0 || stm32_phylinkread(&linkup) < 0 || !linkup)
+            {
+              goto reschedule;
+            }
+
+          stm32_maclinkconfig(priv);
+          priv->linkstate = true;
+          netdev_carrier_on(&priv->dev);
+          ninfo("PHY link is up\n");
+        }
+      else
+        {
+          wd_cancel(&priv->txtimeout);
+          priv->linkstate = false;
+          netdev_carrier_off(&priv->dev);
+          ninfo("PHY link is down\n");
+        }
+    }
+
+reschedule:
+  if (priv->ifup)
+    {
+      ret = work_queue(LPWORK, &priv->linkwork, stm32_link_work, priv,
+                       STM32_LINK_POLL_DELAY);
+      if (ret < 0)
+        {
+          nwarn("WARNING: Failed to reschedule PHY link work: %d\n", ret);
+        }
+    }
+
+  net_unlock();
+}
+#endif
+
 #endif
 
 /****************************************************************************
@@ -3651,8 +3876,10 @@ static inline void stm32_ethgpioconfig(struct stm32_ethmac_s *priv)
    * MII_RX_ER, MII_RX_DV, MII_CRS, MII_COL, MDC, MDIO
    */
 
+#    ifndef BOARD_ETH_MII_NO_CRS_COL
   stm32_configgpio(GPIO_ETH_MII_COL);
   stm32_configgpio(GPIO_ETH_MII_CRS);
+#    endif
   stm32_configgpio(GPIO_ETH_MII_RXD0);
   stm32_configgpio(GPIO_ETH_MII_RXD1);
   stm32_configgpio(GPIO_ETH_MII_RXD2);

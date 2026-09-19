@@ -275,6 +275,24 @@
 
 /* Ethernet definitions *****************************************************/
 
+/* MB1381 H750XB-B01 routes the LAN8740A through full MII.  PH2/MII_CRS and
+ * PH3/MII_COL share pins with QSPI bank 2 IO0/IO1.  QSPI-XIP builds must
+ * leave those pins in their QSPI alternate function; negotiated full-duplex
+ * Ethernet does not use CRS/COL.
+ */
+
+/* Poll the LAN8740A PHY link state from LPWORK.  Needed because this board
+ * has no PHY interrupt wired to the MCU; without polling the driver never
+ * publishes carrier state (IFF_RUNNING) and a cable plugged in after boot
+ * would never be detected.
+ *
+ * Note: BOARD_ETH_MII_NO_CRS_COL is only required for QSPI-XIP builds, where
+ * PH2/PH3 are reused as QSPI bank2 IO0/IO1.  Booting from the internal flash
+ * leaves those pins free for MII_CRS/MII_COL.
+ */
+
+#define BOARD_ETH_PHY_POLL 1
+
 /* The STM32H7 connects to a LAN8740A PHY using these pins:
  *
  *   STM32H7  BOARD        LAN8740A
@@ -349,7 +367,20 @@
 #  endif
 #endif
 
-#define BOARD_SDRAM2_SIZE               (8*1024*1024)
+/* The LTDC framebuffers live at the start of SDRAM bank 2 (0xd0000000), sized
+ * by CONFIG_STM32H7_LTDC_FB_BASE / _FB_SIZE.  Registering the whole bank as
+ * heap would put the allocator's own metadata at those same addresses, so a
+ * display refresh would corrupt the heap and any traversal of it (mallinfo(),
+ * and therefore free/mb) would trip the consistency check in mm_foreach().
+ *
+ * Leave BOARD_SDRAM2_SIZE undefined so arm_addregion() does not claim the
+ * bank; SDRAM then belongs to the framebuffer alone.  The heap keeps DTCM,
+ * SRAM1-3, SRAM4 and AXI SRAM (~940 KB total), which is ample for this
+ * application.  Add the remainder of the bank here as SDRAM2 only if the
+ * framebuffer moves elsewhere.
+ *
+ * #define BOARD_SDRAM2_SIZE            (8*1024*1024)
+ */
 
 /* BOARD_FMC_SDCR[1..2] - Initial value for SDRAM control registers for SDRAM
  *      bank 1-2. Note that some bits in SDCR1 influence both SDRAM banks and
