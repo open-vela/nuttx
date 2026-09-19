@@ -384,7 +384,17 @@ static int esp_setup(uart_dev_t *dev)
 
   uart_hal_init(priv->hal, priv->id);
   uart_hal_set_mode(priv->hal, UART_MODE_UART);
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+  /* The P4 clock-source register is shared by peripherals.  The official
+   * HAL requires an atomic context marker; NuttX's critical section also
+   * prevents an interrupt from interleaving this early UART setup. */
+  irqstate_t flags = enter_critical_section();
+  int __DECLARE_RCC_ATOMIC_ENV __attribute__((unused));
   uart_hal_set_sclk(priv->hal, UART_SCLK_DEFAULT);
+  leave_critical_section(flags);
+#else
+  uart_hal_set_sclk(priv->hal, UART_SCLK_DEFAULT);
+#endif
   uart_hal_set_baudrate(priv->hal, priv->baud, sclk_freq);
   uart_hal_set_parity(priv->hal, priv->parity);
   set_data_length(priv);
@@ -494,28 +504,24 @@ static void esp_shutdown(uart_dev_t *dev)
 static int esp_attach(uart_dev_t *dev)
 {
   struct esp_uart_s *priv = dev->priv;
-  int ret;
 
   DEBUGASSERT(priv->cpuint == -ENOMEM);
 
   /* Set up to receive peripheral interrupts */
 
   priv->cpuint = esp_setup_irq(priv->source, priv->int_pri,
-                               ESP_IRQ_TRIGGER_LEVEL);
-
-  /* Attach and enable the IRQ */
-
-  ret = irq_attach(priv->irq, uart_handler, dev);
-  if (ret == OK)
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               uart_handler,
+                               dev);
+  if (priv->cpuint < 0)
     {
-      up_enable_irq(priv->irq);
-    }
-  else
-    {
-      up_disable_irq(priv->irq);
+      return priv->cpuint;
     }
 
-  return ret;
+  /* Enable the IRQ */
+
+  up_enable_irq(priv->irq);
+  return OK;
 }
 
 /****************************************************************************
@@ -689,7 +695,11 @@ static bool esp_txempty(uart_dev_t *dev)
 {
   struct esp_uart_s *priv = dev->priv;
 
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+  return priv->hal->dev->int_raw.txfifo_empty_int_raw != 0;
+#else
   return priv->hal->dev->int_raw.txfifo_empty != 0;
+#endif
 }
 
 /****************************************************************************

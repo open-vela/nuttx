@@ -45,5 +45,4 @@ endif # HWTRACING_NOTE
 endif # HWTRACING
 
 source "drivers/hwtracing/coresight/Kconfig"
-source "drivers/hwtracing/tricoreht/Kconfig"
-
+# Tricore hardware-tracing is not part of the ESP32-P4 L0 build.

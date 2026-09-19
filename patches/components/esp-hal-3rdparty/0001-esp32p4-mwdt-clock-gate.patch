@@ -1,0 +1,87 @@
+diff --git a/components/esp_hal_clock/esp32p4/include/hal/clk_gate_ll.h b/components/esp_hal_clock/esp32p4/include/hal/clk_gate_ll.h
+index 3e5d68f2bb6..30ce3c03a06 100644
+--- a/components/esp_hal_clock/esp32p4/include/hal/clk_gate_ll.h
++++ b/components/esp_hal_clock/esp32p4/include/hal/clk_gate_ll.h
+@@ -245,9 +245,9 @@ static inline void periph_ll_clk_gate_set_default(soc_reset_reason_t rst_reason,
+         REG_CLR_BIT(HP_SYS_CLKRST_SOC_CLK_CTRL2_REG, HP_SYS_CLKRST_REG_TIMERGRP0_APB_CLK_EN |
+                     HP_SYS_CLKRST_REG_TIMERGRP1_APB_CLK_EN);
+         REG_CLR_BIT(HP_SYS_CLKRST_PERI_CLK_CTRL20_REG, HP_SYS_CLKRST_REG_TIMERGRP0_T0_CLK_EN |
+-                    HP_SYS_CLKRST_REG_TIMERGRP0_T1_CLK_EN);
++                    HP_SYS_CLKRST_REG_TIMERGRP0_T1_CLK_EN | HP_SYS_CLKRST_REG_TIMERGRP0_WDT_CLK_EN);
+         REG_CLR_BIT(HP_SYS_CLKRST_PERI_CLK_CTRL21_REG, HP_SYS_CLKRST_REG_TIMERGRP1_T0_CLK_EN |
+-                    HP_SYS_CLKRST_REG_TIMERGRP1_T1_CLK_EN);
++                    HP_SYS_CLKRST_REG_TIMERGRP1_T1_CLK_EN | HP_SYS_CLKRST_REG_TIMERGRP1_WDT_CLK_EN);
+ 
+         REG_CLR_BIT(DSI_BRG_HOST_CTRL_REG, DSI_BRG_DSI_CFG_REF_CLK_EN);
+         REG_CLR_BIT(SDHOST_CLK_EDGE_SEL_REG, SDHOST_CCLK_EN);
+diff --git a/components/esp_hal_wdt/esp32p4/include/hal/mwdt_ll.h b/components/esp_hal_wdt/esp32p4/include/hal/mwdt_ll.h
+index 0952cebed97..e67599feb3c 100644
+--- a/components/esp_hal_wdt/esp32p4/include/hal/mwdt_ll.h
++++ b/components/esp_hal_wdt/esp32p4/include/hal/mwdt_ll.h
+@@ -289,16 +289,22 @@ FORCE_INLINE_ATTR void mwdt_ll_set_clock_source(timg_dev_t *hw, mwdt_clock_sourc
+  * @param en true to enable, false to disable
+  */
+ __attribute__((always_inline))
+-static inline void mwdt_ll_enable_clock(timg_dev_t *hw, bool en)
++static inline void _mwdt_ll_enable_clock(timg_dev_t *hw, bool en)
+ {
+-    /* The clock always defaults to enabled on P4.
+-       If we update to be able to enable/disable the clock then this function
+-       needs to be protected with PERIPH_RCC_ATOMIC as it touches shared registers.
+-     */
+-    (void)hw;
+-    (void)en;
++    if (hw == &TIMERG0) {
++        HP_SYS_CLKRST.peri_clk_ctrl20.reg_timergrp0_wdt_clk_en = en;
++    } else {
++        HP_SYS_CLKRST.peri_clk_ctrl21.reg_timergrp1_wdt_clk_en = en;
++    }
+ }
+ 
++/// use a macro to wrap the function, force the caller to use it in a critical section
++/// the critical section needs to declare the __DECLARE_RCC_ATOMIC_ENV variable in advance
++#define mwdt_ll_enable_clock(...) do { \
++        (void)__DECLARE_RCC_ATOMIC_ENV; \
++        _mwdt_ll_enable_clock(__VA_ARGS__); \
++    } while(0)
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/components/esp_hal_wdt/esp32p4/rom.wdt.ld b/components/esp_hal_wdt/esp32p4/rom.wdt.ld
+index ed3bfd3d81e..11277bed6b0 100644
+--- a/components/esp_hal_wdt/esp32p4/rom.wdt.ld
++++ b/components/esp_hal_wdt/esp32p4/rom.wdt.ld
+@@ -18,8 +18,8 @@
+  ***************************************/
+ 
+ /* Functions */
+-wdt_hal_init = 0x4fc001fc;
+-wdt_hal_deinit = 0x4fc00200;
++rom_wdt_hal_init = 0x4fc001fc;
++rom_wdt_hal_deinit = 0x4fc00200;
+ rom_wdt_hal_config_stage = 0x4fc00204;
+ wdt_hal_write_protect_disable = 0x4fc00208;
+ wdt_hal_write_protect_enable = 0x4fc0020c;
+diff --git a/components/esp_hal_wdt/wdt_hal_iram.c b/components/esp_hal_wdt/wdt_hal_iram.c
+index d256a0abcfa..2714a854d3d 100644
+--- a/components/esp_hal_wdt/wdt_hal_iram.c
++++ b/components/esp_hal_wdt/wdt_hal_iram.c
+@@ -79,6 +79,8 @@ void wdt_hal_init(wdt_hal_context_t *hal, wdt_inst_t wdt_inst, uint32_t prescale
+         mwdt_ll_set_cpu_reset_length(hal->mwdt_dev, WDT_RESET_SIG_LENGTH_3_2us);
+         mwdt_ll_set_sys_reset_length(hal->mwdt_dev, WDT_RESET_SIG_LENGTH_3_2us);
+         mwdt_ll_set_clock_source(hal->mwdt_dev, MWDT_CLK_SRC_DEFAULT);
++        // To suppress build errors about spinlock's __DECLARE_RCC_ATOMIC_ENV
++        int __DECLARE_RCC_ATOMIC_ENV __attribute__((unused));
+         mwdt_ll_enable_clock(hal->mwdt_dev, true);
+         //Set tick period
+         mwdt_ll_set_prescaler(hal->mwdt_dev, prescaler);
+@@ -107,6 +109,8 @@ void wdt_hal_deinit(wdt_hal_context_t *hal)
+         mwdt_ll_disable(hal->mwdt_dev);
+         mwdt_ll_clear_intr_status(hal->mwdt_dev);
+         mwdt_ll_set_intr_enable(hal->mwdt_dev, false);
++        // To suppress build errors about spinlock's __DECLARE_RCC_ATOMIC_ENV
++        int __DECLARE_RCC_ATOMIC_ENV __attribute__((unused));
+         mwdt_ll_enable_clock(hal->mwdt_dev, false);
+         //Lock WDT
+         mwdt_ll_write_protect_enable(hal->mwdt_dev);

@@ -38,6 +38,7 @@
 #include <arch/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
+#include <nuttx/spinlock.h>
 
 /* Arch */
 
@@ -64,6 +65,16 @@ static gpio_hal_context_t g_gpio_hal =
 
 #ifdef CONFIG_ESPRESSIF_GPIO_IRQ
 static int g_gpio_cpuint;
+
+struct esp_gpio_irqhandler_s
+{
+  xcpt_t handler;
+  void *arg;
+};
+
+static struct esp_gpio_irqhandler_s
+  g_gpio_irqhandlers[SOC_GPIO_PIN_COUNT];
+
 #endif
 
 /****************************************************************************
@@ -95,7 +106,21 @@ static void gpio_dispatch(int irq, uint32_t status, uint32_t *regs)
 
   while ((i = __builtin_ffs(status)) > 0)
     {
-      irq_dispatch(irq + i - 1, regs);
+      int gpioirq = irq + i - 1;
+      int pin = ESP_IRQ2PIN(gpioirq);
+      xcpt_t handler = g_gpio_irqhandlers[pin].handler;
+      void *arg = g_gpio_irqhandlers[pin].arg;
+
+      /* GPIO pin IRQs are second-level IRQs.  They cannot be placed in the
+       * 17-entry RISC-V minimal vector table, so dispatch them through the
+       * dedicated GPIO handler table instead of irq_dispatch().
+       */
+
+      if (handler != NULL)
+        {
+          handler(gpioirq, regs, arg);
+        }
+
       status >>= i;
     }
 }
@@ -123,6 +148,9 @@ static int gpio_interrupt(int irq, void *context, void *arg)
 {
   int i;
   uint32_t status;
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+  uint32_t status_high;
+#endif
   uint32_t intr_bitmask;
   int cpu = this_cpu();
 
@@ -140,6 +168,24 @@ static int gpio_interrupt(int irq, void *context, void *arg)
   /* Dispatch pending interrupts in the lower GPIO status register */
 
   gpio_dispatch(ESP_FIRST_GPIOIRQ, status, (uint32_t *)context);
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+  /* ESP32-P4 has a second status register for GPIO32 and above.  The
+   * interrupt source is shared with the lower GPIO status, but the two
+   * status registers must be read, cleared, and dispatched separately.
+   */
+
+  gpio_hal_get_intr_status_high(&g_gpio_hal, cpu, &status_high);
+  intr_bitmask = status_high;
+
+  while ((i = __builtin_ffs(intr_bitmask)) > 0)
+    {
+      gpio_hal_clear_intr_status_bit(&g_gpio_hal, 32 + (i - 1));
+      intr_bitmask >>= i;
+    }
+
+  gpio_dispatch(ESP_FIRST_GPIOIRQ + 32, status_high,
+                (uint32_t *)context);
+#endif
 
   return OK;
 }
@@ -236,15 +282,45 @@ int esp_configgpio(int pin, gpio_pinattr_t attr)
   if ((attr & FUNCTION_MASK) != 0)
     {
       uint32_t val = ((attr & FUNCTION_MASK) >> FUNCTION_SHIFT) - 1;
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+      gpio_hal_func_sel(&g_gpio_hal, pin, val);
+#else
       gpio_hal_iomux_func_sel(GPIO_PIN_MUX_REG[pin], val);
+#endif
     }
   else
     {
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+      gpio_hal_func_sel(&g_gpio_hal, pin, PIN_FUNC_GPIO);
+#else
       gpio_hal_iomux_func_sel(GPIO_PIN_MUX_REG[pin], PIN_FUNC_GPIO);
+#endif
     }
 
   return OK;
 }
+
+/****************************************************************************
+ * Name: esp_gpioirqattach
+ ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_GPIO_IRQ
+int esp_gpioirqattach(int irq, xcpt_t isr, void *arg)
+{
+  int pin;
+  irqstate_t flags;
+
+  DEBUGASSERT(irq >= ESP_FIRST_GPIOIRQ && irq <= ESP_LAST_GPIOIRQ);
+  pin = ESP_IRQ2PIN(irq);
+
+  flags = enter_critical_section();
+  g_gpio_irqhandlers[pin].handler = isr;
+  g_gpio_irqhandlers[pin].arg = arg;
+  leave_critical_section(flags);
+
+  return OK;
+}
+#endif
 
 /****************************************************************************
  * Name: esp_gpio_matrix_in
@@ -362,15 +438,17 @@ void esp_gpioirqinitialize(void)
 {
   /* Setup the GPIO interrupt. */
 
-  g_gpio_cpuint = esp_setup_irq(GPIO_INTR_SOURCE,
+  g_gpio_cpuint = esp_setup_irq(GPIO_INTR0_SOURCE,
                                 ESP_IRQ_PRIORITY_DEFAULT,
-                                ESP_IRQ_TRIGGER_LEVEL);
+                                ESP_IRQ_TRIGGER_LEVEL,
+                                gpio_interrupt,
+                                NULL);
   DEBUGASSERT(g_gpio_cpuint >= 0);
 
-  /* Attach and enable the interrupt handler */
-
-  DEBUGVERIFY(irq_attach(ESP_IRQ_GPIO, gpio_interrupt, NULL));
-  up_enable_irq(ESP_IRQ_GPIO);
+  /* Keep the CPU interrupt disabled until a GPIO client has configured and
+   * enabled a pin interrupt.  At this stage the GPIO status registers and
+   * the second-level NuttX handlers are not ready yet.
+   */
 }
 #endif
 
@@ -405,7 +483,7 @@ void esp_gpioirqenable(int irq, gpio_intrtype_t intrtype)
 
   /* Disable the GPIO interrupt during the configuration. */
 
-  up_disable_irq(ESP_IRQ_GPIO);
+  up_disable_irq(ESP_IRQ_GPIO_INTR0);
 
   /* Enable interrupt for this pin on the current core */
 
@@ -415,7 +493,7 @@ void esp_gpioirqenable(int irq, gpio_intrtype_t intrtype)
 
   /* Configuration done. Re-enable the GPIO interrupt. */
 
-  up_enable_irq(ESP_IRQ_GPIO);
+  up_enable_irq(ESP_IRQ_GPIO_INTR0);
 }
 #endif
 
@@ -448,7 +526,7 @@ void esp_gpioirqdisable(int irq)
 
   /* Disable the GPIO interrupt during the configuration. */
 
-  up_disable_irq(ESP_IRQ_GPIO);
+  up_disable_irq(ESP_IRQ_GPIO_INTR0);
 
   /* Disable the interrupt for this pin */
 
@@ -456,6 +534,22 @@ void esp_gpioirqdisable(int irq)
 
   /* Configuration done. Re-enable the GPIO interrupt. */
 
-  up_enable_irq(ESP_IRQ_GPIO);
+  up_enable_irq(ESP_IRQ_GPIO_INTR0);
+}
+#endif
+
+/****************************************************************************
+ * Name: esp_gpioirqclear
+ ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_GPIO_IRQ
+void esp_gpioirqclear(int irq)
+{
+  int pin;
+
+  DEBUGASSERT(irq >= ESP_FIRST_GPIOIRQ && irq <= ESP_LAST_GPIOIRQ);
+
+  pin = ESP_IRQ2PIN(irq);
+  gpio_hal_clear_intr_status_bit(&g_gpio_hal, pin);
 }
 #endif

@@ -53,6 +53,16 @@
 #  define SYSTIMER_TRIGGER_TYPE ESP_IRQ_TRIGGER_EDGE
 #endif /* SOC_SYSTIMER_INT_LEVEL */
 
+/* ESP32-P4 exposes the systimer interrupt without the legacy EDGE suffix. */
+
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+#  define CHIP_SYSTIMER_SOURCE SYSTIMER_TARGET0_INTR_SOURCE
+#  define CHIP_SYSTIMER_IRQ    ESP_IRQ_SYSTIMER_TARGET0
+#else
+#  define CHIP_SYSTIMER_SOURCE SYSTIMER_TARGET0_EDGE_INTR_SOURCE
+#  define CHIP_SYSTIMER_IRQ    ESP_IRQ_SYSTIMER_TARGET0_EDGE
+#endif
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -399,7 +409,18 @@ void up_timer_initialize(void)
 {
   g_timer_started = false;
 
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+  PERIPH_RCC_ACQUIRE_ATOMIC(PERIPH_SYSTIMER_MODULE, ref_count)
+    {
+      if (ref_count == 0)
+        {
+          systimer_ll_enable_bus_clock(true);
+          systimer_ll_reset_register();
+        }
+    }
+#else
   periph_module_enable(PERIPH_SYSTIMER_MODULE);
+#endif
   systimer_hal_init(&systimer_hal);
   systimer_hal_tick_rate_ops_t ops =
     {
@@ -421,15 +442,13 @@ void up_timer_initialize(void)
                                         true);
   systimer_hal_enable_counter(&systimer_hal, SYSTIMER_COUNTER_OS_TICK);
 
-  esp_setup_irq(SYSTIMER_TARGET0_EDGE_INTR_SOURCE,
+  esp_setup_irq(CHIP_SYSTIMER_SOURCE,
                 ESP_IRQ_PRIORITY_DEFAULT,
-                SYSTIMER_TRIGGER_TYPE);
-
-  /* Attach the timer interrupt. */
-
-  irq_attach(ESP_IRQ_SYSTIMER_TARGET0_EDGE, (xcpt_t)esp_tickless_isr, NULL);
+                SYSTIMER_TRIGGER_TYPE,
+                esp_tickless_isr,
+                NULL);
 
   /* Enable the allocated CPU interrupt. */
 
-  up_enable_irq(ESP_IRQ_SYSTIMER_TARGET0_EDGE);
+  up_enable_irq(CHIP_SYSTIMER_IRQ);
 }

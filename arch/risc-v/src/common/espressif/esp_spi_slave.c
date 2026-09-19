@@ -1140,9 +1140,9 @@ struct spi_slave_ctrlr_s *esp_spislave_ctrlr_initialize(int port)
 
   /* Attach IRQ for CS pin interrupt */
 
-  DEBUGVERIFY(irq_attach(ESP_PIN2IRQ(priv->config->cs_pin),
-                         spislave_cs_interrupt,
-                         priv));
+  DEBUGVERIFY(esp_gpioirqattach(ESP_PIN2IRQ(priv->config->cs_pin),
+                                spislave_cs_interrupt,
+                                priv));
 
   if (priv->cpuint != -ENOMEM)
     {
@@ -1153,22 +1153,13 @@ struct spi_slave_ctrlr_s *esp_spislave_ctrlr_initialize(int port)
 
   priv->cpuint = esp_setup_irq(priv->config->periph,
                                ESP_IRQ_PRIORITY_DEFAULT,
-                               ESP_IRQ_TRIGGER_LEVEL);
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               spislave_periph_interrupt,
+                               priv);
   if (priv->cpuint < 0)
     {
       /* Failed to allocate a CPU interrupt of this type. */
 
-      leave_critical_section(flags);
-
-      return NULL;
-    }
-
-  if (irq_attach(priv->config->irq, spislave_periph_interrupt, priv) != OK)
-    {
-      /* Failed to attach IRQ, so CPU interrupt must be freed. */
-
-      esp_teardown_irq(priv->config->periph, priv->cpuint);
-      priv->cpuint = -ENOMEM;
       leave_critical_section(flags);
 
       return NULL;

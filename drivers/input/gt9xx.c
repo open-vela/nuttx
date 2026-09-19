@@ -34,6 +34,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <assert.h>
 #include <errno.h>
@@ -45,6 +46,7 @@
 #include <nuttx/spinlock.h>
 #include <nuttx/mutex.h>
 #include <nuttx/i2c/i2c_master.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/input/touchscreen.h>
 #include <nuttx/input/gt9xx.h>
 
@@ -90,8 +92,11 @@ struct gt9xx_dev_s
   /* Device State */
 
   mutex_t devlock;  /* Mutex to prevent concurrent reads */
+  sem_t waitsem;    /* Semaphore for waiting readers */
   uint8_t cref;     /* Reference Counter for device */
+  uint8_t nwaiters; /* Number of waiting readers */
   bool int_pending; /* True if a Touch Interrupt is pending processing */
+  bool touching;    /* True if the last reported state was touching */
   uint16_t x;       /* X Coordinate of Last Touch Point */
   uint16_t y;       /* Y Coordinate of Last Touch Point */
   uint8_t flags;    /* Touch Up or Touch Down for Last Touch Point */
@@ -239,53 +244,35 @@ static int gt9xx_i2c_write(FAR struct gt9xx_dev_s *dev,
 {
   int ret;
 
-  /* Send the Register Address, MSB first */
+  /* GT911 accepts the register address followed by the value in one
+   * ordinary write transaction.  Keep this as one message: the ESP32-P4
+   * I2C controller's no-START continuation path is not required here and
+   * can leave the transfer waiting for an interrupt when used for the
+   * status-clear byte.
+   */
 
-  uint8_t regbuf[2] =
+  uint8_t buf[3] =
   {
     reg >> 8,   /* First Byte: MSB */
-    reg & 0xff  /* Second Byte: LSB */
+    reg & 0xff, /* Second Byte: LSB */
+    val         /* Third Byte: Value */
   };
 
-  /* Send the Register Value */
-
-  uint8_t buf[1] =
+  struct i2c_msg_s msg =
   {
-    val  /* Value to be written */
+    .frequency = CONFIG_INPUT_GT9XX_I2C_FREQUENCY,
+    .addr      = dev->addr,
+    .flags     = 0,
+    .buffer    = buf,
+    .length    = sizeof(buf)
   };
-
-  /* Compose the I2C Messages */
-
-  struct i2c_msg_s msgv[2] =
-  {
-    {
-      /* Send the I2C Register Address */
-
-      .frequency = CONFIG_INPUT_GT9XX_I2C_FREQUENCY,
-      .addr      = dev->addr,
-      .flags     = 0,
-      .buffer    = regbuf,
-      .length    = sizeof(regbuf)
-    },
-    {
-      /* Send the I2C Register Value */
-
-      .frequency = CONFIG_INPUT_GT9XX_I2C_FREQUENCY,
-      .addr      = dev->addr,
-      .flags     = I2C_M_NOSTART,
-      .buffer    = buf,
-      .length    = sizeof(buf)
-    }
-  };
-
-  const int msgv_len = sizeof(msgv) / sizeof(msgv[0]);
 
   iinfo("reg=0x%x, val=%d\n", reg, val);
   DEBUGASSERT(dev && dev->i2c);
 
   /* Execute the I2C Transfer */
 
-  ret = I2C_TRANSFER(dev->i2c, msgv, msgv_len);
+  ret = I2C_TRANSFER(dev->i2c, &msg, 1);
   if (ret < 0)
     {
       ierr("I2C Write failed: %d\n", ret);
@@ -432,15 +419,32 @@ static int gt9xx_read_touch_data(FAR struct gt9xx_dev_s *dev,
       x = touch[0] + (touch[1] << 8);
       y = touch[2] + (touch[3] << 8);
 
-      /* Return the Touch Coordinates as Touch Down */
+      /* Return a new contact or movement event. */
 
-      flags = TOUCH_DOWN | TOUCH_ID_VALID | TOUCH_POS_VALID;
+      flags = (dev->touching ? TOUCH_MOVE : TOUCH_DOWN) |
+              TOUCH_ID_VALID | TOUCH_POS_VALID;
       sample->npoints = 1;
       sample->point[0].id = 0;
       sample->point[0].x = x;
       sample->point[0].y = y;
       sample->point[0].flags = flags;
-      iinfo("touch down x=%d, y=%d\n", x, y);
+      dev->touching = true;
+      dev->x = x;
+      dev->y = y;
+      iinfo("touch x=%d, y=%d flags=%02x\n", x, y, flags);
+    }
+  else if (dev->touching && touched_points == 0)
+    {
+      /* A ready sample with no points is the actual release event. */
+
+      sample->npoints = 1;
+      sample->point[0].id = 0;
+      sample->point[0].x = dev->x;
+      sample->point[0].y = dev->y;
+      sample->point[0].flags = TOUCH_UP | TOUCH_ID_VALID |
+                               TOUCH_POS_VALID;
+      dev->touching = false;
+      iinfo("touch up x=%d, y=%d\n", dev->x, dev->y);
     }
 
   /* Set the Touch Panel Status to 0 */
@@ -506,83 +510,83 @@ static ssize_t gt9xx_read(FAR struct file *filep, FAR char *buffer,
       return ret;
     }
 
-  ret = -EINVAL;
+  /* Wait until the GPIO interrupt reports a new GT911 sample. */
 
-  /* If waiting for Touch Up, return the Last Touch Point as Touch Up */
-
-  if (priv->flags & TOUCH_DOWN)
+wait_for_event:
+  for (;;)
     {
-      /* Begin Critical Section */
+      bool wait = false;
 
       flags = enter_critical_section();
+      if (!priv->int_pending)
+        {
+          if ((filep->f_oflags & O_NONBLOCK) != 0)
+            {
+              leave_critical_section(flags);
+              ret = -EAGAIN;
+              goto out_unlock;
+            }
 
-      /* Mark the Last Touch Point as Touch Up */
-
-      priv->flags = TOUCH_UP | TOUCH_ID_VALID | TOUCH_POS_VALID;
-
-      /* End Critical Section */
-
+          priv->nwaiters++;
+          wait = true;
+        }
       leave_critical_section(flags);
 
-      /* Return the Last Touch Point, changed to Touch Up */
-
-      memset(&sample, 0, sizeof(sample));
-      sample.npoints = 1;
-      sample.point[0].id = 0;
-      sample.point[0].x = priv->x;
-      sample.point[0].y = priv->y;
-      sample.point[0].flags = priv->flags;
-      memcpy(buffer, &sample, sizeof(sample));
-      ret = OK;
-      iinfo("touch up x=%d, y=%d\n", priv->x, priv->y);
-    }
-  else
-    {
-      /* Otherwise read the Touch Point over I2C */
-
-      ret = gt9xx_read_touch_data(priv, &sample);
-
-      /* Skip duplicates */
-
-      if (sample.npoints >= 1 &&
-          priv->x == sample.point[0].x &&
-          priv->y == sample.point[0].y)
+      if (!wait)
         {
-          memset(&sample, 0, sizeof(sample));
-          sample.npoints = 0;
-          iinfo("skip duplicate x=%d, y=%d\n", priv->x, priv->y);
+          break;
         }
 
-      /* Return the Touch Point */
-
-      memcpy(buffer, &sample, sizeof(sample));
-
-      /* Begin Critical Section */
+      nxmutex_unlock(&priv->devlock);
+      ret = nxsem_wait(&priv->waitsem);
+      nxmutex_lock(&priv->devlock);
 
       flags = enter_critical_section();
+      priv->nwaiters--;
+      leave_critical_section(flags);
 
-      /* Clear the Interrupt Pending Flag */
-
-      priv->int_pending = false;
-
-      /* Remember the Last Touch Point */
-
-      if (sample.npoints >= 1)
+      if (ret < 0)
         {
-          priv->x = sample.point[0].x;
-          priv->y = sample.point[0].y;
-          priv->flags = sample.point[0].flags;
+          goto out_unlock;
         }
+    }
 
-      /* End Critical Section */
+  flags = enter_critical_section();
+  priv->int_pending = false;
+  leave_critical_section(flags);
 
+  /* Read the sample associated with this interrupt over I2C. */
+
+  ret = gt9xx_read_touch_data(priv, &sample);
+  if (ret < 0)
+    {
+      goto out_unlock;
+    }
+
+  /* Ignore an interrupt for which the controller has no usable sample.
+   * A release is converted to a one-point TOUCH_UP sample above. */
+
+  if (sample.npoints == 0)
+    {
+      goto wait_for_event;
+    }
+
+  memcpy(buffer, &sample, sizeof(sample));
+
+  if (sample.npoints >= 1)
+    {
+      flags = enter_critical_section();
+      priv->x = sample.point[0].x;
+      priv->y = sample.point[0].y;
+      priv->flags = sample.point[0].flags;
       leave_critical_section(flags);
     }
 
-  /* End Mutex: Unlock to allow next read */
+  ret = outlen;
 
+out_unlock:
   nxmutex_unlock(&priv->devlock);
-  return (ret < 0) ? ret : outlen;
+  return ret;
 }
 
 /****************************************************************************
@@ -654,6 +658,23 @@ static int gt9xx_open(FAR struct file *filep)
           goto out_lock;
         }
 
+      /* Discard any stale sample left before this open and clear the
+       * controller status before enabling the first interrupt. */
+
+      ret = gt9xx_set_status(priv, 0);
+      if (ret < 0)
+        {
+          priv->board->set_power(priv->board, false);
+          goto out_lock;
+        }
+
+      priv->touching = false;
+      priv->flags = 0;
+      priv->x = 0;
+      priv->y = 0;
+      priv->int_pending = false;
+      nxsem_reset(&priv->waitsem, 0);
+
       /* Enable Touch Panel Interrupts */
 
       DEBUGASSERT(priv->board->irq_enable);
@@ -724,6 +745,13 @@ static int gt9xx_close(FAR struct file *filep)
 
       DEBUGASSERT(priv->board->set_power);
       priv->board->set_power(priv->board, false);
+
+      priv->touching = false;
+      priv->flags = 0;
+      priv->x = 0;
+      priv->y = 0;
+      priv->int_pending = false;
+      nxsem_reset(&priv->waitsem, 0);
     }
 
   /* Set the Reference Count */
@@ -872,6 +900,11 @@ static int gt9xx_isr_handler(int irq, FAR void *context, FAR void *arg)
 
   priv->int_pending = true;
 
+  if (priv->nwaiters > 0)
+    {
+      nxsem_post(&priv->waitsem);
+    }
+
   /* End Critical Section */
 
   leave_critical_section(flags);
@@ -930,6 +963,7 @@ int gt9xx_register(FAR const char *devpath,
   priv->i2c = i2c_dev;
   priv->board = board_config;
   nxmutex_init(&priv->devlock);
+  nxsem_init(&priv->waitsem, 0, 0);
 
   /* Register the Touch Input Driver */
 
@@ -937,6 +971,7 @@ int gt9xx_register(FAR const char *devpath,
   if (ret < 0)
     {
       nxmutex_destroy(&priv->devlock);
+      nxsem_destroy(&priv->waitsem);
       kmm_free(priv);
       ierr("GT9XX Registration failed: %d\n", ret);
       return ret;

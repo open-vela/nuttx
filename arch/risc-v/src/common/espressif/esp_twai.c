@@ -312,24 +312,14 @@ static int esp_twai_setup(struct can_dev_s *dev)
 
   priv->cpuint = esp_setup_irq(priv->periph,
                                ESP_IRQ_PRIORITY_DEFAULT,
-                               ESP_IRQ_TRIGGER_LEVEL);
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               esp_twai_interrupt,
+                               dev);
   if (priv->cpuint < 0)
     {
       /* Failed to allocate a CPU interrupt of this type. */
 
       ret = priv->cpuint;
-      leave_critical_section(flags);
-
-      return ret;
-    }
-
-  ret = irq_attach(priv->irq, esp_twai_interrupt, dev);
-  if (ret != OK)
-    {
-      /* Failed to attach IRQ, so CPU interrupt must be freed. */
-
-      esp_teardown_irq(priv->periph, priv->cpuint);
-      priv->cpuint = -ENOMEM;
       leave_critical_section(flags);
 
       return ret;

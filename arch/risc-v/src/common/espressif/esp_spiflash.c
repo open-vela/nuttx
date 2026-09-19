@@ -40,12 +40,17 @@
 #include <nuttx/spinlock.h>
 #include "esp_spiflash.h"
 #include "esp_attr.h"
-#include "memspi_host_driver.h"
-#include "spi_flash_defs.h"
+#include "esp_private/memspi_host_driver.h"
+#include "esp_flash_chips/spi_flash_defs.h"
 #include "hal/spimem_flash_ll.h"
 #include "hal/spi_flash_ll.h"
 #include "esp_rom_spiflash.h"
 #include "esp_irq.h"
+#include "esp_intr_alloc.h"
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+#  include "esp_private/esp_cache_private.h"
+#  include "esp_flash.h"
+#endif
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -179,7 +184,9 @@ static volatile bool s_sched_suspended[CONFIG_ESPRESSIF_NUM_CPUS];
 
 IRAM_ATTR void spiflash_start(void)
 {
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   extern uint32_t cache_suspend_icache(void);
+#endif
   int cpu;
   irqstate_t flags;
   uint32_t regval;
@@ -191,7 +198,11 @@ IRAM_ATTR void spiflash_start(void)
 
   esp_intr_noniram_disable();
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  esp_cache_suspend_ext_mem_cache();
+#else
   s_flash_op_cache_state[cpu] = cache_suspend_icache() << 16;
+#endif
 
   leave_critical_section(flags);
 }
@@ -212,8 +223,10 @@ IRAM_ATTR void spiflash_start(void)
 
 IRAM_ATTR void spiflash_end(void)
 {
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   extern void cache_resume_icache(uint32_t);
   extern void cache_invalidate_icache_all(void);
+#endif
 
   int cpu;
   irqstate_t flags;
@@ -222,8 +235,12 @@ IRAM_ATTR void spiflash_end(void)
 
   cpu = this_cpu();
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  esp_cache_resume_ext_mem_cache();
+#else
   cache_invalidate_icache_all();
   cache_resume_icache(s_flash_op_cache_state[cpu] >> 16);
+#endif
 
   esp_intr_noniram_enable();
   s_sched_suspended[cpu] = false;
@@ -315,7 +332,7 @@ static IRAM_ATTR void esp_spi_trans(uint32_t command,
 
   /* Start transmision */
 
-  spi_flash_ll_user_start(dev);
+  spi_flash_ll_user_start(dev, false);
 
   /* Wait until transmission is done */
 
@@ -592,6 +609,41 @@ IRAM_ATTR int spi_flash_write(uint32_t dest_addr,
   return ret;
 }
 #endif /* CONFIG_ESPRESSIF_SPI_FLASH_USE_ROM_CODE */
+
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+
+/****************************************************************************
+ * Name: esp_spiflash_read
+ ****************************************************************************/
+
+int esp_spiflash_read(uint32_t address, void *buffer, uint32_t length)
+{
+  return esp_flash_read(NULL, buffer, address, length) == ESP_OK ?
+         OK : ERROR;
+}
+
+/****************************************************************************
+ * Name: esp_spiflash_erase
+ ****************************************************************************/
+
+int esp_spiflash_erase(uint32_t start, uint32_t length)
+{
+  esp_err_t err = esp_flash_erase_region(NULL, start, length);
+  return err == ESP_OK ? OK : ERROR;
+}
+
+/****************************************************************************
+ * Name: esp_spiflash_write
+ ****************************************************************************/
+
+int esp_spiflash_write(uint32_t address, const void *buffer,
+                       uint32_t length)
+{
+  return esp_flash_write(NULL, buffer, address, length) == ESP_OK ?
+         OK : ERROR;
+}
+
+#endif /* CONFIG_ARCH_CHIP_ESP32P4 */
 
 /****************************************************************************
  * Name: esp_spiflash_init

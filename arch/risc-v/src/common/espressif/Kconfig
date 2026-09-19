@@ -3,10 +3,11 @@
 # see the file kconfig-language.txt in the NuttX tools repository.
 #
 
-if ARCH_CHIP_ESPRESSIF || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32C3_GENERIC
+if ARCH_CHIP_ESPRESSIF || ARCH_CHIP_ESP32C6 || ARCH_CHIP_ESP32H2 || ARCH_CHIP_ESP32C3_GENERIC || ARCH_CHIP_ESP32P4
 
 choice ESPRESSIF_CHIP_SERIES
 	prompt "Chip Series"
+	default ESPRESSIF_ESP32P4 if ARCH_CHIP_ESP32P4
 	default ESPRESSIF_ESP32C3
 
 config ESPRESSIF_ESP32C3
@@ -21,6 +22,12 @@ config ESPRESSIF_ESP32C6
 	---help---
 		Espressif ESP32-C6 (RV32IMAC).
 
+config ESPRESSIF_ESP32P4
+	bool "ESP32-P4"
+	select ARCH_HAVE_I2CRESET
+	---help---
+		Espressif ESP32-P4 (RV32IMAC).
+
 config ESPRESSIF_ESP32H2
 	bool "ESP32-H2"
 	select ARCH_HAVE_I2CRESET
@@ -34,11 +41,20 @@ config ESPRESSIF_CHIP_SERIES
 	default "esp32c3" if ESPRESSIF_ESP32C3
 	default "esp32c6" if ESPRESSIF_ESP32C6
 	default "esp32h2" if ESPRESSIF_ESP32H2
+	default "esp32p4" if ESPRESSIF_ESP32P4
 	default "unknown"
+
+config ESPRESSIF_LOG_LEVEL
+	int "Default Espressif log level"
+	default 3
+	range 0 5
+	---help---
+		Set the default Espressif HAL log level: 0=None, 1=Error,
+		2=Warn, 3=Info, 4=Debug, and 5=Verbose.
 
 choice ESPRESSIF_FLASH
 	prompt "Flash Size"
-	default ESPRESSIF_FLASH_4M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32H2
+	default ESPRESSIF_FLASH_4M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32H2 || ESPRESSIF_ESP32P4
 
 config ESPRESSIF_FLASH_2M
 	bool "2 MB"
@@ -60,14 +76,54 @@ config ESPRESSIF_FLASH_DETECT
 	---help---
 		Auto detect flash size when flashing.
 
+menu "ESP32-P4 PSRAM"
+	depends on ESPRESSIF_ESP32P4
+
+config ESPRESSIF_SPIRAM
+	bool "External PSRAM"
+	default n
+	---help---
+		Enable the external octal PSRAM connected to the ESP32-P4.
+
+config ESPRESSIF_SPIRAM_BOOT_INIT
+	bool "Initialize PSRAM during startup"
+	depends on ESPRESSIF_SPIRAM
+	default y
+	---help---
+		Initialize and map PSRAM before the normal system heap is brought up.
+
+config ESPRESSIF_SPIRAM_MEMTEST
+	bool "Run PSRAM memory test during startup"
+	depends on ESPRESSIF_SPIRAM_BOOT_INIT
+	default y
+
+config ESPRESSIF_SPIRAM_USER_HEAP
+	bool "Use PSRAM for malloc"
+	depends on ESPRESSIF_SPIRAM
+	default n
+	---help---
+		Add PSRAM to the normal malloc allocator after startup initialization.
+
+config ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+	bool "Place BSS in external PSRAM"
+	depends on ESPRESSIF_SPIRAM
+	default n
+	---help---
+		Allow selected external-BSS sections to be mapped into PSRAM.
+
+endmenu # ESP32-P4 PSRAM
+
 config ESPRESSIF_NUM_CPUS
 	int
 	default 1 if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32H2
+	default 2 if ESPRESSIF_ESP32P4
 
 choice ESPRESSIF_CPU_FREQ
 	prompt "CPU frequency"
 	default ESPRESSIF_CPU_FREQ_160 if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
 	default ESPRESSIF_CPU_FREQ_96 if ESPRESSIF_ESP32H2
+	default ESPRESSIF_CPU_FREQ_400 if ESPRESSIF_ESP32P4 && !ESP32P4_SELECTS_REV_LESS_V3
+	default ESPRESSIF_CPU_FREQ_360 if ESPRESSIF_ESP32P4 && ESP32P4_SELECTS_REV_LESS_V3
 	---help---
 		CPU frequency to be set on application startup.
 
@@ -107,6 +163,18 @@ config ESPRESSIF_CPU_FREQ_160
 	---help---
 		Set the CPU frequency to 160 MHz.
 
+config ESPRESSIF_CPU_FREQ_360
+	bool "360 MHz"
+	depends on ESPRESSIF_ESP32P4 && ESP32P4_SELECTS_REV_LESS_V3
+	---help---
+		Set the CPU frequency to 360 MHz.
+
+config ESPRESSIF_CPU_FREQ_400
+	bool "400 MHz"
+	depends on ESPRESSIF_ESP32P4 && !ESP32P4_SELECTS_REV_LESS_V3
+	---help---
+		Set the CPU frequency to 400 MHz.
+
 endchoice # ESPRESSIF_CPU_FREQ
 
 config ESPRESSIF_CPU_FREQ_MHZ
@@ -117,6 +185,8 @@ config ESPRESSIF_CPU_FREQ_MHZ
 	default 80 if ESPRESSIF_CPU_FREQ_80
 	default 96 if ESPRESSIF_CPU_FREQ_96
 	default 160 if ESPRESSIF_CPU_FREQ_160
+	default 360 if ESPRESSIF_CPU_FREQ_360
+	default 400 if ESPRESSIF_CPU_FREQ_400
 
 config ESPRESSIF_REGION_PROTECTION
 	bool "Enable region protection"
@@ -388,6 +458,49 @@ config ESPRESSIF_DMA
 	bool "General DMA (GDMA)"
 	default n
 	select ARCH_DMA
+
+config ESPRESSIF_LDO
+	bool "Low-Dropout Regulator (LDO)"
+	default n
+	---help---
+		Enable on-chip LDO channel control.  ESP32-P4 board code uses
+		this to power the MIPI D-PHY supply before DSI initialization.
+
+menuconfig ESPRESSIF_MIPI_DSI
+	bool "MIPI DSI Host"
+	depends on ARCH_CHIP_ESP32P4
+	default n
+	select ESPRESSIF_LDO
+	select DRIVERS_VIDEO
+	select FB_UPDATE
+	select MIPI_DSI
+	---help---
+		Enable the Espressif MIPI-DSI host driver behind NuttX's
+		generic mipi_dsi_host_ops API.  Panel initialization, reset,
+		power sequencing and framebuffer registration remain board or
+		panel responsibilities.
+
+		Board code must power VDD_MIPI_DPHY before calling the host
+		initialization API.
+
+if ESPRESSIF_MIPI_DSI
+
+config ESPRESSIF_MIPI_DSI_BUS
+	int "DSI host bus number"
+	default 0
+	range 0 0
+
+config ESPRESSIF_MIPI_DSI_LANES
+	int "Default number of DSI data lanes"
+	default 2
+	range 1 2
+
+config ESPRESSIF_MIPI_DSI_LANE_BITRATE_MBPS
+	int "Default DSI lane bit rate (Mbps)"
+	default 500
+	range 80 1500
+
+endif # ESPRESSIF_MIPI_DSI
 
 config ESPRESSIF_HR_TIMER
 	bool
@@ -1019,18 +1132,22 @@ config ESPRESSIF_UART0_TXPIN
 	default 21 if ESPRESSIF_ESP32C3
 	default 16 if ESPRESSIF_ESP32C6
 	default 24 if ESPRESSIF_ESP32H2
+	default 37 if ESPRESSIF_ESP32P4
 	range 0 21 if ESPRESSIF_ESP32C3
 	range 0 30 if ESPRESSIF_ESP32C6
 	range 0 27 if ESPRESSIF_ESP32H2
+	range 0 54 if ESPRESSIF_ESP32P4
 
 config ESPRESSIF_UART0_RXPIN
 	int "UART0 RX Pin"
 	default 20 if ESPRESSIF_ESP32C3
 	default 17 if ESPRESSIF_ESP32C6
 	default 23 if ESPRESSIF_ESP32H2
+	default 38 if ESPRESSIF_ESP32P4
 	range 0 21 if ESPRESSIF_ESP32C3
 	range 0 30 if ESPRESSIF_ESP32C6
 	range 0 27 if ESPRESSIF_ESP32H2
+	range 0 54 if ESPRESSIF_ESP32P4
 
 config ESPRESSIF_UART0_RTSPIN
 	int "UART0 RTS Pin"
@@ -1038,9 +1155,11 @@ config ESPRESSIF_UART0_RTSPIN
 	default 16 if ESPRESSIF_ESP32C3
 	default 15 if ESPRESSIF_ESP32C6
 	default 22 if ESPRESSIF_ESP32H2
+	default 35 if ESPRESSIF_ESP32P4
 	range 0 21 if ESPRESSIF_ESP32C3
 	range 0 30 if ESPRESSIF_ESP32C6
 	range 0 27 if ESPRESSIF_ESP32H2
+	range 0 54 if ESPRESSIF_ESP32P4
 
 config ESPRESSIF_UART0_CTSPIN
 	int "UART0 CTS Pin"
@@ -1048,9 +1167,11 @@ config ESPRESSIF_UART0_CTSPIN
 	default 15 if ESPRESSIF_ESP32C3
 	default 14 if ESPRESSIF_ESP32C6
 	default 21 if ESPRESSIF_ESP32H2
+	default 36 if ESPRESSIF_ESP32P4
 	range 0 21 if ESPRESSIF_ESP32C3
 	range 0 30 if ESPRESSIF_ESP32C6
 	range 0 27 if ESPRESSIF_ESP32H2
+	range 0 54 if ESPRESSIF_ESP32P4
 
 endif # ESPRESSIF_UART0
 
@@ -1242,28 +1363,36 @@ config ESPRESSIF_SPI2_SLAVE_BUFSIZE
 
 config ESPRESSIF_SPI2_CSPIN
 	int "SPI2 CS Pin"
+	default 20 if ARCH_CHIP_ESP32P4
 	default 10 if ARCH_CHIP_ESP32C3_GENERIC
 	default 16 if ARCH_CHIP_ESP32C6
 	default 1 if ARCH_CHIP_ESP32H2
-	range 0 21
+	range 0 54 if ARCH_CHIP_ESP32P4
+	range 0 21 if !ARCH_CHIP_ESP32P4
 
 config ESPRESSIF_SPI2_CLKPIN
 	int "SPI2 CLK Pin"
+	default 21 if ARCH_CHIP_ESP32P4
 	default 6 if !ARCH_CHIP_ESP32H2
 	default 4 if ARCH_CHIP_ESP32H2
-	range 0 21
+	range 0 54 if ARCH_CHIP_ESP32P4
+	range 0 21 if !ARCH_CHIP_ESP32P4
 
 config ESPRESSIF_SPI2_MOSIPIN
 	int "SPI2 MOSI Pin"
+	default 4 if ARCH_CHIP_ESP32P4
 	default 7 if !ARCH_CHIP_ESP32H2
 	default 5 if ARCH_CHIP_ESP32H2
-	range 0 21
+	range 0 54 if ARCH_CHIP_ESP32P4
+	range 0 21 if !ARCH_CHIP_ESP32P4
 
 config ESPRESSIF_SPI2_MISOPIN
 	int "SPI2 MISO Pin"
+	default 5 if ARCH_CHIP_ESP32P4
 	default 2 if !ARCH_CHIP_ESP32H2
 	default 0 if ARCH_CHIP_ESP32H2
-	range 0 21
+	range 0 54 if ARCH_CHIP_ESP32P4
+	range 0 21 if !ARCH_CHIP_ESP32P4
 
 endif # ESPRESSIF_SPI2
 
@@ -1388,14 +1517,14 @@ endif # ESPRESSIF_SPIFLASH
 
 choice ESPRESSIF_FLASH_FREQ
 	prompt "SPI Flash frequency"
-	default ESPRESSIF_FLASH_FREQ_80M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	default ESPRESSIF_FLASH_FREQ_80M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
 	default ESPRESSIF_FLASH_FREQ_48M if ESPRESSIF_ESP32H2
 	---help---
 		SPI Flash frequency.
 
 config ESPRESSIF_FLASH_FREQ_80M
 	bool "80 MHz"
-	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6
+	depends on ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32P4
 
 config ESPRESSIF_FLASH_FREQ_48M
 	bool "48 MHz"

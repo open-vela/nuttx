@@ -139,8 +139,12 @@ static int esp_erase(struct mtd_dev_s *dev, off_t startblock,
   ssize_t ret;
   uint32_t offset = startblock * MTD_ERASE_SIZE;
   uint32_t nbytes = nblocks * MTD_ERASE_SIZE;
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   struct esp_mtd_dev_s *priv = (struct esp_mtd_dev_s *)dev;
   irqstate_t flags;
+#else
+  struct esp_mtd_dev_s *priv = (struct esp_mtd_dev_s *)dev;
+#endif
 
   if ((offset > MTD_SIZE(priv)) || ((offset + nbytes) > MTD_SIZE(priv)))
     {
@@ -153,9 +157,13 @@ static int esp_erase(struct mtd_dev_s *dev, off_t startblock,
   finfo("spi_flash_erase_range(0x%x, %d)\n", offset, nbytes);
 #endif
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  ret = esp_spiflash_erase(offset, nbytes);
+#else
   flags = enter_critical_section();
   ret = spi_flash_erase_range(offset, nbytes);
   leave_critical_section(flags);
+#endif
 
   if (ret == OK)
     {
@@ -197,7 +205,9 @@ static ssize_t esp_read(struct mtd_dev_s *dev, off_t offset,
                         size_t nbytes, uint8_t *buffer)
 {
   ssize_t ret;
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   irqstate_t flags;
+#endif
 
 #ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DEBUG
   finfo("%s(%p, 0x%x, %d, %p)\n", __func__, dev, offset, nbytes, buffer);
@@ -205,9 +215,13 @@ static ssize_t esp_read(struct mtd_dev_s *dev, off_t offset,
   finfo("spi_flash_read(0x%x, %p, %d)\n", offset, buffer, nbytes);
 #endif
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  ret = esp_spiflash_read(offset, buffer, nbytes);
+#else
   flags = enter_critical_section();
   ret = spi_flash_read(offset, (uint32_t *)buffer, nbytes);
   leave_critical_section(flags);
+#endif
 
   if (ret == OK)
     {
@@ -244,7 +258,9 @@ static ssize_t esp_bread(struct mtd_dev_s *dev, off_t startblock,
   ssize_t ret;
   uint32_t addr = startblock * MTD_BLK_SIZE;
   uint32_t size = nblocks * MTD_BLK_SIZE;
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   irqstate_t flags;
+#endif
 
 #ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DEBUG
   finfo("%s(%p, 0x%x, %d, %p)\n", __func__, dev, startblock, nblocks,
@@ -253,9 +269,13 @@ static ssize_t esp_bread(struct mtd_dev_s *dev, off_t startblock,
   finfo("spi_flash_read(0x%x, %p, %d)\n", addr, buffer, size);
 #endif
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  ret = esp_spiflash_read(addr, buffer, size);
+#else
   flags = enter_critical_section();
   ret = spi_flash_read(addr, (uint32_t *)buffer, size);
   leave_critical_section(flags);
+#endif
 
   if (ret == OK)
     {
@@ -291,7 +311,9 @@ static ssize_t esp_write(struct mtd_dev_s *dev, off_t offset,
 {
   ssize_t ret;
   struct esp_mtd_dev_s *priv = (struct esp_mtd_dev_s *)dev;
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   irqstate_t flags;
+#endif
 
   ASSERT(buffer);
 
@@ -306,9 +328,13 @@ static ssize_t esp_write(struct mtd_dev_s *dev, off_t offset,
   finfo("spi_flash_write(0x%x, %p, %d)\n", offset, buffer, nbytes);
 #endif
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  ret = esp_spiflash_write(offset, buffer, nbytes);
+#else
   flags = enter_critical_section();
   ret = spi_flash_write(offset, (uint32_t *)buffer, nbytes);
   leave_critical_section(flags);
+#endif
 
   if (ret == OK)
     {
@@ -346,7 +372,9 @@ static ssize_t esp_bwrite(struct mtd_dev_s *dev, off_t startblock,
   ssize_t ret;
   uint32_t addr = startblock * MTD_BLK_SIZE;
   uint32_t size = nblocks * MTD_BLK_SIZE;
+#ifndef CONFIG_ARCH_CHIP_ESP32P4
   irqstate_t flags;
+#endif
 
 #ifdef CONFIG_ESPRESSIF_STORAGE_MTD_DEBUG
   finfo("%s(%p, 0x%x, %d, %p)\n", __func__, dev, startblock,
@@ -355,9 +383,13 @@ static ssize_t esp_bwrite(struct mtd_dev_s *dev, off_t startblock,
   finfo("spi_flash_write(0x%x, %p, %d)\n", addr, buffer, size);
 #endif
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  ret = esp_spiflash_write(addr, buffer, size);
+#else
   flags = enter_critical_section();
   ret = spi_flash_write(addr, (uint32_t *)buffer, size);
   leave_critical_section(flags);
+#endif
 
   if (ret == OK)
     {

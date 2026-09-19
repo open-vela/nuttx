@@ -26,7 +26,9 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/irq.h>
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -270,6 +272,16 @@ void esp_gpioirqinitialize(void);
 #endif
 
 /****************************************************************************
+ * Name: esp_gpioirqattach
+ ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_GPIO_IRQ
+int esp_gpioirqattach(int irq, xcpt_t isr, void *arg);
+#else
+#  define esp_gpioirqattach(irq,isr,arg) (-ENOSYS)
+#endif
+
+/****************************************************************************
  * Name: esp_gpioirqenable
  *
  * Description:
@@ -308,6 +320,16 @@ void esp_gpioirqenable(int irq, gpio_intrtype_t intrtype);
 void esp_gpioirqdisable(int irq);
 #else
 #  define esp_gpioirqdisable(irq)
+#endif
+
+/****************************************************************************
+ * Name: esp_gpioirqclear
+ ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_GPIO_IRQ
+void esp_gpioirqclear(int irq);
+#else
+#  define esp_gpioirqclear(irq)
 #endif
 
 #ifdef __cplusplus

@@ -46,6 +46,9 @@
 #include "esp_rom_sys.h"
 #endif
 #include "hal/wdt_hal.h"
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+#include "hal/timg_ll.h"
+#endif
 #include "soc/rtc.h"
 #include "periph_ctrl.h"
 
@@ -93,6 +96,25 @@
 
 #define IS_XTWDT(dev)    (((struct esp_wdt_lowerhalf_s *)dev)->peripheral == XTAL32K)
 
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+/* ESP32-P4 replaced the legacy peripheral clock API with the RCC API. */
+
+static void esp_wdt_enable_timer_group(int group)
+{
+  shared_periph_module_t module = group == 0 ?
+                                   PERIPH_TIMG0_MODULE : PERIPH_TIMG1_MODULE;
+
+  PERIPH_RCC_ACQUIRE_ATOMIC(module, ref_count)
+    {
+      if (ref_count == 0)
+        {
+          timg_ll_enable_bus_clock(group, true);
+          timg_ll_reset_register(group);
+        }
+    }
+}
+#endif
+
 /* XTWDT clock period in nanoseconds */
 
 #define XTWDT_CLK_PERIOD_NS        (30)
@@ -110,7 +132,8 @@
 #define N             19
 #define Q_TO_FLOAT(x) ((float)x/(float)(1<<N))
 
-#if defined(CONFIG_ARCH_CHIP_ESP32C6) || defined(CONFIG_ARCH_CHIP_ESP32H2)
+#if defined(CONFIG_ARCH_CHIP_ESP32P4) || defined(CONFIG_ARCH_CHIP_ESP32C6) || \
+    defined(CONFIG_ARCH_CHIP_ESP32H2)
 #define RTC_CORE_INTR_SOURCE  LP_WDT_INTR_SOURCE
 #define ESP_IRQ_RTC_CORE      ESP_IRQ_LP_WDT
 #endif
@@ -324,6 +347,13 @@ static int wdt_start(struct watchdog_lowerhalf_s *lower)
           wdt_hal_config_stage(priv->ctx, WDT_STAGE0,
                               timeout,
                               priv->action);
+
+          /* No callback is installed in reset-on-expiration mode.  Keep the
+           * level interrupt disabled so a timeout cannot enter wdt_handler()
+           * with a NULL callback before the hardware reset is asserted.
+           */
+
+          WDT_INTR_ENABLE(priv->peripheral, priv->ctx, false);
         }
     }
   else
@@ -407,14 +437,9 @@ static int wdt_stop(struct watchdog_lowerhalf_s *lower)
 
       wdt_hal_disable(priv->ctx);
 
-      /* In case there is a callback registered, ensure WDT interrupts are
-       * disabled.
-       */
+      /* Ensure WDT interrupts are disabled. */
 
-      if (priv->handler != NULL)
-        {
-          WDT_INTR_ENABLE(priv->peripheral, priv->ctx, false);
-        }
+      WDT_INTR_ENABLE(priv->peripheral, priv->ctx, false);
     }
 #ifdef CONFIG_ESPRESSIF_XTWDT
   else
@@ -889,9 +914,19 @@ int esp_wdt_initialize(const char *devpath, enum esp_wdt_inst_e wdt_id)
       case ESP_WDT_MWDT0:
         {
           lower = &g_esp_mwdt0_lowerhalf;
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+          esp_wdt_enable_timer_group(0);
+#else
           periph_module_enable(PERIPH_TIMG0_MODULE);
+#endif
           wdt_hal_init(lower->ctx, WDT_MWDT0,
                        MWDT_LL_DEFAULT_CLK_PRESCALER, true);
+
+          /* wdt_hal_init() leaves the MWDT write-protected. */
+
+          WDT_WP_DISABLE(lower);
+          wdt_hal_set_flashboot_en(lower->ctx, false);
+          WDT_WP_ENABLE(lower);
 
           break;
         }
@@ -902,9 +937,16 @@ int esp_wdt_initialize(const char *devpath, enum esp_wdt_inst_e wdt_id)
       case ESP_WDT_MWDT1:
         {
           lower = &g_esp_mwdt1_lowerhalf;
+#if defined(CONFIG_ARCH_CHIP_ESP32P4)
+          esp_wdt_enable_timer_group(1);
+#else
           periph_module_enable(PERIPH_TIMG1_MODULE);
+#endif
           wdt_hal_init(lower->ctx, WDT_MWDT1,
                        MWDT_LL_DEFAULT_CLK_PRESCALER, true);
+          WDT_WP_DISABLE(lower);
+          wdt_hal_set_flashboot_en(lower->ctx, false);
+          WDT_WP_ENABLE(lower);
 
           break;
         }
@@ -954,7 +996,14 @@ int esp_wdt_initialize(const char *devpath, enum esp_wdt_inst_e wdt_id)
 
   if (IS_XTWDT(lower) != true)
     {
-      lower->started = wdt_hal_is_enabled(lower->ctx);
+      /* wdt_hal_init() disables the timer and all stages before the
+       * lower-half is registered.  Do not infer the state from the
+       * hardware here: on ESP32-P4 the status bit can still reflect the
+       * reset-time watchdog state and make the first WDIOC_START fail with
+       * -EBUSY.
+       */
+
+      lower->started = false;
     }
 
   /* Register the watchdog driver as /dev/watchdogX. If the registration goes
@@ -976,13 +1025,14 @@ int esp_wdt_initialize(const char *devpath, enum esp_wdt_inst_e wdt_id)
       return -EEXIST;
     }
 
-  esp_setup_irq(lower->periph,
-                ESP_IRQ_PRIORITY_DEFAULT,
-                ESP_IRQ_TRIGGER_LEVEL);
-
-  /* Attach the handler for the timer IRQ */
-
-  irq_attach(lower->irq, (xcpt_t)wdt_handler, lower);
+  if (esp_setup_irq(lower->periph,
+                    ESP_IRQ_PRIORITY_DEFAULT,
+                    ESP_IRQ_TRIGGER_LEVEL,
+                    wdt_handler,
+                    lower) < 0)
+    {
+      return -ENOMEM;
+    }
 
   /* Enable the allocated CPU interrupt */
 

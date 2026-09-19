@@ -61,9 +61,9 @@ else ifeq ($(CONFIG_ESPRESSIF_FLASH_FREQ_20M),y)
 endif
 
 ifeq ($(CONFIG_ESPRESSIF_FLASH_DETECT),y)
-	ESPTOOL_WRITEFLASH_OPTS := -fs detect -fm dio -ff $(FLASH_FREQ)
+	ESPTOOL_WRITEFLASH_OPTS := -fs detect -fm $(FLASH_MODE) -ff $(FLASH_FREQ)
 else
-	ESPTOOL_WRITEFLASH_OPTS := -fs $(FLASH_SIZE) -fm dio -ff $(FLASH_FREQ)
+	ESPTOOL_WRITEFLASH_OPTS := -fs $(FLASH_SIZE) -fm $(FLASH_MODE) -ff $(FLASH_FREQ)
 endif
 
 # Configure the variables according to build environment
@@ -95,7 +95,11 @@ ifeq ($(CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT),y)
 		-H $(CONFIG_ESPRESSIF_APP_MCUBOOT_HEADER_SIZE) --pad-header \
 		-S $(CONFIG_ESPRESSIF_OTA_SLOT_SIZE)
 else ifeq ($(CONFIG_ESPRESSIF_SIMPLE_BOOT),y)
-	APP_OFFSET     := 0x0000
+	ifeq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
+		APP_OFFSET     := 0x2000
+	else
+		APP_OFFSET     := 0x0000
+	endif
 	APP_IMAGE      := nuttx.bin
 	FLASH_APP      := $(APP_OFFSET) $(APP_IMAGE)
 	ESPTOOL_BINDIR := .

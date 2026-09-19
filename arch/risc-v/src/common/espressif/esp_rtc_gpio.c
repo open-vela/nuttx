@@ -37,7 +37,7 @@
 #include "riscv_internal.h"
 #include "esp_irq.h"
 #include "esp_rtc_gpio.h"
-#include "soc/rtc_io_periph.h"
+#include "hal/rtc_io_periph.h"
 #include "hal/rtc_io_hal.h"
 #include "soc/rtc_cntl_periph.h"
 #include "soc/periph_defs.h"
@@ -178,12 +178,13 @@ void esp_rtcioirqinitialize(void)
   /* Setup the RTCIO interrupt. */
 
   g_rtcio_cpuint = esp_setup_irq(ETS_RTC_CORE_INTR_SOURCE,
-                                 1, ESP_IRQ_TRIGGER_LEVEL);
+                                 1, ESP_IRQ_TRIGGER_LEVEL,
+                                 rtcio_interrupt,
+                                 NULL);
   DEBUGASSERT(g_rtcio_cpuint >= 0);
 
-  /* Attach and enable the interrupt handler */
+  /* Enable the interrupt handler */
 
-  DEBUGVERIFY(irq_attach(ESP_IRQ_RTC_CORE, rtcio_interrupt, NULL));
   up_enable_irq(ESP_IRQ_RTC_CORE);
 }
 

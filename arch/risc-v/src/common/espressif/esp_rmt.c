@@ -1077,33 +1077,24 @@ static int rmt_isr_register(int (*fn)(int, void *, void *), void *arg,
                             int intr_alloc_flags)
 {
   int cpuint;
-  int ret;
-  int cpu = this_cpu();
 
   DEBUGASSERT(fn);
   DEBUGASSERT(g_rmtdev_common.rmt_driver_channels == 0);
 
   cpuint = esp_setup_irq(rmt_periph_signals.groups[0].irq,
                          ESP_IRQ_PRIORITY_DEFAULT,
-                         ESP_IRQ_TRIGGER_LEVEL);
+                         ESP_IRQ_TRIGGER_LEVEL,
+                         fn,
+                         arg);
   if (cpuint < 0)
     {
       rmterr("Failed to allocate a CPU interrupt.\n");
       return -ENOMEM;
     }
 
-  ret = irq_attach(ESP_SOURCE2IRQ(rmt_periph_signals.groups[0].irq),
-                   fn, &g_rmtdev_common.hal);
-  if (ret < 0)
-    {
-      rmterr("Couldn't attach IRQ to handler.\n");
-      esp_teardown_irq(rmt_periph_signals.groups[0].irq, cpuint);
-      return ret;
-    }
-
   up_enable_irq(ESP_SOURCE2IRQ(rmt_periph_signals.groups[0].irq));
 
-  return ret;
+  return OK;
 }
 
 /****************************************************************************

@@ -164,7 +164,7 @@ int mipi_dsi_detach(FAR struct mipi_dsi_device *device)
 
 int mipi_dsi_shutdown_peripheral(FAR struct mipi_dsi_device *device)
 {
-  struct mipi_dsi_msg msg;
+  struct mipi_dsi_msg msg = {0};
   uint8_t tx[2] =
   {
     0,
@@ -198,7 +198,7 @@ int mipi_dsi_shutdown_peripheral(FAR struct mipi_dsi_device *device)
 int mipi_dsi_turn_on_peripheral(FAR struct mipi_dsi_device *device)
 {
   int ret;
-  struct mipi_dsi_msg msg;
+  struct mipi_dsi_msg msg = {0};
   uint8_t tx[2] =
   {
     0,
@@ -235,7 +235,7 @@ int mipi_dsi_set_maximum_return_packet_size(
                           FAR struct mipi_dsi_device *device, uint16_t value)
 {
   int ret;
-  struct mipi_dsi_msg msg;
+  struct mipi_dsi_msg msg = {0};
   uint8_t tx[2] =
   {
     value & 0xff,
@@ -275,7 +275,7 @@ int mipi_dsi_compression_mode(FAR struct mipi_dsi_device *device,
   /* Note: Needs updating for non-default PPS or algorithm */
 
   int ret;
-  struct mipi_dsi_msg msg;
+  struct mipi_dsi_msg msg = {0};
   uint8_t tx[2] =
   {
     enable & 0xff,
@@ -313,7 +313,7 @@ int mipi_dsi_generic_write(FAR struct mipi_dsi_device *device,
                            size_t size)
 {
   int ret;
-  struct mipi_dsi_msg msg;
+  struct mipi_dsi_msg msg = {0};
 
   msg.channel = device->channel;
   msg.tx_buf = payload;
@@ -370,7 +370,7 @@ ssize_t mipi_dsi_generic_read(FAR struct mipi_dsi_device *device,
                               FAR void *data,
                               size_t size)
 {
-  struct mipi_dsi_msg msg;
+  struct mipi_dsi_msg msg = {0};
 
   msg.channel = device->channel;
   msg.tx_len = num_params;
@@ -420,7 +420,7 @@ ssize_t mipi_dsi_dcs_write_buffer(FAR struct mipi_dsi_device *device,
                                   FAR const void *data,
                                   size_t len)
 {
-  struct mipi_dsi_msg msg;
+  struct mipi_dsi_msg msg = {0};
 
   msg.channel = device->channel;
   msg.tx_buf = data;
@@ -523,7 +523,7 @@ ssize_t mipi_dsi_dcs_read(FAR struct mipi_dsi_device *device,
                           FAR void *data,
                           size_t len)
 {
-  struct mipi_dsi_msg msg;
+  struct mipi_dsi_msg msg = {0};
 
   msg.channel = device->channel;
   msg.type = MIPI_DSI_DCS_READ_0_PARAM;

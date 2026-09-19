@@ -454,15 +454,17 @@ struct oneshot_lowerhalf_s *oneshot_initialize(int chan, uint16_t resolution)
 
   irq = timer_group_periph_signals.groups[GROUP_ID].timer_irq_id[TIMER_ID];
 
-  esp_setup_irq(irq,
-                ESP_IRQ_PRIORITY_DEFAULT,
-                ESP_IRQ_TRIGGER_LEVEL);
+  ret = esp_setup_irq(irq,
+                      ESP_IRQ_PRIORITY_DEFAULT,
+                      ESP_IRQ_TRIGGER_LEVEL,
+                      esp_oneshot_isr,
+                      lower);
+  if (ret < 0)
+    {
+      return NULL;
+    }
 
   oneshot_count_init(&lower->lh, USEC_PER_SEC / resolution);
-
-  /* Attach the handler for the timer IRQ */
-
-  irq_attach(ESP_SOURCE2IRQ(irq), (xcpt_t)esp_oneshot_isr, lower);
 
   /* Enable the allocated CPU interrupt */
 

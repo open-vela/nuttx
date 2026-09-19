@@ -94,6 +94,14 @@ ifeq ($(CONFIG_ESP_RMT),y)
 	endif
 endif
 
+ifeq ($(CONFIG_ESPRESSIF_LDO),y)
+	CHIP_CSRCS += esp_ldo.c
+endif
+
+ifeq ($(CONFIG_ESPRESSIF_MIPI_DSI),y)
+	CHIP_CSRCS += esp_mipi_dsi.c
+endif
+
 ifeq ($(CONFIG_ESPRESSIF_TEMP),y)
 	CHIP_CSRCS += esp_temperature_sensor.c
 endif
@@ -188,7 +196,9 @@ chip/$(ESP_HAL_3RDPARTY_REPO):
 ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms: ${ESP_HAL_3RDPARTY_VERSION}"
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) checkout --quiet $(ESP_HAL_3RDPARTY_VERSION)
+	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) restore --quiet --source=$(ESP_HAL_3RDPARTY_VERSION) --worktree .
 endif
+	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) apply $(TOPDIR)/patches/components/esp-hal-3rdparty/*.patch
 ifeq ($(CONFIG_ESP_WIRELESS),y)
 ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms: initializing submodules..."

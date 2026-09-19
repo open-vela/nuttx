@@ -38,7 +38,7 @@ function mount_unionfs()
 function build_board()
 {
   echo -e "Build command line:"
-  echo -e "  ${TOOLSDIR}/configure.sh -e $1"
+  echo -e "  ${TOOLSDIR}/configure.sh -e -S $1"
   echo -e "  make -C ${NUTTXDIR} EXTRAFLAGS="$EXTRA_FLAGS" ${@:2}"
   echo -e "  make -C ${NUTTXDIR} savedefconfig"
 
@@ -57,9 +57,19 @@ function build_board()
   fi
   export PATH=${ROOTDIR}/prebuilts/kconfig-frontends/bin:$PATH
 
-  if ! ${TOOLSDIR}/configure.sh -e $1; then
+  if ! ${TOOLSDIR}/configure.sh -e -S $1; then
     echo "Error: ############# config ${1} fail ##############"
     exit 1
+  fi
+
+  # The minimal L0 and the GPIO-only L1 configurations have no
+  # board_app_initialize() implementation.  Keep boardctl disabled for
+  # these configurations until the board-control API is implemented.
+  if [[ "$1" == */configs/l0 || "$1" == */configs/l1_gpio || \
+        "$1" == */configs/l1_pwm || "$1" == */configs/l2_psram || \
+        "$1" == */configs/l2_kernel_tests ]]; then
+    kconfig-tweak --file ${NUTTXDIR}/.config --disable CONFIG_BOARDCTL \
+      --disable CONFIG_BOARDCTL_MKRD
   fi
 
   if [[ ${CUSTOM_COMPILER} == "tasking" ]]; then
@@ -280,4 +290,3 @@ if [ -z "$CMAKE_BUILD" ]; then
 else
   build_board_cmake ${board_config} $*
 fi
-
