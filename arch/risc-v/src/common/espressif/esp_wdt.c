@@ -110,7 +110,8 @@
 #define N             19
 #define Q_TO_FLOAT(x) ((float)x/(float)(1<<N))
 
-#if defined(CONFIG_ARCH_CHIP_ESP32C6) || defined(CONFIG_ARCH_CHIP_ESP32H2)
+#if defined(CONFIG_ARCH_CHIP_ESP32P4) || defined(CONFIG_ARCH_CHIP_ESP32C6) || \
+    defined(CONFIG_ARCH_CHIP_ESP32H2)
 #define RTC_CORE_INTR_SOURCE  LP_WDT_INTR_SOURCE
 #define ESP_IRQ_RTC_CORE      ESP_IRQ_LP_WDT
 #endif
@@ -892,6 +893,7 @@ int esp_wdt_initialize(const char *devpath, enum esp_wdt_inst_e wdt_id)
           periph_module_enable(PERIPH_TIMG0_MODULE);
           wdt_hal_init(lower->ctx, WDT_MWDT0,
                        MWDT_LL_DEFAULT_CLK_PRESCALER, true);
+          wdt_hal_set_flashboot_en(lower->ctx, false);
 
           break;
         }
@@ -905,6 +907,7 @@ int esp_wdt_initialize(const char *devpath, enum esp_wdt_inst_e wdt_id)
           periph_module_enable(PERIPH_TIMG1_MODULE);
           wdt_hal_init(lower->ctx, WDT_MWDT1,
                        MWDT_LL_DEFAULT_CLK_PRESCALER, true);
+          wdt_hal_set_flashboot_en(lower->ctx, false);
 
           break;
         }
@@ -954,7 +957,14 @@ int esp_wdt_initialize(const char *devpath, enum esp_wdt_inst_e wdt_id)
 
   if (IS_XTWDT(lower) != true)
     {
-      lower->started = wdt_hal_is_enabled(lower->ctx);
+      /* wdt_hal_init() disables the timer and all stages before the
+       * lower-half is registered.  Do not infer the state from the
+       * hardware here: on ESP32-P4 the status bit can still reflect the
+       * reset-time watchdog state and make the first WDIOC_START fail with
+       * -EBUSY.
+       */
+
+      lower->started = false;
     }
 
   /* Register the watchdog driver as /dev/watchdogX. If the registration goes
