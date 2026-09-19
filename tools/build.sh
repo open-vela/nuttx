@@ -126,7 +126,11 @@ function build_board_cmake()
   GHS_OPTS_STRING="CONFIG_ARM_TOOLCHAIN_GHS=y"
   TASKING_OPTS_STRING="CONFIG_TRICORE_TOOLCHAIN_TASKING=y"
   defconfig_path=$1/defconfig
-  valid_defconfig_path=$(echo ${defconfig_path} | sed 's/^.\{3\}//')
+  if [[ ${defconfig_path} =~ ^/ ]]; then
+    valid_defconfig_path=$(echo ${defconfig_path} | sed 's/^.\{3\}//')
+  else
+    valid_defconfig_path=${defconfig_path}
+  fi
   if grep -qE "^(${GHS_OPTS_STRING}|${TASKING_OPTS_STRING})$" "${valid_defconfig_path}"; then
     echo "EXTRA_FLAGS are required to update the when using the GHS toolchain."
     EXTRA_FLAGS=$(echo "$EXTRA_FLAGS" | sed 's/-Wno-cpp//' | xargs)
@@ -140,6 +144,9 @@ function build_board_cmake()
   for arg in "${@:2}"
   do
     if [[ $arg == *config ]]; then
+      if [ ! -d "${CMAKE_BINARY_DIR}" ]; then
+        _do_cmake_generator
+      fi
       if ! m $arg; then
         echo "Error: #############  m $arg fail ##############"
         exit 2

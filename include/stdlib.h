@@ -87,7 +87,13 @@
  * Public Type Definitions
  ****************************************************************************/
 
-/* Structure type returned by the div() function. */
+/* Structure type returned by the div() function.
+ * NOTE: In C++ the toolchain C library (newlib) already provides div_t etc.,
+ * and libstdc++'s <cstdlib> does include_next to the C stdlib, so defining
+ * them here would conflict. Skip them in C++ mode (TFLM/GCC13 build fix).
+ */
+
+#if !defined(__cplusplus)
 
 struct div_s
 {
@@ -116,6 +122,8 @@ struct lldiv_s
 };
 
 typedef struct lldiv_s lldiv_t;
+
+#endif /* !defined(__cplusplus) */
 
 /****************************************************************************
  * Public Function Prototypes
@@ -160,7 +168,11 @@ uint32_t  arc4random(void);
 FAR char **get_environ_ptr(void);
 
 FAR char *getenv(FAR const char *);
+
+/* putenv is provided by the toolchain C library in C++ mode */
+#if !defined(__cplusplus)
 int       putenv(FAR const char *);
+#endif
 
 int       clearenv(void);
 
@@ -266,11 +278,13 @@ long int  labs(long int);
 long long int llabs(long long int);
 #endif
 
+#if !defined(__cplusplus)
 div_t     div(int, int);
 ldiv_t    ldiv(long, long);
 #ifdef CONFIG_HAVE_LONG_LONG
 lldiv_t   lldiv(long long, long long);
 #endif
+#endif /* !defined(__cplusplus) */
 
 /* Temporary files */
 
