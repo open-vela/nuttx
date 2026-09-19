@@ -27,14 +27,25 @@
 #include <nuttx/config.h>
 
 #include <debug.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <syslog.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <nuttx/fs/fs.h>
+
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI
+#  include <nuttx/video/mipi_dsi.h>
+#  include <nuttx/kmalloc.h>
+#  include <nuttx/timers/pwm.h>
+#  ifdef CONFIG_VIDEO_FB
+#    include <nuttx/video/fb.h>
+#  endif
+#endif
 
 #include "esp_board_ledc.h"
 #include "esp_board_spiflash.h"
@@ -59,7 +70,7 @@
 #  include "espressif/esp_rtc.h"
 #endif
 
-#ifdef CONFIG_DEV_GPIO
+#if defined(CONFIG_DEV_GPIO) || defined(CONFIG_ESPRESSIF_MIPI_DSI)
 #  include "espressif/esp_gpio.h"
 #endif
 
@@ -113,6 +124,11 @@
 #  include "espressif/esp_pm.h"
 #endif
 
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI
+#  include "espressif/esp_ldo.h"
+#  include "espressif/esp_mipi_dsi.h"
+#endif
+
 #ifdef CONFIG_SYSTEM_NXDIAG_ESPRESSIF_CHIP_WO_TOOL
 #  include "espressif/esp_nxdiag.h"
 #endif
@@ -140,6 +156,400 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI
+#  define BOARD_MIPI_DPHY_LDO_CHANNEL 3
+#  define BOARD_MIPI_DPHY_LDO_VOLTAGE_MV 2500
+#  define BOARD_LCD_HRES 1024
+#  define BOARD_LCD_VRES 600
+#  define BOARD_LCD_BPP 16
+#  define BOARD_LCD_FB_SIZE \
+    ((size_t)BOARD_LCD_HRES * BOARD_LCD_VRES * BOARD_LCD_BPP / 8)
+#endif
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI
+static struct esp_ldo_config_t g_mipi_dphy_ldo =
+{
+  .chan_id = BOARD_MIPI_DPHY_LDO_CHANNEL,
+  .voltage_mv = BOARD_MIPI_DPHY_LDO_VOLTAGE_MV,
+  .handler = NULL,
+};
+
+static FAR struct mipi_dsi_device *g_lcd_dsi_device;
+static FAR uint16_t *g_lcd_framebuffer;
+#ifdef CONFIG_ESPRESSIF_LEDC
+static int g_lcd_backlight_fd = -1;
+#endif
+#ifdef CONFIG_VIDEO_FB
+static struct fb_videoinfo_s g_lcd_fb_videoinfo =
+{
+  .fmt = FB_FMT_RGB16_565,
+  .xres = BOARD_LCD_HRES,
+  .yres = BOARD_LCD_VRES,
+  .nplanes = 1,
+};
+
+static struct fb_planeinfo_s g_lcd_fb_planeinfo;
+#endif
+#endif
+
+/****************************************************************************
+ * Private Functions
+ ****************************************************************************/
+
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI
+static int board_mipi_panel_write(uint8_t command, uint8_t value)
+{
+  ssize_t ret;
+
+  ret = mipi_dsi_dcs_write(g_lcd_dsi_device, command, &value, 1);
+  if (ret < 0)
+    {
+      return (int)ret;
+    }
+
+  return ret == 2 ? OK : -EIO;
+}
+
+static int board_mipi_panel_initialize(void)
+{
+  FAR struct mipi_dsi_host *host;
+  int ret;
+
+  host = esp_mipi_dsi_host_get();
+  if (host == NULL)
+    {
+      return -ENODEV;
+    }
+
+  /* GPIO27 is the active-low LCD reset line on the Function-EV LCD
+   * subboard.  Keep the panel in reset while the DSI host settles.
+   */
+
+  esp_configgpio(27, OUTPUT_FUNCTION_2);
+  esp_gpiowrite(27, false);
+  usleep(10000);
+  esp_gpiowrite(27, true);
+  usleep(20000);
+
+  g_lcd_dsi_device = mipi_dsi_device_register(host, "ek79007ad", 0);
+  if (g_lcd_dsi_device == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  g_lcd_dsi_device->lanes = 2;
+  g_lcd_dsi_device->format = MIPI_DSI_FMT_RGB565;
+  g_lcd_dsi_device->mode_flags = MIPI_DSI_MODE_LPM;
+  g_lcd_dsi_device->hs_rate = 500000000;
+  g_lcd_dsi_device->lp_rate = 10000000;
+
+  ret = mipi_dsi_attach(g_lcd_dsi_device);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  /* EK79007AD datasheet control registers:
+   *   B2[4] = 1 selects the physical 2-lane interface;
+   *   B1[3:2] = 00 selects 1024 x 600;
+   *   B3 = 00 keeps the default gate/frame setting;
+   *   B0[7] = 1 enables the panel charge pump/VCOM block.
+   */
+
+  ret = board_mipi_panel_write(0xb2, 0x10);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = board_mipi_panel_write(0xb1, 0x00);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = board_mipi_panel_write(0xb3, 0x00);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = board_mipi_panel_write(0xb0, 0x80);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  ret = mipi_dsi_dcs_exit_sleep_mode(g_lcd_dsi_device);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  usleep(120000);
+
+  ret = mipi_dsi_dcs_set_display_on(g_lcd_dsi_device);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  usleep(20000);
+  return OK;
+}
+
+static void board_mipi_fill_framebuffer(void)
+{
+  int y;
+  int x;
+
+  for (y = 0; y < BOARD_LCD_VRES; y++)
+    {
+      for (x = 0; x < BOARD_LCD_HRES; x++)
+        {
+          uint16_t red = (uint16_t)((x * 31) / BOARD_LCD_HRES);
+          uint16_t green = (uint16_t)((y * 63) / BOARD_LCD_VRES);
+          uint16_t blue = (uint16_t)(31 - red);
+
+          g_lcd_framebuffer[y * BOARD_LCD_HRES + x] =
+            (uint16_t)((red << 11) | (green << 5) | blue);
+        }
+    }
+}
+
+#ifdef CONFIG_VIDEO_FB
+static int board_lcd_getvideoinfo(FAR struct fb_vtable_s *vtable,
+                                  FAR struct fb_videoinfo_s *vinfo)
+{
+  if (vtable == NULL || vinfo == NULL)
+    {
+      return -EINVAL;
+    }
+
+  memcpy(vinfo, &g_lcd_fb_videoinfo, sizeof(*vinfo));
+  return OK;
+}
+
+static int board_lcd_getplaneinfo(FAR struct fb_vtable_s *vtable,
+                                  int planeno,
+                                  FAR struct fb_planeinfo_s *pinfo)
+{
+  if (vtable == NULL || planeno != 0 || pinfo == NULL ||
+      g_lcd_framebuffer == NULL)
+    {
+      return -EINVAL;
+    }
+
+  memset(&g_lcd_fb_planeinfo, 0, sizeof(g_lcd_fb_planeinfo));
+  g_lcd_fb_planeinfo.fbmem = g_lcd_framebuffer;
+  g_lcd_fb_planeinfo.fblen = BOARD_LCD_FB_SIZE;
+  g_lcd_fb_planeinfo.stride = BOARD_LCD_HRES * BOARD_LCD_BPP / 8;
+  g_lcd_fb_planeinfo.display = 0;
+  g_lcd_fb_planeinfo.bpp = BOARD_LCD_BPP;
+  g_lcd_fb_planeinfo.xres_virtual = BOARD_LCD_HRES;
+  g_lcd_fb_planeinfo.yres_virtual = BOARD_LCD_VRES;
+
+  memcpy(pinfo, &g_lcd_fb_planeinfo, sizeof(*pinfo));
+  return OK;
+}
+
+#ifdef CONFIG_FB_UPDATE
+static int board_lcd_updatearea(FAR struct fb_vtable_s *vtable,
+                                FAR const struct fb_area_s *area)
+{
+  uint8_t *row;
+  size_t row_bytes;
+  int ret;
+
+  if (vtable == NULL || area == NULL || g_lcd_framebuffer == NULL ||
+      area->w == 0 || area->h == 0 ||
+      area->x + area->w > BOARD_LCD_HRES ||
+      area->y + area->h > BOARD_LCD_VRES)
+    {
+      return -EINVAL;
+    }
+
+  row_bytes = (size_t)area->w * BOARD_LCD_BPP / 8;
+  row = (uint8_t *)g_lcd_framebuffer +
+        (size_t)area->y * BOARD_LCD_HRES * BOARD_LCD_BPP / 8 +
+        (size_t)area->x * BOARD_LCD_BPP / 8;
+
+  for (int y = 0; y < area->h; y++)
+    {
+      ret = esp_mipi_dsi_flush_framebuffer(row, row_bytes);
+      if (ret < 0)
+        {
+          return ret;
+        }
+
+      row += BOARD_LCD_HRES * BOARD_LCD_BPP / 8;
+    }
+
+  return OK;
+}
+#endif
+
+static struct fb_vtable_s g_lcd_fb_vtable =
+{
+  .getvideoinfo = board_lcd_getvideoinfo,
+  .getplaneinfo = board_lcd_getplaneinfo,
+#ifdef CONFIG_FB_UPDATE
+  .updatearea = board_lcd_updatearea,
+#endif
+};
+#endif
+
+#ifdef CONFIG_ESPRESSIF_LEDC
+static int board_mipi_backlight_enable(void)
+{
+  struct pwm_info_s info;
+  int fd;
+  int ret;
+
+  if (g_lcd_backlight_fd >= 0)
+    {
+      return OK;
+    }
+
+  fd = open("/dev/pwm0", O_WRONLY);
+  if (fd < 0)
+    {
+      return -errno;
+  }
+
+  memset(&info, 0, sizeof(info));
+  info.frequency = 1000;
+  info.duty = 0xffff;
+  info.cpol = PWM_CPOL_HIGH;
+  info.dcpol = PWM_CPOL_LOW;
+
+  ret = ioctl(fd, PWMIOC_SETCHARACTERISTICS,
+              (unsigned long)(uintptr_t)&info);
+  if (ret >= 0)
+    {
+      ret = ioctl(fd, PWMIOC_START, 0);
+    }
+
+  if (ret < 0)
+    {
+      close(fd);
+      return -errno;
+    }
+
+  /* Keep the descriptor open.  The PWM upper-half shuts down the LEDC
+   * timer when its final descriptor is closed, which would disable the
+   * LCD backlight immediately after startup. */
+
+  g_lcd_backlight_fd = fd;
+  return OK;
+}
+#endif
+
+static int board_mipi_video_initialize(void)
+{
+  struct esp_mipi_dsi_dpi_config_s dpi =
+  {
+    .h_res = BOARD_LCD_HRES,
+    .v_res = BOARD_LCD_VRES,
+    .hsync_pulse_width = 70,
+    .hsync_back_porch = 160,
+    .hsync_front_porch = 160,
+    .vsync_pulse_width = 10,
+    .vsync_back_porch = 23,
+    .vsync_front_porch = 12,
+    .dpi_clock_freq_mhz = 51,
+    .virtual_channel = 0,
+    .format = MIPI_DSI_FMT_RGB565,
+  };
+  int ret;
+
+  g_lcd_framebuffer = kumm_memalign(64, BOARD_LCD_FB_SIZE);
+  if (g_lcd_framebuffer == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  ret = esp_mipi_dsi_configure_dpi(&dpi);
+  if (ret < 0)
+    {
+      goto errout;
+    }
+
+  ret = esp_mipi_dsi_bind_framebuffer(g_lcd_framebuffer,
+                                      BOARD_LCD_FB_SIZE,
+                                      BOARD_LCD_HRES,
+                                      BOARD_LCD_VRES,
+                                      BOARD_LCD_BPP);
+  if (ret < 0)
+    {
+      goto errout;
+    }
+
+  board_mipi_fill_framebuffer();
+
+  ret = esp_mipi_dsi_flush_framebuffer(g_lcd_framebuffer,
+                                       BOARD_LCD_FB_SIZE);
+  if (ret < 0)
+    {
+      goto errout;
+    }
+
+  ret = esp_mipi_dsi_video_start();
+  if (ret < 0)
+    {
+      goto errout;
+    }
+
+#ifdef CONFIG_ESPRESSIF_LEDC
+  ret = board_mipi_backlight_enable();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to enable LCD backlight: %d\n", ret);
+      esp_mipi_dsi_video_stop();
+      goto errout;
+    }
+#endif
+
+#ifdef CONFIG_VIDEO_FB
+  /* Register last: fb_register_device() clears the exposed framebuffer. */
+  ret = fb_register_device(0, 0, &g_lcd_fb_vtable);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to register LCD framebuffer: %d\n", ret);
+      esp_mipi_dsi_video_stop();
+      goto errout;
+    }
+
+  board_mipi_fill_framebuffer();
+  ret = esp_mipi_dsi_flush_framebuffer(g_lcd_framebuffer,
+                                       BOARD_LCD_FB_SIZE);
+  if (ret < 0)
+    {
+      esp_mipi_dsi_video_stop();
+      goto errout;
+    }
+#endif
+
+  syslog(LOG_INFO,
+         "LCD video active: %ux%u RGB565 FB=%p size=%lu\n",
+         BOARD_LCD_HRES, BOARD_LCD_VRES, g_lcd_framebuffer,
+         (unsigned long)BOARD_LCD_FB_SIZE);
+#ifdef CONFIG_VIDEO_FB
+  syslog(LOG_INFO, "LCD framebuffer registered: /dev/fb0\n");
+#endif
+  return OK;
+
+errout:
+  kumm_free(g_lcd_framebuffer);
+  g_lcd_framebuffer = NULL;
+  return ret;
+}
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -341,6 +751,54 @@ int esp_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI
+  /* Power the P4 MIPI D-PHY before initializing the host.  Framebuffer
+   * setup and video streaming are intentionally deferred to the next
+   * bring-up stage.
+   */
+
+  {
+    struct esp_mipi_dsi_bus_config_s dsi_config =
+    {
+      .num_data_lanes = CONFIG_ESPRESSIF_MIPI_DSI_LANES,
+      .lane_bit_rate_mbps = CONFIG_ESPRESSIF_MIPI_DSI_LANE_BITRATE_MBPS,
+    };
+
+    ret = esp_ldo_channel_acquire(&g_mipi_dphy_ldo);
+    if (ret < 0)
+      {
+        syslog(LOG_ERR, "Failed to enable MIPI D-PHY LDO: %d\n", ret);
+      }
+    else
+      {
+        ret = esp_mipi_dsi_initialize(&dsi_config);
+        if (ret < 0)
+          {
+            syslog(LOG_ERR, "Failed to initialize MIPI DSI host: %d\n", ret);
+          }
+        else
+          {
+            syslog(LOG_INFO,
+                   "MIPI DSI host initialized: lanes=%lu bitrate=%lu Mbps\n",
+                   (unsigned long)dsi_config.num_data_lanes,
+                   (unsigned long)dsi_config.lane_bit_rate_mbps);
+          }
+      }
+  }
+#endif
+
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI
+  ret = board_mipi_panel_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize EK79007AD panel: %d\n", ret);
+    }
+  else
+    {
+      syslog(LOG_INFO, "EK79007AD panel command initialization complete\n");
+    }
+#endif
+
 #ifdef CONFIG_SENSORS_BMP180
   /* Try to register BMP180 device in I2C0 */
 
@@ -437,6 +895,14 @@ int esp_bringup(void)
       syslog(LOG_ERR, "ERROR: board_ledc_setup() failed: %d\n", ret);
     }
 #endif /* CONFIG_ESPRESSIF_LEDC */
+
+#ifdef CONFIG_ESPRESSIF_MIPI_DSI
+  ret = board_mipi_video_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize LCD video: %d\n", ret);
+    }
+#endif
 
 #ifdef CONFIG_ESP_MCPWM_CAPTURE
   ret = board_capture_initialize();

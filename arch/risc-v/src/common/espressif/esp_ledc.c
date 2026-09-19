@@ -1539,11 +1539,11 @@ static int pwm_start(struct pwm_lowerhalf_s *dev,
 
   for (int i = 0; i < channels; i++)
     {
-#ifdef CONFIG_PWM_NCHANNELS
+#ifdef CONFIG_PWM_MULTICHAN
       duty = ledc_duty_bin_conversion(info->channels[i].duty,
                                       priv->duty_resolution);
 #else
-      duty = ledc_duty_bin_conversion(info[i].duty,
+      duty = ledc_duty_bin_conversion(info->duty,
                                       priv->duty_resolution);
 #endif
       if (priv->chans[i].duty != duty)

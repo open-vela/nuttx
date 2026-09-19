@@ -459,6 +459,49 @@ config ESPRESSIF_DMA
 	default n
 	select ARCH_DMA
 
+config ESPRESSIF_LDO
+	bool "Low-Dropout Regulator (LDO)"
+	default n
+	---help---
+		Enable on-chip LDO channel control.  ESP32-P4 board code uses
+		this to power the MIPI D-PHY supply before DSI initialization.
+
+menuconfig ESPRESSIF_MIPI_DSI
+	bool "MIPI DSI Host"
+	depends on ARCH_CHIP_ESP32P4
+	default n
+	select ESPRESSIF_LDO
+	select DRIVERS_VIDEO
+	select FB_UPDATE
+	select MIPI_DSI
+	---help---
+		Enable the Espressif MIPI-DSI host driver behind NuttX's
+		generic mipi_dsi_host_ops API.  Panel initialization, reset,
+		power sequencing and framebuffer registration remain board or
+		panel responsibilities.
+
+		Board code must power VDD_MIPI_DPHY before calling the host
+		initialization API.
+
+if ESPRESSIF_MIPI_DSI
+
+config ESPRESSIF_MIPI_DSI_BUS
+	int "DSI host bus number"
+	default 0
+	range 0 0
+
+config ESPRESSIF_MIPI_DSI_LANES
+	int "Default number of DSI data lanes"
+	default 2
+	range 1 2
+
+config ESPRESSIF_MIPI_DSI_LANE_BITRATE_MBPS
+	int "Default DSI lane bit rate (Mbps)"
+	default 500
+	range 80 1500
+
+endif # ESPRESSIF_MIPI_DSI
+
 config ESPRESSIF_HR_TIMER
 	bool
 	default RTC_DRIVER
