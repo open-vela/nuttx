@@ -103,6 +103,7 @@ struct espgpint_dev_s
 {
   struct espgpio_dev_s espgpio;
   pin_interrupt_t callback;
+  gpio_intrtype_t intrtype;
 };
 
 /****************************************************************************
@@ -404,6 +405,10 @@ static int espgpio_interrupt(int irq, void *context, void *arg)
   struct espgpint_dev_s *espgpint = (struct espgpint_dev_s *)arg;
 
   DEBUGASSERT(espgpint != NULL && espgpint->callback != NULL);
+
+  /* Clear any latched status before notifying the upper half. */
+
+  esp_gpioirqclear(irq);
   gpioinfo("Interrupt! callback=%p\n", espgpint->callback);
 
   espgpint->callback(&espgpint->espgpio.gpio, espgpint->espgpio.id);
@@ -469,8 +474,8 @@ static int gpint_attach(struct gpio_dev_s *dev,
 
   esp_gpioirqdisable(irq);
 
-  ret = irq_attach(irq, espgpio_interrupt,
-                   &g_gpint[espgpint->espgpio.id]);
+  ret = esp_gpioirqattach(irq, espgpio_interrupt,
+                          &g_gpint[espgpint->espgpio.id]);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: gpint_attach() failed: %d\n", ret);
@@ -512,9 +517,7 @@ static int gpint_enable(struct gpio_dev_s *dev, bool enable)
         {
           gpioinfo("Enabling the interrupt\n");
 
-          /* Configure the interrupt for rising edge */
-
-          esp_gpioirqenable(irq, RISING);
+          esp_gpioirqenable(irq, espgpint->intrtype);
         }
     }
   else
@@ -545,25 +548,67 @@ static int gpint_setpintype(struct gpio_dev_s *dev,
                             enum gpio_pintype_e pintype)
 {
   struct espgpint_dev_s *espgpint = (struct espgpint_dev_s *)dev;
+  gpio_pinattr_t attr = INPUT_FUNCTION_2 | PULLDOWN;
+  gpio_intrtype_t intrtype;
 
   DEBUGASSERT(espgpint != NULL);
   DEBUGASSERT(espgpint->espgpio.id < BOARD_NGPIOINT);
   gpioinfo("Setting pintype: %d\n", (int)pintype);
   switch (pintype)
     {
+      case GPIO_INPUT_PIN:
+        attr = INPUT_FUNCTION_2;
+        intrtype = DISABLED;
+        break;
+
+      case GPIO_INPUT_PIN_PULLUP:
+        attr = INPUT_FUNCTION_2 | PULLUP;
+        intrtype = DISABLED;
+        break;
+
+      case GPIO_INPUT_PIN_PULLDOWN:
+        attr = INPUT_FUNCTION_2 | PULLDOWN;
+        intrtype = DISABLED;
+        break;
+
+      case GPIO_INTERRUPT_PIN:
+      case GPIO_INTERRUPT_PIN_WAKEUP:
+      case GPIO_INTERRUPT_RISING_PIN:
+      case GPIO_INTERRUPT_RISING_PIN_WAKEUP:
+        intrtype = RISING;
+        break;
+
       case GPIO_INTERRUPT_HIGH_PIN:
-        esp_configgpio(g_gpiointinputs[espgpint->espgpio.id],
-                       INPUT_PULLUP);
+      case GPIO_INTERRUPT_HIGH_PIN_WAKEUP:
+        attr = INPUT_FUNCTION_2 | PULLUP;
+        intrtype = ONHIGH;
         break;
+
       case GPIO_INTERRUPT_LOW_PIN:
-        esp_configgpio(g_gpiointinputs[espgpint->espgpio.id],
-                       INPUT_PULLDOWN);
+      case GPIO_INTERRUPT_LOW_PIN_WAKEUP:
+        attr = INPUT_FUNCTION_2 | PULLDOWN;
+        intrtype = ONLOW;
         break;
+
+      case GPIO_INTERRUPT_FALLING_PIN:
+      case GPIO_INTERRUPT_FALLING_PIN_WAKEUP:
+        attr = INPUT_FUNCTION_2 | PULLUP;
+        intrtype = FALLING;
+        break;
+
+      case GPIO_INTERRUPT_BOTH_PIN:
+      case GPIO_INTERRUPT_BOTH_PIN_WAKEUP:
+        attr = INPUT_FUNCTION_2 | PULLUP;
+        intrtype = CHANGE;
+        break;
+
       default:
         return ERROR;
-        break;
     }
 
+  esp_configgpio(g_gpiointinputs[espgpint->espgpio.id], attr);
+  espgpint->intrtype = intrtype;
+  dev->gp_pintype = pintype;
   return OK;
 }
 #endif
@@ -616,6 +661,7 @@ int esp_gpio_init(void)
       g_gpint[i].espgpio.gpio.gp_pintype = GPIO_INTERRUPT_PIN;
       g_gpint[i].espgpio.gpio.gp_ops     = &gpint_ops;
       g_gpint[i].espgpio.id              = i;
+      g_gpint[i].intrtype               = RISING;
       gpio_pin_register(&g_gpint[i].espgpio.gpio, pincount);
 
       /* Configure the pins that will be used as interrupt input with

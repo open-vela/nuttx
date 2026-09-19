@@ -136,7 +136,12 @@ static void esp_cpuint_initialize(void)
   /* Set CPU interrupt threshold level */
 
   esprv_int_set_threshold(RVHAL_INTR_ENABLE_THRESH);
-  rv_utils_intr_global_enable();
+
+  /* Keep global interrupts disabled until the NuttX exception and DEMUX
+   * handlers have been attached. GPIO/RTC initialization below allocates
+   * and enables CPU interrupt sources, so enabling MIE here can dispatch a
+   * pending source through irq_unexpected_isr during startup.
+   */
 }
 
 #ifdef CONFIG_ESPRESSIF_IRAM_ISR_DEBUG

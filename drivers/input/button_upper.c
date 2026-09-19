@@ -36,6 +36,7 @@
 #include <sys/types.h>
 #include <stdbool.h>
 #include <string.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <assert.h>
 #include <errno.h>
@@ -480,15 +481,34 @@ static ssize_t btn_read(FAR struct file *filep, FAR char *buffer,
 
   nxmutex_lock(&priv->mutex);
 
+  /* A non-blocking reader must not consume the same current state forever.
+   * The buttons example drains read() until it gets EAGAIN; return that
+   * result once the notification that woke the reader has already been
+   * consumed.
+   */
+
+  flags = spin_lock_irqsave(&priv->lock);
+  if (!opriv->bo_pending && (filep->f_oflags & O_NONBLOCK) != 0)
+    {
+      spin_unlock_irqrestore(&priv->lock, flags);
+      nxmutex_unlock(&priv->mutex);
+      return -EAGAIN;
+    }
+
+  /* Consume the notification that caused this read before sampling the
+   * hardware.  A GPIO interrupt may run while bl_buttons() is sampling the
+   * pins and set bo_pending again.  Clearing it after the sample would race
+   * with that interrupt and lose the new event before the next poll().
+   */
+
+  opriv->bo_pending = false;
+  spin_unlock_irqrestore(&priv->lock, flags);
+
   /* Read and return the current state of the buttons */
 
   lower = priv->bu_lower;
   DEBUGASSERT(lower && lower->bl_buttons);
   *(FAR btn_buttonset_t *)buffer = lower->bl_buttons(lower);
-
-  flags = spin_lock_irqsave(&priv->lock);
-  opriv->bo_pending = false;
-  spin_unlock_irqrestore(&priv->lock, flags);
 
   nxmutex_unlock(&priv->mutex);
   return (ssize_t)sizeof(btn_buttonset_t);

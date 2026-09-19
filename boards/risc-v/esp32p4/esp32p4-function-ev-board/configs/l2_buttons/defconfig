@@ -1,0 +1,21 @@
+# BOOT button validation configuration derived from the verified l2_psram base.
+# Keep this include so the button experiment does not duplicate the baseline.
+#
+# This configuration is intentionally independent from l2_psram and is not the
+# default board configuration.
+
+#include <../l2_psram/defconfig>
+
+CONFIG_ARCH_BUTTONS=y
+CONFIG_ARCH_IRQBUTTONS=y
+CONFIG_INPUT=y
+CONFIG_INPUT_BUTTONS=y
+CONFIG_INPUT_BUTTONS_LOWER=y
+CONFIG_EXAMPLES_BUTTONS=y
+CONFIG_EXAMPLES_BUTTONS_PRIORITY=110
+CONFIG_EXAMPLES_BUTTONS_STACKSIZE=4096
+CONFIG_EXAMPLES_GPIO=y
+CONFIG_EXAMPLES_BUTTONS_NAMES=y
+CONFIG_EXAMPLES_BUTTONS_NAME0="BOOT"
+CONFIG_EXAMPLES_BUTTONS_POLL=y
+# CONFIG_EXAMPLES_BUTTONS_SIGNAL is not set

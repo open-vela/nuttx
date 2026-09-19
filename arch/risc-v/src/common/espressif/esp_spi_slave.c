@@ -1140,9 +1140,9 @@ struct spi_slave_ctrlr_s *esp_spislave_ctrlr_initialize(int port)
 
   /* Attach IRQ for CS pin interrupt */
 
-  DEBUGVERIFY(irq_attach(ESP_PIN2IRQ(priv->config->cs_pin),
-                         spislave_cs_interrupt,
-                         priv));
+  DEBUGVERIFY(esp_gpioirqattach(ESP_PIN2IRQ(priv->config->cs_pin),
+                                spislave_cs_interrupt,
+                                priv));
 
   if (priv->cpuint != -ENOMEM)
     {

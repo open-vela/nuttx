@@ -31,10 +31,9 @@
 /* Libc */
 
 #include <assert.h>
-#include <nuttx/debug.h>
+#include <debug.h>
 #include <errno.h>
 #include <stdbool.h>
-#include <stdio.h>
 
 /* NuttX */
 
@@ -204,7 +203,7 @@ uint32_t board_button_initialize(void)
     }
 #endif
 
-  esp_configgpio(BUTTON_BOOT, INPUT_FUNCTION_2 | PULLUP | CHANGE);
+  esp_configgpio(BUTTON_BOOT, INPUT_FUNCTION_2 | PULLUP);
   return button_num;
 }
 
@@ -227,18 +226,11 @@ uint32_t board_button_initialize(void)
 uint32_t board_buttons(void)
 {
   uint8_t ret = 0;
-  int i = 0;
-  int n = 0;
   bool b0;
-  bool b1;
 
   for (uint8_t btn_id = 0; btn_id < nitems(g_buttons); btn_id++)
     {
-      iinfo("Reading button %d\n", btn_id);
-
       const struct button_type_s button_info = g_buttons[btn_id];
-
-      n = 0;
 
 #ifdef CONFIG_ESPRESSIF_TOUCH
       if (button_info.is_touchpad)
@@ -249,32 +241,7 @@ uint32_t board_buttons(void)
 #endif
         {
           b0 = esp_gpioread(button_info.input.gpio);
-
-          for (i = 0; i < 10; i++)
-            {
-              up_mdelay(1);
-
-              b1 = esp_gpioread(button_info.input.gpio);
-
-              if (b0 == b1)
-                {
-                  n++;
-                }
-              else
-                {
-                  n = 0;
-                }
-
-              if (3 == n)
-                {
-                  break;
-                }
-
-              b0 = b1;
-            }
         }
-
-      iinfo("b=%d n=%d\n", b0, n);
 
       /* Low value means that the button is pressed */
 
@@ -340,7 +307,30 @@ int board_button_irq(int id, xcpt_t irqhandler, void *arg)
   else
 #  endif
     {
-      ret = esp_gpio_irq(button_info.input.gpio, irqhandler, arg);
+      int irq = ESP_PIN2IRQ(button_info.input.gpio);
+
+      if (irqhandler != NULL)
+        {
+          /* Make sure the interrupt is disabled before attaching it. */
+
+          esp_gpioirqdisable(irq);
+
+          ret = esp_gpioirqattach(irq, irqhandler, arg);
+          if (ret < 0)
+            {
+              ierr("ERROR: irq_attach() failed: %d\n", ret);
+              return ret;
+            }
+
+          /* Configure the interrupt for both press and release edges. */
+
+          esp_gpioirqenable(irq, CHANGE);
+        }
+      else
+        {
+          esp_gpioirqdisable(irq);
+          esp_gpioirqattach(irq, NULL, NULL);
+        }
     }
 
   return ret;
