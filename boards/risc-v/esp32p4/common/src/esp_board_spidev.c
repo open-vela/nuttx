@@ -27,7 +27,7 @@
 #include <nuttx/config.h>
 
 #include <stdio.h>
-#include <nuttx/debug.h>
+#include <debug.h>
 #include <errno.h>
 
 #include <nuttx/spi/spi_transfer.h>
