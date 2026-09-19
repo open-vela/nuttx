@@ -772,13 +772,14 @@ int esp_hr_timer_init(void)
       spin_unlock_irqrestore(&priv->lock, flags);
     }
 
-  esp_setup_irq(SYSTIMER_TARGET2_EDGE_INTR_SOURCE,
-                ESP_IRQ_PRIORITY_DEFAULT,
-                SYSTIMER_TRIGGER_TYPE);
-
-  /* Attach the systimer interrupt */
-
-  irq_attach(ESP_IRQ_SYSTIMER_TARGET2_EDGE, (xcpt_t)esp_hr_timer_isr, NULL);
+  if (esp_setup_irq(SYSTIMER_TARGET2_EDGE_INTR_SOURCE,
+                    ESP_IRQ_PRIORITY_DEFAULT,
+                    SYSTIMER_TRIGGER_TYPE,
+                    esp_hr_timer_isr,
+                    NULL) < 0)
+    {
+      return -ENOMEM;
+    }
 
   /* Enable the allocated CPU interrupt */
 

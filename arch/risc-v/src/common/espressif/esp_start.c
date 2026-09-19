@@ -48,8 +48,10 @@
 #include "hal/cache_ll.h"
 #include "hal/cache_hal.h"
 #include "soc/ext_mem_defs.h"
+#ifndef CONFIG_ESPRESSIF_ESP32P4
 #include "soc/extmem_reg.h"
 #include "soc/mmu.h"
+#endif
 #include "soc/reg_base.h"
 #include "spi_flash_mmap.h"
 #include "rom/cache.h"
@@ -95,11 +97,16 @@
 
 #  define CHECKSUM_ALIGN        16
 #  define IS_PADD(addr) ((addr) == 0)
+#  if defined(SOC_TCM_LOW) || defined(SOC_TCM_HIGH)
+#    define IS_TCM(addr)  ((addr) >= SOC_TCM_LOW && (addr) < SOC_TCM_HIGH)
+#  else
+#    define IS_TCM(addr) false
+#  endif
 #  define IS_DRAM(addr) ((addr) >= SOC_DRAM_LOW && (addr) < SOC_DRAM_HIGH)
 #  define IS_IRAM(addr) ((addr) >= SOC_IRAM_LOW && (addr) < SOC_IRAM_HIGH)
 #  define IS_IROM(addr) ((addr) >= SOC_IROM_LOW && (addr) < SOC_IROM_HIGH)
 #  define IS_DROM(addr) ((addr) >= SOC_DROM_LOW && (addr) < SOC_DROM_HIGH)
-#  define IS_SRAM(addr) (IS_IRAM(addr) || IS_DRAM(addr))
+#  define IS_SRAM(addr) (IS_TCM(addr) || IS_IRAM(addr) || IS_DRAM(addr))
 #  define IS_MMAP(addr) (IS_IROM(addr) || IS_DROM(addr))
 #  ifdef SOC_RTC_FAST_MEM_SUPPORTED
 #    define IS_RTC_FAST_IRAM(addr) \
@@ -122,6 +129,7 @@
 #  define IS_NONE(addr) (!IS_IROM(addr) \
                          && !IS_DROM(addr) \
                          && !IS_IRAM(addr) \
+                         && !IS_TCM(addr) \
                          && !IS_DRAM(addr) \
                          && !IS_RTC_FAST_IRAM(addr) \
                          && !IS_RTC_FAST_DRAM(addr) \
@@ -300,7 +308,8 @@ static int map_rom_segments(uint32_t app_drom_start, uint32_t app_drom_vaddr,
               IS_MMAP(segment_hdr.load_addr) ?
                 IS_IROM(segment_hdr.load_addr) ? "imap" : "dmap" :
                   IS_PADD(segment_hdr.load_addr) ? "padd" :
-                    IS_DRAM(segment_hdr.load_addr) ? "dram" : "iram",
+                    IS_TCM(segment_hdr.load_addr) ? "tcm" :
+                      IS_DRAM(segment_hdr.load_addr) ? "dram" : "iram",
           offset + sizeof(esp_image_segment_header_t),
           segment_hdr.load_addr, segment_hdr.data_len,
           segment_hdr.data_len);
@@ -346,7 +355,11 @@ static int map_rom_segments(uint32_t app_drom_start, uint32_t app_drom_vaddr,
   ets_printf("total segments stored %d\n", segments - 1);
 #endif
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  cache_hal_disable(CACHE_LL_LEVEL_EXT_MEM, CACHE_TYPE_ALL);
+#else
   cache_hal_disable(CACHE_TYPE_ALL);
+#endif
 
   /* Clear the MMU entries that are already set up,
    * so the new app only has the mappings it creates.
@@ -378,7 +391,11 @@ static int map_rom_segments(uint32_t app_drom_start, uint32_t app_drom_vaddr,
 
   /* ------------------Enable Cache----------------------------------- */
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  cache_hal_enable(CACHE_LL_LEVEL_EXT_MEM, CACHE_TYPE_ALL);
+#else
   cache_hal_enable(CACHE_TYPE_ALL);
+#endif
 
   return (int)rc;
 }
@@ -398,6 +415,8 @@ void __esp_start(void)
   uint32_t _instruction_size;
   uint32_t cache_mmu_irom_size;
 #endif
+
+  bootloader_clear_bss_section();
 
 #ifdef CONFIG_ESPRESSIF_SIMPLE_BOOT
   if (bootloader_init() != 0)

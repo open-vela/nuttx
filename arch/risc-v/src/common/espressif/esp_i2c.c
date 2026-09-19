@@ -1478,7 +1478,6 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
   struct esp_i2c_priv_s *priv;
 #ifndef CONFIG_I2C_POLLED
   const struct esp_i2c_config_s *config;
-  int ret;
 #endif
 
   switch (port)
@@ -1521,24 +1520,13 @@ struct i2c_master_s *esp_i2cbus_initialize(int port)
 
   priv->cpuint = esp_setup_irq(config->periph,
                                ESP_IRQ_PRIORITY_DEFAULT,
-                               ESP_IRQ_TRIGGER_LEVEL);
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               esp_i2c_irq,
+                               priv);
   if (priv->cpuint < 0)
     {
       /* Failed to allocate a CPU interrupt of this type. */
 
-      priv->refs--;
-      nxmutex_unlock(&priv->lock);
-
-      return NULL;
-    }
-
-  ret = irq_attach(config->irq, esp_i2c_irq, priv);
-  if (ret != OK)
-    {
-      /* Failed to attach IRQ, free the allocated CPU interrupt */
-
-      esp_teardown_irq(config->periph, priv->cpuint);
-      priv->cpuint = -ENOMEM;
       priv->refs--;
       nxmutex_unlock(&priv->lock);
 

@@ -71,9 +71,18 @@ __start:
   addi t0, t0, %lo(_vector_table)
   csrw  CSR_MTVEC, t0
 
+#ifdef CONFIG_ARCH_RV_HAVE_CLIC
+  /* Initialize the CLIC machine trap-vector table. */
+
+  lui  t0, %hi(_mtvt_table)
+  addi t0, t0, %lo(_mtvt_table)
+  csrw CSR_MTVT, t0
+#endif
+
   /* Jump to __esp_start */
 
-  jal  x1, __esp_start
+  la   t0, __esp_start
+  jalr x1, t0, 0
 
   /* We shouldn't return from __esp_start */
 

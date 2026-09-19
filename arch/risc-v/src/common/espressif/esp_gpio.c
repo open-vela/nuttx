@@ -236,11 +236,19 @@ int esp_configgpio(int pin, gpio_pinattr_t attr)
   if ((attr & FUNCTION_MASK) != 0)
     {
       uint32_t val = ((attr & FUNCTION_MASK) >> FUNCTION_SHIFT) - 1;
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+      gpio_hal_func_sel(&g_gpio_hal, pin, val);
+#else
       gpio_hal_iomux_func_sel(GPIO_PIN_MUX_REG[pin], val);
+#endif
     }
   else
     {
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+      gpio_hal_func_sel(&g_gpio_hal, pin, PIN_FUNC_GPIO);
+#else
       gpio_hal_iomux_func_sel(GPIO_PIN_MUX_REG[pin], PIN_FUNC_GPIO);
+#endif
     }
 
   return OK;
@@ -364,12 +372,13 @@ void esp_gpioirqinitialize(void)
 
   g_gpio_cpuint = esp_setup_irq(GPIO_INTR_SOURCE,
                                 ESP_IRQ_PRIORITY_DEFAULT,
-                                ESP_IRQ_TRIGGER_LEVEL);
+                                ESP_IRQ_TRIGGER_LEVEL,
+                                gpio_interrupt,
+                                NULL);
   DEBUGASSERT(g_gpio_cpuint >= 0);
 
-  /* Attach and enable the interrupt handler */
+  /* Enable the interrupt handler */
 
-  DEBUGVERIFY(irq_attach(ESP_IRQ_GPIO, gpio_interrupt, NULL));
   up_enable_irq(ESP_IRQ_GPIO);
 }
 #endif

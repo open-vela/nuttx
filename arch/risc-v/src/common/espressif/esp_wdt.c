@@ -976,13 +976,14 @@ int esp_wdt_initialize(const char *devpath, enum esp_wdt_inst_e wdt_id)
       return -EEXIST;
     }
 
-  esp_setup_irq(lower->periph,
-                ESP_IRQ_PRIORITY_DEFAULT,
-                ESP_IRQ_TRIGGER_LEVEL);
-
-  /* Attach the handler for the timer IRQ */
-
-  irq_attach(lower->irq, (xcpt_t)wdt_handler, lower);
+  if (esp_setup_irq(lower->periph,
+                    ESP_IRQ_PRIORITY_DEFAULT,
+                    ESP_IRQ_TRIGGER_LEVEL,
+                    wdt_handler,
+                    lower) < 0)
+    {
+      return -ENOMEM;
+    }
 
   /* Enable the allocated CPU interrupt */
 

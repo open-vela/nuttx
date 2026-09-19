@@ -1,0 +1,37 @@
+############################################################################
+# arch/risc-v/src/esp32p4/Make.defs
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+############################################################################
+
+include common/Make.defs
+ESP_HAL_3RDPARTY_VERSION = 8d0a898910084206721a0892ab093021bca1496a
+include common/espressif/Make.defs
+
+# ESP32-P4 supplies its own SYSTIMER-backed scheduler clock path.
+# The generic RISC-V machine-timer lower half uses a newer oneshot API than
+# this OpenVela tree and is not part of the P4 board bring-up path.
+CMN_CSRCS := $(filter-out riscv_allocateheap.c riscv_mtimer.c,$(CMN_CSRCS))
+
+CHIP_CSRCS += esp_chip_rev.c
+
+CFLAGS += ${DEFINE_PREFIX}_RETARGETABLE_LOCKING
+
+# TODO: Remove these flags once ulp/lp_core/lp_core.c is updated.
+CFLAGS += -Wno-array-bounds -Wno-stringop-overflow

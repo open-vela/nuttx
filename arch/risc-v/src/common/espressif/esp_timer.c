@@ -574,13 +574,14 @@ int esp_timer_initialize(uint32_t timer_id)
     }
 
   lib_put_tempbuffer(devpath);
-  esp_setup_irq(lower->source,
-                ESP_IRQ_PRIORITY_DEFAULT,
-                ESP_IRQ_TRIGGER_LEVEL);
-
-  /* Attach the handler for the timer IRQ */
-
-  irq_attach(lower->irq, (xcpt_t)esp_timer_isr, lower);
+  if (esp_setup_irq(lower->source,
+                    ESP_IRQ_PRIORITY_DEFAULT,
+                    ESP_IRQ_TRIGGER_LEVEL,
+                    esp_timer_isr,
+                    lower) < 0)
+    {
+      return -ENOMEM;
+    }
 
   /* Enable the allocated CPU interrupt */
 

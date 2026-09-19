@@ -188,7 +188,12 @@ void esp_lowputc_send_byte(const struct esp_uart_s *priv, char byte)
 
 void esp_lowputc_enable_sysclk(const struct esp_uart_s *priv)
 {
+#ifndef CONFIG_ESPRESSIF_ESP32P4
   periph_module_enable(PERIPH_UART0_MODULE + priv->id);
+#else
+  /* ESP32-P4 does not expose the legacy PERIPH_UARTx_MODULE IDs. */
+  UNUSED(priv);
+#endif
 }
 
 /****************************************************************************

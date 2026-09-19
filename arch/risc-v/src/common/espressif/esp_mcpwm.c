@@ -1651,30 +1651,21 @@ static int esp_mcpwm_isr_register(int (*fn)(int, void *, void *),
                                           void *arg)
 {
   int cpuint;
-  int ret;
 
   cpuint = esp_setup_irq(mcpwm_periph_signals.groups[0].irq_id,
                          ESP_IRQ_PRIORITY_DEFAULT,
-                         ESP_IRQ_TRIGGER_LEVEL);
+                         ESP_IRQ_TRIGGER_LEVEL,
+                         fn,
+                         arg);
   if (cpuint < 0)
     {
       cperr("Failed to allocate a CPU interrupt.\n");
       return -ENOMEM;
     }
 
-  ret = irq_attach(ESP_IRQ_MCPWM0,
-                   fn,
-                   &g_mcpwm_common);
-  if (ret < 0)
-    {
-      cperr("Couldn't attach IRQ to handler.\n");
-      esp_teardown_irq(mcpwm_periph_signals.groups[0].irq_id, cpuint);
-      return ret;
-    }
-
   up_enable_irq(ESP_IRQ_MCPWM0);
 
-  return ret;
+  return OK;
 }
 #endif
 

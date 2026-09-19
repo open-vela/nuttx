@@ -494,28 +494,24 @@ static void esp_shutdown(uart_dev_t *dev)
 static int esp_attach(uart_dev_t *dev)
 {
   struct esp_uart_s *priv = dev->priv;
-  int ret;
 
   DEBUGASSERT(priv->cpuint == -ENOMEM);
 
   /* Set up to receive peripheral interrupts */
 
   priv->cpuint = esp_setup_irq(priv->source, priv->int_pri,
-                               ESP_IRQ_TRIGGER_LEVEL);
-
-  /* Attach and enable the IRQ */
-
-  ret = irq_attach(priv->irq, uart_handler, dev);
-  if (ret == OK)
+                               ESP_IRQ_TRIGGER_LEVEL,
+                               uart_handler,
+                               dev);
+  if (priv->cpuint < 0)
     {
-      up_enable_irq(priv->irq);
-    }
-  else
-    {
-      up_disable_irq(priv->irq);
+      return priv->cpuint;
     }
 
-  return ret;
+  /* Enable the IRQ */
+
+  up_enable_irq(priv->irq);
+  return OK;
 }
 
 /****************************************************************************
