@@ -1,0 +1,20 @@
+/****************************************************************************
+ * boards/arm/stm32h7/stm32h750b-dk/src/etc/init.d/rc.sysinit
+ *
+ * System init script - mounts filesystems.
+ ****************************************************************************/
+
+mount -t procfs proc /proc
+mount -t tmpfs tmp /tmp
+mount -t devfs devfs /dev
+
+/* The AI agent stores its configuration, session state and the WeChat bot
+ * token under /data/ai_agent.  This board has no persistent writable
+ * filesystem, so back it with the RAM disk: the WeChat login is lost on
+ * reboot and has to be repeated.  Move to a flash or SD partition for
+ * persistence.
+ */
+
+mkdir /data
+mount -t tmpfs tmp /data
+mkdir /data/ai_agent

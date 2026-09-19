@@ -52,4 +52,9 @@ ifeq ($(CONFIG_STM32H7_LTDC),y)
 CSRCS += stm32_lcd.c
 endif
 
+ifeq ($(CONFIG_ETC_ROMFS),y)
+RCSRCS = etc/init.d/rc.sysinit etc/init.d/rcS
+RCRAWS = etc/group etc/passwd
+endif
+
 include $(TOPDIR)/boards/Board.mk
