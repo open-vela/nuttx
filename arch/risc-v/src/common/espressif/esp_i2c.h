@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_i2c.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -45,6 +47,10 @@
 
 #ifdef CONFIG_ESPRESSIF_I2C1
 #  define ESPRESSIF_I2C1 1
+#endif
+
+#ifdef CONFIG_ESPRESSIF_LP_I2C0
+#  define ESPRESSIF_LP_I2C0 2
 #endif
 
 /****************************************************************************

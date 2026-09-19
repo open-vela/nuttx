@@ -26,7 +26,7 @@
 
 #include <nuttx/config.h>
 
-#include <nuttx/debug.h>
+#include <debug.h>
 #include <errno.h>
 #include <sys/types.h>
 
@@ -35,7 +35,7 @@
 #ifdef CONFIG_ESPRESSIF_I2C_BITBANG
 #include "espressif/esp_i2c_bitbang.h"
 #endif
-#ifdef CONFIG_ESPRESSIF_I2C_PERIPH_MASTER_MODE
+#ifdef CONFIG_ESPRESSIF_I2C_PERIPH
 #include "espressif/esp_i2c.h"
 #endif
 #ifdef CONFIG_ESPRESSIF_I2C_PERIPH_SLAVE_MODE
@@ -78,7 +78,7 @@ static int i2c_bitbang_driver_init(int bus)
 }
 #endif
 
-#ifdef CONFIG_ESPRESSIF_I2C_PERIPH_MASTER_MODE
+#ifdef CONFIG_ESPRESSIF_I2C_PERIPH
 static int i2c_driver_init(int bus)
 {
   struct i2c_master_s *i2c;
@@ -142,7 +142,7 @@ int board_i2c_init(void)
 {
   int ret = OK;
 
-#ifdef CONFIG_ESPRESSIF_I2C_PERIPH_MASTER_MODE
+#ifdef CONFIG_ESPRESSIF_I2C_PERIPH
 #ifdef CONFIG_ESPRESSIF_I2C0
   ret = i2c_driver_init(ESPRESSIF_I2C0);
   if (ret != OK)
