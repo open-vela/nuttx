@@ -30,10 +30,15 @@
 #include <arch/board/board.h>
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
+#include <nuttx/kmalloc.h>
 #include <nuttx/mm/mm.h>
 
 #include "riscv_internal.h"
 #include "rom/rom_layout.h"
+
+#ifdef CONFIG_ESPRESSIF_SPIRAM
+#include "esp_private/esp_psram_extram.h"
+#endif
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -100,6 +105,14 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
 #if CONFIG_MM_REGIONS > 1
 void riscv_addregion(void)
 {
+#ifdef CONFIG_ESPRESSIF_SPIRAM
+  uintptr_t psram_start = esp_psram_extram_vaddr_start();
+  uintptr_t psram_end = esp_psram_extram_vaddr_end();
+
+  if (psram_end > psram_start)
+    {
+      kumm_addregion((FAR void *)psram_start, psram_end - psram_start);
+    }
+#endif
 }
 #endif
-

@@ -58,6 +58,12 @@
 
 #include "bootloader_init.h"
 
+#ifdef CONFIG_ESPRESSIF_SPIRAM
+#include "esp_psram.h"
+#include "esp_private/esp_psram_extram.h"
+#include "esp_private/esp_mmu_map_private.h"
+#endif
+
 #ifdef CONFIG_ESPRESSIF_SIMPLE_BOOT
 #include "bootloader_flash_priv.h"
 #include "esp_rom_uart.h"
@@ -496,6 +502,35 @@ void __esp_start(void)
 #endif
 
   showprogress('A');
+
+#ifdef CONFIG_ESPRESSIF_SPIRAM
+  /* The NuttX ESP32-P4 entry point does not use ESP-IDF's call_start_cpu0().
+   * Initialize PSRAM here, after the clock and early UART setup but before
+   * NuttX creates its heaps.  riscv_addregion() registers the mapped range
+   * with the NuttX allocator later in the startup sequence.
+   */
+  esp_mmu_map_init();
+
+  if (esp_psram_init() != ESP_OK)
+    {
+      riscv_lowputc('P');
+      riscv_lowputc('!');
+      for (; ; )
+        {
+        }
+    }
+
+#ifdef CONFIG_ESPRESSIF_SPIRAM_MEMTEST
+  if (!esp_psram_extram_test())
+    {
+      riscv_lowputc('M');
+      riscv_lowputc('!');
+      for (; ; )
+        {
+        }
+    }
+#endif
+#endif
 
   /* Setup the syscall table needed by the ROM code */
 

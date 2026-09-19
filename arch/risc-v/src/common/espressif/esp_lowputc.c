@@ -50,6 +50,32 @@
 #include "periph_ctrl.h"
 #include "soc/gpio_sig_map.h"
 
+/* ESP32-P4 uses the pad-qualified GPIO signal names provided by the
+ * official Espressif HAL.  Older Espressif targets use the shorter Ux...
+ * names.  Keep the common UART driver independent of that HAL naming
+ * difference.
+ */
+
+#ifdef CONFIG_ESPRESSIF_ESP32P4
+#  define ESP_UART0_TXSIG UART0_TXD_PAD_OUT_IDX
+#  define ESP_UART0_RXSIG UART0_RXD_PAD_IN_IDX
+#  define ESP_UART0_RTSSIG UART0_RTS_PAD_OUT_IDX
+#  define ESP_UART0_CTSSIG UART0_CTS_PAD_IN_IDX
+#  define ESP_UART1_TXSIG UART1_TXD_PAD_OUT_IDX
+#  define ESP_UART1_RXSIG UART1_RXD_PAD_IN_IDX
+#  define ESP_UART1_RTSSIG UART1_RTS_PAD_OUT_IDX
+#  define ESP_UART1_CTSSIG UART1_CTS_PAD_IN_IDX
+#else
+#  define ESP_UART0_TXSIG U0TXD_OUT_IDX
+#  define ESP_UART0_RXSIG U0RXD_IN_IDX
+#  define ESP_UART0_RTSSIG U0RTS_OUT_IDX
+#  define ESP_UART0_CTSSIG U0CTS_IN_IDX
+#  define ESP_UART1_TXSIG U1TXD_OUT_IDX
+#  define ESP_UART1_RXSIG U1RXD_IN_IDX
+#  define ESP_UART1_RTSSIG U1RTS_OUT_IDX
+#  define ESP_UART1_CTSSIG U1CTS_IN_IDX
+#endif
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -79,12 +105,12 @@ struct esp_uart_s g_uart0_config =
   .bits = CONFIG_UART0_BITS,
   .parity = CONFIG_UART0_PARITY,
   .txpin = CONFIG_ESPRESSIF_UART0_TXPIN,
-  .txsig = U0TXD_OUT_IDX,
+  .txsig = ESP_UART0_TXSIG,
   .rxpin = CONFIG_ESPRESSIF_UART0_RXPIN,
-  .rxsig = U0RXD_IN_IDX,
+  .rxsig = ESP_UART0_RXSIG,
 #ifdef CONFIG_SERIAL_IFLOWCONTROL
   .rtspin = CONFIG_ESPRESSIF_UART0_RTSPIN,
-  .rtssig = U0RTS_OUT_IDX,
+  .rtssig = ESP_UART0_RTSSIG,
 #ifdef CONFIG_UART0_IFLOWCONTROL
   .iflow  = true,    /* input flow control (RTS) enabled */
 #else
@@ -93,7 +119,7 @@ struct esp_uart_s g_uart0_config =
 #endif
 #ifdef CONFIG_SERIAL_OFLOWCONTROL
   .ctspin = CONFIG_ESPRESSIF_UART0_CTSPIN,
-  .ctssig = U0CTS_IN_IDX,
+  .ctssig = ESP_UART0_CTSSIG,
 #ifdef CONFIG_UART0_OFLOWCONTROL
   .oflow  = true,    /* output flow control (CTS) enabled */
 #else
@@ -125,12 +151,12 @@ struct esp_uart_s g_uart1_config =
   .bits = CONFIG_UART1_BITS,
   .parity = CONFIG_UART1_PARITY,
   .txpin = CONFIG_ESPRESSIF_UART1_TXPIN,
-  .txsig = U1TXD_OUT_IDX,
+  .txsig = ESP_UART1_TXSIG,
   .rxpin = CONFIG_ESPRESSIF_UART1_RXPIN,
-  .rxsig = U1RXD_IN_IDX,
+  .rxsig = ESP_UART1_RXSIG,
 #ifdef CONFIG_SERIAL_IFLOWCONTROL
   .rtspin = CONFIG_ESPRESSIF_UART1_RTSPIN,
-  .rtssig = U1RTS_OUT_IDX,
+  .rtssig = ESP_UART1_RTSSIG,
 #ifdef CONFIG_UART1_IFLOWCONTROL
   .iflow  = true,    /* input flow control (RTS) enabled */
 #else
@@ -139,7 +165,7 @@ struct esp_uart_s g_uart1_config =
 #endif
 #ifdef CONFIG_SERIAL_OFLOWCONTROL
   .ctspin = CONFIG_ESPRESSIF_UART1_CTSPIN,
-  .ctssig = U1CTS_IN_IDX,
+  .ctssig = ESP_UART1_CTSSIG,
 #ifdef CONFIG_UART1_OFLOWCONTROL
   .oflow  = true,    /* output flow control (CTS) enabled */
 #else

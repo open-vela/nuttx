@@ -240,6 +240,17 @@
  * remains consistent across task switches and nested interrupt scenarios.
  */
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+/*
+ * The ESP32-P4 enters early interrupt/critical-section code while the
+ * instruction cache may still be unavailable.  Keep the tiny IRQ state
+ * helpers in IRAM so their instruction fetch does not depend on flash.
+ */
+#  define RISCV_IRQ_CRITICAL_ATTR __attribute__((section(".iram0.text")))
+#else
+#  define RISCV_IRQ_CRITICAL_ATTR
+#endif
+
 #ifdef CONFIG_ARCH_RV_HAVE_CLIC
 #  define REG_INT_THRESH_NDX  32
 #  ifdef CONFIG_ARCH_RV_SHADOW_STACK
@@ -837,7 +848,8 @@ int up_this_cpu(void);
  *
  ****************************************************************************/
 
-noinstrument_function static inline_function irqstate_t up_irq_save(void)
+noinstrument_function static inline_function RISCV_IRQ_CRITICAL_ATTR
+irqstate_t up_irq_save(void)
 {
   /* Read current interrupt threshold and set to maximum to mask all */
 
@@ -852,7 +864,7 @@ noinstrument_function static inline_function irqstate_t up_irq_save(void)
  *
  ****************************************************************************/
 
-noinstrument_function static inline_function
+noinstrument_function static inline_function RISCV_IRQ_CRITICAL_ATTR
 void up_irq_restore(irqstate_t flags)
 {
   /* Restore the interrupt threshold value */
@@ -870,7 +882,8 @@ void up_irq_restore(irqstate_t flags)
  *
  ****************************************************************************/
 
-noinstrument_function static inline_function irqstate_t up_irq_save(void)
+noinstrument_function static inline_function RISCV_IRQ_CRITICAL_ATTR
+irqstate_t up_irq_save(void)
 {
   irqstate_t flags;
 
@@ -899,7 +912,7 @@ noinstrument_function static inline_function irqstate_t up_irq_save(void)
  *
  ****************************************************************************/
 
-noinstrument_function static inline_function
+noinstrument_function static inline_function RISCV_IRQ_CRITICAL_ATTR
 void up_irq_restore(irqstate_t flags)
 {
   __asm__ __volatile__

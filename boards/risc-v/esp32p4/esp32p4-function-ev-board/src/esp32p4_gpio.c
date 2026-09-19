@@ -33,7 +33,7 @@
 #include <sys/types.h>
 #include <syslog.h>
 #include <assert.h>
-#include <nuttx/debug.h>
+#include <debug.h>
 
 /* NuttX */
 
@@ -47,7 +47,6 @@
 #ifdef CONFIG_ESPRESSIF_DEDICATED_GPIO
 #include "espressif/esp_dedic_gpio.h"
 #endif
-#include "espressif/esp_rtc_gpio.h"
 
 /* Board */
 
@@ -243,7 +242,7 @@ static int gprtc_read(struct gpio_dev_s *dev, bool *value)
   DEBUGASSERT(espgpio != NULL && value != NULL);
   gpioinfo("Reading...\n");
 
-  *value = esp_rtcio_read(g_gpiortc[espgpio->id]);
+  *value = esp_gpioread(g_gpiortc[espgpio->id]);
   return OK;
 }
 
@@ -269,7 +268,7 @@ static int gprtc_write(struct gpio_dev_s *dev, bool value)
   DEBUGASSERT(espgpio != NULL);
   gpioinfo("Writing %d\n", (int)value);
 
-  esp_rtcio_write(g_gpiortc[espgpio->id], value);
+  esp_gpiowrite(g_gpiortc[espgpio->id], value);
   return OK;
 }
 
@@ -461,17 +460,17 @@ static int gpint_attach(struct gpio_dev_s *dev,
 {
   struct espgpint_dev_s *espgpint =
     (struct espgpint_dev_s *)dev;
+  int irq = ESP_PIN2IRQ(g_gpiointinputs[espgpint->espgpio.id]);
   int ret;
 
   gpioinfo("Attaching the callback\n");
 
   /* Make sure the interrupt is disabled */
 
-  esp_gpioirqdisable(g_gpiointinputs[espgpint->espgpio.id]);
+  esp_gpioirqdisable(irq);
 
-  ret = esp_gpio_irq(g_gpiointinputs[espgpint->espgpio.id],
-                     espgpio_interrupt,
-                     &g_gpint[espgpint->espgpio.id]);
+  ret = irq_attach(irq, espgpio_interrupt,
+                   &g_gpint[espgpint->espgpio.id]);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: gpint_attach() failed: %d\n", ret);
@@ -480,7 +479,7 @@ static int gpint_attach(struct gpio_dev_s *dev,
 
   /* Make sure the interrupt is disabled */
 
-  esp_gpioirqdisable(g_gpiointinputs[espgpint->espgpio.id]);
+  esp_gpioirqdisable(irq);
 
   gpioinfo("Attach %p\n", callback);
   espgpint->callback = callback;
@@ -505,6 +504,7 @@ static int gpint_attach(struct gpio_dev_s *dev,
 static int gpint_enable(struct gpio_dev_s *dev, bool enable)
 {
   struct espgpint_dev_s *espgpint = (struct espgpint_dev_s *)dev;
+  int irq = ESP_PIN2IRQ(g_gpiointinputs[espgpint->espgpio.id]);
 
   if (enable)
     {
@@ -514,13 +514,13 @@ static int gpint_enable(struct gpio_dev_s *dev, bool enable)
 
           /* Configure the interrupt for rising edge */
 
-          esp_gpioirqenable(g_gpiointinputs[espgpint->espgpio.id]);
+          esp_gpioirqenable(irq, RISING);
         }
     }
   else
     {
       gpioinfo("Disable the interrupt\n");
-      esp_gpioirqdisable(g_gpiointinputs[espgpint->espgpio.id]);
+      esp_gpioirqdisable(irq);
     }
 
   return OK;
@@ -553,11 +553,11 @@ static int gpint_setpintype(struct gpio_dev_s *dev,
     {
       case GPIO_INTERRUPT_HIGH_PIN:
         esp_configgpio(g_gpiointinputs[espgpint->espgpio.id],
-                       INPUT_PULLUP | FALLING);
+                       INPUT_PULLUP);
         break;
       case GPIO_INTERRUPT_LOW_PIN:
         esp_configgpio(g_gpiointinputs[espgpint->espgpio.id],
-                       INPUT_PULLDOWN | RISING);
+                       INPUT_PULLDOWN);
         break;
       default:
         return ERROR;
@@ -646,7 +646,7 @@ int esp_gpio_init(void)
 
       /* Configure the pins that will be used as input/output */
 
-      esp_rtcio_config_gpio(g_gpiortc[i], ESP_RTC_GPIO_MODE_INPUT_OUTPUT);
+      esp_configgpio(g_gpiortc[i], INPUT | OUTPUT);
       pincount++;
     }
 

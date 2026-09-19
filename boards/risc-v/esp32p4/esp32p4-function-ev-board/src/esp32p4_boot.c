@@ -26,6 +26,10 @@
 
 #include <nuttx/config.h>
 
+#ifdef CONFIG_BOARDCTL
+#  include <nuttx/board.h>
+#endif
+
 #include "esp32p4-function-ev-board.h"
 
 /****************************************************************************
@@ -60,6 +64,14 @@
 void esp_board_initialize(void)
 {
 }
+
+#ifdef CONFIG_BOARDCTL
+int board_app_initialize(uintptr_t arg)
+{
+  (void)arg;
+  return 0;
+}
+#endif
 
 /****************************************************************************
  * Name: board_late_initialize

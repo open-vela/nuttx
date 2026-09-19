@@ -41,6 +41,7 @@
 #include <arch/chip/gpio_sig_map.h>
 #include "esp_private/periph_ctrl.h"
 #include "hal/ledc_hal.h"
+#include "hal/ledc_periph.h"
 #include "hal/ledc_types.h"
 #include "soc/soc_caps.h"
 #include "clk_ctrl_os.h"
@@ -141,6 +142,24 @@
 /* LEDC Timer default frequency */
 
 #define LEDC_DEFAULT_FREQ         (1000)
+
+/* ESP32-P4 uses the shared RCC registers for LEDC clock control.  The
+ * current HAL deliberately requires these operations to be wrapped by the
+ * RCC atomic environment.  Keep the macros compatible with targets that
+ * still use the legacy peripheral controller.
+ */
+
+#if !SOC_RCC_IS_INDEPENDENT
+#  define LEDC_BUS_CLOCK_ATOMIC()   PERIPH_RCC_ATOMIC()
+#else
+#  define LEDC_BUS_CLOCK_ATOMIC()
+#endif
+
+#if SOC_PERIPH_CLK_CTRL_SHARED
+#  define LEDC_FUNC_CLOCK_ATOMIC()   PERIPH_RCC_ATOMIC()
+#else
+#  define LEDC_FUNC_CLOCK_ATOMIC()
+#endif
 
 /* Check max LEDC channels number */
 
@@ -435,10 +454,20 @@ static bool ledc_ctx_create(void)
 
           /* Only ESP32 supports High Speed mode */
 
+          LEDC_BUS_CLOCK_ATOMIC()
+            {
+              ledc_ll_enable_bus_clock(true);
+              ledc_ll_enable_reset_reg(false);
+            }
+
+          LEDC_FUNC_CLOCK_ATOMIC()
+            {
+              ledc_ll_enable_clock(LEDC_LL_GET_HW(), true);
+            }
+
           ledc_hal_init(&(ledc_new_mode_obj->ledc_hal), LEDC_LOW_SPEED_MODE);
           ledc_new_mode_obj->glb_clk = LEDC_SLOW_CLK_UNINIT;
           p_ledc_obj = ledc_new_mode_obj;
-          periph_module_enable(PERIPH_LEDC_MODULE);
       }
   }
 
@@ -832,7 +861,10 @@ static int ledc_set_timer_div(ledc_timer_t timer_num,
   if (p_ledc_obj->glb_clk != glb_clk)
     {
       p_ledc_obj->glb_clk = glb_clk;
-      ledc_hal_set_slow_clk_sel(&(p_ledc_obj->ledc_hal), glb_clk);
+      LEDC_FUNC_CLOCK_ATOMIC()
+        {
+          ledc_hal_set_slow_clk_sel(&(p_ledc_obj->ledc_hal), glb_clk);
+        }
     }
 
   leave_critical_section(flags);
@@ -1048,17 +1080,12 @@ static IRAM_ATTR int ledc_duty_config(ledc_channel_t channel,
       ledc_hal_set_duty_int_part(&(p_ledc_obj->ledc_hal), channel, duty_val);
     }
 
-  ledc_hal_set_duty_direction(&(p_ledc_obj->ledc_hal),
-                              channel,
-                              duty_direction);
-
-  ledc_hal_set_duty_num(&(p_ledc_obj->ledc_hal), channel, duty_num);
-  ledc_hal_set_duty_cycle(&(p_ledc_obj->ledc_hal), channel, duty_cycle);
-  ledc_hal_set_duty_scale(&(p_ledc_obj->ledc_hal), channel, duty_scale);
+  ledc_hal_set_fade_param(&(p_ledc_obj->ledc_hal), channel, 0,
+                          duty_direction, duty_cycle, duty_scale, duty_num);
 
 #if SOC_LEDC_GAMMA_CURVE_FADE_SUPPORTED
-  ledc_hal_set_duty_range_wr_addr(&(p_ledc_obj->ledc_hal), channel, 0);
   ledc_hal_set_range_number(&(p_ledc_obj->ledc_hal), channel, 1);
+  ledc_hal_clear_left_off_fade_param(&(p_ledc_obj->ledc_hal), channel, 1);
 #endif
   return OK;
 }
@@ -1127,7 +1154,7 @@ static int ledc_channel_output_enable(ledc_channel_t channel)
     }
 
   ledc_hal_set_sig_out_en(&(p_ledc_obj->ledc_hal), channel, true);
-  ledc_hal_set_duty_start(&(p_ledc_obj->ledc_hal), channel, true);
+  ledc_hal_set_duty_start(&(p_ledc_obj->ledc_hal), channel);
 
   return OK;
 }
@@ -1162,7 +1189,7 @@ static int ledc_channel_output_disable(ledc_channel_t channel)
 
   ledc_hal_set_idle_level(&(p_ledc_obj->ledc_hal), channel, 0);
   ledc_hal_set_sig_out_en(&(p_ledc_obj->ledc_hal), channel, false);
-  ledc_hal_set_duty_start(&(p_ledc_obj->ledc_hal), channel, false);
+  ledc_hal_set_duty_start(&(p_ledc_obj->ledc_hal), channel);
 
   leave_critical_section(flags);
   return OK;
@@ -1295,7 +1322,7 @@ static void setup_channel(struct esp_ledc_s *priv, int cn)
       pwmerr("ERROR: No memory for LEDC context\n");
       PANIC();
     }
-#ifndef CONFIG_ESPRESSIF_ESP32H2
+#if !(defined(CONFIG_ARCH_CHIP_ESP32H2) || defined(CONFIG_ARCH_CHIP_ESP32P4))
   /* On such targets, the default ledc core(global) clock does not connect to
    * any clock source. Setting channel configurations and updating bits
    * before core clock is enabled could lead to an error.
@@ -1312,8 +1339,11 @@ static void setup_channel(struct esp_ledc_s *priv, int cn)
 
       if (p_ledc_obj->glb_clk == LEDC_SLOW_CLK_UNINIT)
         {
-          ledc_hal_set_slow_clk_sel(&(p_ledc_obj->ledc_hal),
-                                    LEDC_LL_GLOBAL_CLK_DEFAULT);
+          LEDC_FUNC_CLOCK_ATOMIC()
+            {
+              ledc_hal_set_slow_clk_sel(&(p_ledc_obj->ledc_hal),
+                                        LEDC_LL_GLOBAL_CLK_DEFAULT);
+            }
         }
 
       leave_critical_section(flags);
@@ -1375,7 +1405,8 @@ static int pwm_setup(struct pwm_lowerhalf_s *dev)
 
       esp_configgpio(priv->chans[i].pin, OUTPUT | PULLUP);
       esp_gpio_matrix_out(priv->chans[i].pin,
-                          LEDC_LS_SIG_OUT0_IDX + priv->chans[i].num,
+                          ledc_periph_signal[0].sig_out0_idx +
+                          priv->chans[i].num,
                           0, 0);
     }
 
@@ -1424,10 +1455,20 @@ static int pwm_shutdown(struct pwm_lowerhalf_s *dev)
 
   if (p_ledc_obj != NULL)
     {
-      periph_module_disable(PERIPH_LEDC_MODULE);
       kmm_free(p_ledc_obj);
       p_ledc_obj = NULL;
       s_ledc_slow_clk_rc_fast_freq = 0;
+
+      LEDC_BUS_CLOCK_ATOMIC()
+        {
+          ledc_ll_enable_bus_clock(false);
+          ledc_ll_enable_reset_reg(true);
+        }
+
+      LEDC_FUNC_CLOCK_ATOMIC()
+        {
+          ledc_ll_enable_clock(LEDC_LL_GET_HW(), false);
+        }
     }
   else
     {

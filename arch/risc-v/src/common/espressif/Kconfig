@@ -44,6 +44,14 @@ config ESPRESSIF_CHIP_SERIES
 	default "esp32p4" if ESPRESSIF_ESP32P4
 	default "unknown"
 
+config ESPRESSIF_LOG_LEVEL
+	int "Default Espressif log level"
+	default 3
+	range 0 5
+	---help---
+		Set the default Espressif HAL log level: 0=None, 1=Error,
+		2=Warn, 3=Info, 4=Debug, and 5=Verbose.
+
 choice ESPRESSIF_FLASH
 	prompt "Flash Size"
 	default ESPRESSIF_FLASH_4M if ESPRESSIF_ESP32C3 || ESPRESSIF_ESP32C6 || ESPRESSIF_ESP32H2 || ESPRESSIF_ESP32P4
@@ -67,6 +75,43 @@ config ESPRESSIF_FLASH_DETECT
 	default n
 	---help---
 		Auto detect flash size when flashing.
+
+menu "ESP32-P4 PSRAM"
+	depends on ESPRESSIF_ESP32P4
+
+config ESPRESSIF_SPIRAM
+	bool "External PSRAM"
+	default n
+	---help---
+		Enable the external octal PSRAM connected to the ESP32-P4.
+
+config ESPRESSIF_SPIRAM_BOOT_INIT
+	bool "Initialize PSRAM during startup"
+	depends on ESPRESSIF_SPIRAM
+	default y
+	---help---
+		Initialize and map PSRAM before the normal system heap is brought up.
+
+config ESPRESSIF_SPIRAM_MEMTEST
+	bool "Run PSRAM memory test during startup"
+	depends on ESPRESSIF_SPIRAM_BOOT_INIT
+	default y
+
+config ESPRESSIF_SPIRAM_USER_HEAP
+	bool "Use PSRAM for malloc"
+	depends on ESPRESSIF_SPIRAM
+	default n
+	---help---
+		Add PSRAM to the normal malloc allocator after startup initialization.
+
+config ESPRESSIF_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+	bool "Place BSS in external PSRAM"
+	depends on ESPRESSIF_SPIRAM
+	default n
+	---help---
+		Allow selected external-BSS sections to be mapped into PSRAM.
+
+endmenu # ESP32-P4 PSRAM
 
 config ESPRESSIF_NUM_CPUS
 	int

@@ -370,7 +370,7 @@ void esp_gpioirqinitialize(void)
 {
   /* Setup the GPIO interrupt. */
 
-  g_gpio_cpuint = esp_setup_irq(GPIO_INTR_SOURCE,
+  g_gpio_cpuint = esp_setup_irq(GPIO_INTR0_SOURCE,
                                 ESP_IRQ_PRIORITY_DEFAULT,
                                 ESP_IRQ_TRIGGER_LEVEL,
                                 gpio_interrupt,
@@ -379,7 +379,7 @@ void esp_gpioirqinitialize(void)
 
   /* Enable the interrupt handler */
 
-  up_enable_irq(ESP_IRQ_GPIO);
+  up_enable_irq(ESP_IRQ_GPIO_INTR0);
 }
 #endif
 
@@ -414,7 +414,7 @@ void esp_gpioirqenable(int irq, gpio_intrtype_t intrtype)
 
   /* Disable the GPIO interrupt during the configuration. */
 
-  up_disable_irq(ESP_IRQ_GPIO);
+  up_disable_irq(ESP_IRQ_GPIO_INTR0);
 
   /* Enable interrupt for this pin on the current core */
 
@@ -424,7 +424,7 @@ void esp_gpioirqenable(int irq, gpio_intrtype_t intrtype)
 
   /* Configuration done. Re-enable the GPIO interrupt. */
 
-  up_enable_irq(ESP_IRQ_GPIO);
+  up_enable_irq(ESP_IRQ_GPIO_INTR0);
 }
 #endif
 
@@ -457,7 +457,7 @@ void esp_gpioirqdisable(int irq)
 
   /* Disable the GPIO interrupt during the configuration. */
 
-  up_disable_irq(ESP_IRQ_GPIO);
+  up_disable_irq(ESP_IRQ_GPIO_INTR0);
 
   /* Disable the interrupt for this pin */
 
@@ -465,6 +465,6 @@ void esp_gpioirqdisable(int irq)
 
   /* Configuration done. Re-enable the GPIO interrupt. */
 
-  up_enable_irq(ESP_IRQ_GPIO);
+  up_enable_irq(ESP_IRQ_GPIO_INTR0);
 }
 #endif

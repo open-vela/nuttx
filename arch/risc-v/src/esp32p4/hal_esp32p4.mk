@@ -479,6 +479,7 @@ ifeq ($(CONFIG_ESPRESSIF_SIMPLE_BOOT),y)
   LDFLAGS += --wrap=bootloader_print_banner
 endif
 
+
 ifeq ($(CONFIG_ESPRESSIF_IDF_ENV_FPGA),y)
   CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_system$(DELIM)fpga_overrides_clk.c
   CHIP_CSRCS += chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)components$(DELIM)esp_system$(DELIM)fpga_overrides_rng.c

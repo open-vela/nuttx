@@ -113,13 +113,13 @@ config ARCH_MPU_CODE_NREGIONS
 
 config ARCH_HAVE_PPRS
 	bool
-	--help--
+	---help---
 		The saving process for MPU PRS differs between TC1V6 and TC1V8.TC1V6
 		saves PRS in the PSW, while TC1V8 saves PRS in the PPRS register.
 
 config HAVE_SECURITY_CORE
 	bool
-	--help--
+	---help---
 		In addition to the 6 cores, tc4xx also has one more security core.
 
 if ARCH_CHIP_TC3XX
