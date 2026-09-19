@@ -1,0 +1,115 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenVela bring-up <openvela@example.invalid>
+Date: Thu, 17 Sep 2026 00:00:00 +0800
+Subject: [PATCH] adapt ESP HAL task helpers to this OpenVela tree
+
+The pinned ESP HAL calls APIs that are not present in this OpenVela
+revision.  Keep the adaptation reproducible when the HAL is regenerated.
+
+---
+ nuttx/include/platform/os.h |  3 ++-
+ nuttx/src/platform/os.c    | 31 +++++++++++--------------------
+ 2 files changed, 14 insertions(+), 20 deletions(-)
+
+diff --git a/nuttx/include/platform/os.h b/nuttx/include/platform/os.h
+index 118b35570f4..16fb6e673b1 100644
+--- a/nuttx/include/platform/os.h
++++ b/nuttx/include/platform/os.h
+@@ -20,6 +20,7 @@
+ #include <stdbool.h>
+ #include <semaphore.h>
+ #include <nuttx/clock.h>
++#include <nuttx/signal.h>
+ #include <nuttx/sched.h>
+ #include <nuttx/init.h>
+ #include <sched/sched.h>
+@@ -354,7 +355,7 @@ static inline void esp_os_task_delay_adapter(uint32_t ticks)
+   if (OSINIT_OS_READY())
+     {
+       useconds_t us = TICK2USEC(ticks);
+-      nxsched_usleep(us);
++      nxsig_usleep(us);
+     }
+ }
+ 
+diff --git a/nuttx/src/platform/os.c b/nuttx/src/platform/os.c
+index 99470d7e7c0..02e75231400 100644
+--- a/nuttx/src/platform/os.c
++++ b/nuttx/src/platform/os.c
+@@ -16,6 +16,7 @@
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <stdio.h>
++#include <fcntl.h>
+ #include <clock/clock.h>
+ 
+ #include <nuttx/config.h>
+@@ -25,6 +26,7 @@
+ #include <nuttx/queue.h>
+ #include <nuttx/mqueue.h>
+ #include <nuttx/kmalloc.h>
++#include <nuttx/kthread.h>
+ #include <semaphore.h>
+ #include <unistd.h>
+ #include <sys/types.h>
+@@ -1307,7 +1309,6 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+                                       esp_os_task_handle_t *task_handle,
+                                       int core_id)
+ {
+-  FAR struct tcb_s *tcb;
+   FAR struct task_wrapper_args_s *wrapper_args;
+   FAR char *argv[2];
+   char ptr_buf[32];
+@@ -1326,22 +1327,11 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+   argv[0] = ptr_buf;
+   argv[1] = NULL;
+ 
+-  tcb = kmm_zalloc(sizeof(struct tcb_s));
+-  if (tcb == NULL)
+-    {
+-      kmm_free(wrapper_args);
+-      return -1;
+-    }
+-
+-  tcb->flags = TCB_FLAG_TTYPE_KERNEL | TCB_FLAG_FREE_TCB;
+-
+-  ret = nxtask_init(tcb, name, priority,
+-                    NULL, stack_size,
+-                    task_wrapper_entry, argv, NULL, NULL);
++  /* Adapt the official HAL to this tree's current NuttX task API. */
++  ret = kthread_create(name, priority, stack_size, task_wrapper_entry, argv);
+   if (ret < 0)
+     {
+       kmm_free(wrapper_args);
+-      kmm_free(tcb);
+       return -1;
+     }
+ 
+@@ -1351,11 +1341,13 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+       cpu_set_t cpuset;
+       CPU_ZERO(&cpuset);
+       CPU_SET(core_id, &cpuset);
+-      tcb->affinity = cpuset;
++      sched_setaffinity(ret, sizeof(cpu_set_t), &cpuset);
+     }
++#else
++  UNUSED(core_id);
+ #endif
+ 
+-  if (task_notify_register(tcb->pid) == NULL)
++  if (task_notify_register(ret) == NULL)
+     {
+       _warn("esp_os_create_task: out of memory for notify entry '%s'\n",
+             name);
+@@ -1363,10 +1355,8 @@ int esp_os_create_task_pinned_to_core(esp_os_task_function_t task_func,
+ 
+   if (task_handle != NULL)
+     {
+-      *task_handle = (esp_os_task_handle_t)tcb->pid;
++      *task_handle = (esp_os_task_handle_t)ret;
+     }
+-
+-  nxtask_activate(tcb);
+   return 0;
+ }
+ 
