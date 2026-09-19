@@ -163,6 +163,41 @@ int spi_flash_erase_range(uint32_t start_address, uint32_t size);
 
 int spi_flash_write(uint32_t dest_addr, const void *buffer, uint32_t size);
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+
+/****************************************************************************
+ * Name: esp_spiflash_read
+ *
+ * Description:
+ *   Read data from flash through the P4 HAL flash API.
+ *
+ ****************************************************************************/
+
+int esp_spiflash_read(uint32_t address, void *buffer, uint32_t length);
+
+/****************************************************************************
+ * Name: esp_spiflash_erase
+ *
+ * Description:
+ *   Erase a range of flash through the P4 HAL flash API.
+ *
+ ****************************************************************************/
+
+int esp_spiflash_erase(uint32_t start, uint32_t length);
+
+/****************************************************************************
+ * Name: esp_spiflash_write
+ *
+ * Description:
+ *   Write data to flash through the P4 HAL flash API.
+ *
+ ****************************************************************************/
+
+int esp_spiflash_write(uint32_t address, const void *buffer,
+                       uint32_t length);
+
+#endif /* CONFIG_ARCH_CHIP_ESP32P4 */
+
 /****************************************************************************
  * Name: esp_spiflash_init
  *

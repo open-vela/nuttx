@@ -58,6 +58,10 @@
 
 #include "bootloader_init.h"
 
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+#include "esp_private/esp_flash_internal.h"
+#endif
+
 #ifdef CONFIG_ESPRESSIF_SPIRAM
 #include "esp_psram.h"
 #include "esp_private/esp_psram_extram.h"
@@ -537,6 +541,22 @@ void __esp_start(void)
   esp_setup_syscall_table();
 
   showprogress('B');
+
+#ifdef CONFIG_ARCH_CHIP_ESP32P4
+  /* The NuttX entry point does not execute ESP-IDF's system-init table.
+   * Initialize the SPI flash HAL explicitly before board code accesses the
+   * MTD device or a filesystem backed by it.
+   */
+  if (esp_flash_app_init() != ESP_OK ||
+      esp_flash_init_default_chip() != ESP_OK)
+    {
+      riscv_lowputc('F');
+      riscv_lowputc('!');
+      for (; ; )
+        {
+        }
+    }
+#endif
 
   /* The 2nd stage bootloader enables RTC WDT to monitor any issues that may
    * prevent the startup sequence from finishing correctly. Hence disable it
