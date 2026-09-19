@@ -1,0 +1,25 @@
+############################################################################
+# arch/arm64/src/rk3576/Make.defs
+#
+# RK3576 chip layer: openvela AMP slave (Cortex-A53) alongside Linux.
+#
+# SPDX-License-Identifier: Apache-2.0
+############################################################################
+
+include common/Make.defs
+
+# C source files specific to the SoC
+
+CHIP_CSRCS  = rk3576_boot.c rk3576_serial.c rk3576_addrenv.c rk3576_soc.c
+
+ifeq ($(CONFIG_RK3576_SAI),y)
+CHIP_CSRCS += rk3576_sai.c
+endif
+
+ifeq ($(CONFIG_RK3576_PDM),y)
+CHIP_CSRCS += rk3576_pdm.c
+endif
+
+ifeq ($(CONFIG_RPTUN),y)
+CHIP_CSRCS += rk3576_rptun.c rk3576_rsctable.c
+endif

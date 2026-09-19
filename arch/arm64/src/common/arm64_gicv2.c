@@ -771,6 +771,7 @@ static int gic_validate_dist_version(void)
  *
  ****************************************************************************/
 
+#ifndef CONFIG_ARM64_GIC_SLAVE
 static void arm_gic0_initialize(void)
 {
   unsigned int nlines = arm_gic_nlines();
@@ -827,6 +828,7 @@ static void arm_gic0_initialize(void)
   DEBUGVERIFY(irq_attach(GIC_SMP_CALL, nxsched_smp_call_handler, NULL));
 #endif
 }
+#endif /* !CONFIG_ARM64_GIC_SLAVE */
 
 /****************************************************************************
  * Name: arm_gic_initialize
@@ -1311,14 +1313,20 @@ int arm64_gic_initialize(void)
       return err;
     }
 
+#ifndef CONFIG_ARM64_GIC_SLAVE
   /* CPU0-specific initialization for GIC */
 
   if (sched_getcpu() == 0)
     {
       arm_gic0_initialize();
     }
+#endif
 
-  /* CPU-generic initialization for GIC */
+  /* CPU-generic initialization for GIC.  With CONFIG_ARM64_GIC_SLAVE the
+   * distributor belongs to the master OS and is left untouched; only the
+   * banked CPU interface is initialized here and individual SPIs are
+   * enabled later through the write-1-to-set GICD_ISENABLER path.
+   */
 
   arm_gic_initialize();
 
