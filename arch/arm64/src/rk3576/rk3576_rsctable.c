@@ -90,28 +90,28 @@ struct rptun_rsc_s g_rk3576_rsc_table =
     2,                      /* notifyid */
     RSC_VDEV_FEATURES,      /* dfeatures: NS + CPUNAME */
 
-    /* gfeatures: normally written by the driver after negotiation, but the
-     * Linux master never touches this table, so pre-set it equal to
-     * dfeatures.  openamp uses (dfeatures & gfeatures) as the active set.
-     */
+  /* gfeatures: normally written by the driver after negotiation, but the
+   * Linux master never touches this table, so pre-set it equal to
+   * dfeatures.  openamp uses (dfeatures & gfeatures) as the active set.
+   */
 
     RSC_VDEV_FEATURES,
 
-    /* config_len: size of the fw_rsc_config that immediately follows the
-     * vrings in this table.  openamp locates the virtio config space there;
-     * with config_len=0 the DEVICE side reads an empty cpuname and the
-     * uart_rpmsg binding (strcmp against "linux") silently fails.
-     */
+  /* config_len: size of the fw_rsc_config that immediately follows the
+   * vrings in this table.  openamp locates the virtio config space there;
+   * with config_len=0 the DEVICE side reads an empty cpuname and the
+   * uart_rpmsg binding (strcmp against "linux") silently fails.
+   */
 
     sizeof(struct fw_rsc_config),
 
-    /* status: pre-set DRIVER_OK.  The standard OpenAMP handshake has the
-     * master write DRIVER_OK into a *shared* resource table for the remote
-     * (device) side to poll, but our master is Linux rockchip_rpmsg_softirq
-     * which never touches a resource table (it uses fixed vring addresses).
-     * So we assert master-ready ourselves; the Linux side has already
-     * initialised both vrings by the time this table is parsed.
-     */
+  /* status: pre-set DRIVER_OK.  The standard OpenAMP handshake has the
+   * master write DRIVER_OK into a *shared* resource table for the remote
+   * (device) side to poll, but our master is Linux rockchip_rpmsg_softirq
+   * which never touches a resource table (it uses fixed vring addresses).
+   * So we assert master-ready ourselves; the Linux side has already
+   * initialised both vrings by the time this table is parsed.
+   */
 
     VIRTIO_CONFIG_STATUS_DRIVER_OK,
     NUM_VRINGS,
@@ -145,8 +145,12 @@ struct rptun_rsc_s g_rk3576_rsc_table =
     "linux",                /* host_cpuname: the Linux master */
     "nuttx",                /* remote_cpuname: us (cpu3) */
     0,                      /* priority (no PRIORITY feature) */
-    {0, 0, 0},              /* reserved1 */
-    {0, 0, 0, 0, 0}         /* reserved2 */
+    {                       /* reserved1 */
+      0, 0, 0
+    },
+    {                       /* reserved2 */
+      0, 0, 0, 0, 0
+    }
   },
 
   /* rpmsg buffer pool (Linux allocates from its rpmsg-dma reserved region;
@@ -163,3 +167,7 @@ struct rptun_rsc_s g_rk3576_rsc_table =
     "rpmsg_shm"
   }
 };
+
+/****************************************************************************
+ * Public Functions
+ ****************************************************************************/

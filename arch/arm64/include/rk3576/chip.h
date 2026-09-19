@@ -1,5 +1,5 @@
 /****************************************************************************
- * board/contest_board/chip/include/chip.h
+ * arch/arm64/include/rk3576/chip.h
  *
  * Rockchip RK3576 (KickPi K7) — openvela AMP slave on cpu3 (Cortex-A53).
  *

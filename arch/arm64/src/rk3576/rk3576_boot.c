@@ -1,5 +1,5 @@
 /****************************************************************************
- * board/contest_board/chip/rk3576_boot.c
+ * arch/arm64/src/rk3576/rk3576_boot.c
  *
  * RK3576 (KickPi K7) AMP-slave chip boot: MMU map + board hook.
  *

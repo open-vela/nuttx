@@ -5,7 +5,8 @@
  *
  * IMPORTANT: the RK3576 does NOT use the classic Rockchip PDM block.  Its
  * device tree says "rockchip,rk3576-pdm", which only
- * sound/soc/rockchip/rockchip_pdm_v2.{c,h} matches — a 2024 IP revision with
+ * sound/soc/rockchip/rockchip_pdm_v2.{c,h} matches. This is a 2024 IP
+ * revision with
  * a completely different register map from rockchip_pdm.h.  The give-away on
  * hardware is PDM_V2_VERSION at offset 0x38 reading 0x23023576; with the old
  * map, every functional register reads back zero and the FIFO never fills.
@@ -16,9 +17,9 @@
  * turns it into PCM lives inside this block, so there is no DSP to do here.
  *
  * Clocking.  Everything comes from the 24 MHz crystal, never from the audio
- * PLLs: those belong to Linux, which retunes them whenever it plays audio and
- * would drag our sample rate along.  The v2 driver's own reference table has
- * an entry for exactly this case — { clk 24000000, clk_out 2400000 } — so the
+ * PLLs: those belong to Linux, which retunes them whenever it plays audio
+ * and would drag our sample rate along. The v2 reference table has an entry
+ * for this case: { clk 24000000, clk_out 2400000 }. As a result, the
  * rate lands on a round number instead of the SAI path's 15625 Hz:
  *
  *   mclk_pdm1    = xin24m / 1  = 24 MHz     (filter clock)
@@ -116,8 +117,8 @@
 #define PDM_OUT_HZ              (PDM_XIN_HZ / PDM_OUT_DIV)      /* 2400000 */
 
 /* rockchip_pdm_v2.c: ratio = clk_out / rate / 2, and its scale table pairs
- * ratio 75 with 57.  Keep the pair together — the scale compensates the CIC's
- * gain, so a mismatched value clips or mutes.
+ * ratio 75 with 57. Keep the pair together: the scale compensates the
+ * CIC gain, so a mismatched value clips or mutes.
  */
 
 #define PDM_CIC_RATIO_VAL       75

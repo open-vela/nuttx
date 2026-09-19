@@ -1,5 +1,5 @@
 /****************************************************************************
- * board/contest_board/chip/include/irq.h
+ * arch/arm64/include/rk3576/irq.h
  *
  * RK3576 interrupt map for the openvela AMP slave.
  *

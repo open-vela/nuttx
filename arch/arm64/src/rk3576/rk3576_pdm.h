@@ -92,8 +92,9 @@ int rk3576_pdm_capture_init(void);
  *
  * Description:
  *   Run or halt capture.  rk3576_pdm_start() busy-waits ~40 ms in total (the
- *   microphone needs time to wake after the clock appears, and the decimation
- *   filter needs time to settle), so call it from a thread, not an ISR.
+ *   microphone needs time to wake after the clock appears, and the
+ *   decimation filter needs time to settle). Call it from a thread,
+ *   not an ISR.
  *
  ****************************************************************************/
 
