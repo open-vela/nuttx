@@ -52,6 +52,24 @@
 #include "hardware/esp32s3_gpio_sigmap.h"
 #include "hardware/esp32s3_soc.h"
 
+#if defined(CONFIG_ESP32S3_SDMMC_DMA) && defined(CONFIG_ESP32S3_SPIRAM)
+#include <stdio.h>
+
+/* SDMMC IDMA can only transfer 4-byte aligned buffers, while the upper layer
+ * (FAT/bchdev/application) May return unaligned pointer. Unified check here,
+ * use aligned bounce buffer when needed, avoid DEBUGASSERT in
+ * esp32s3_dmasendsetup directly hanging the entire system.
+ */
+
+static unsigned int g_sd_bounce_log;
+
+static inline bool esp32s3_needs_bounce(const void *buf)
+{
+  return (buf == NULL) || !esp32s3_ptr_dma_capable(buf) ||
+         (((uintptr_t)buf & 3u) != 0);
+}
+#endif
+
 #ifdef CONFIG_ESP32S3_SDMMC
 
 /****************************************************************************
@@ -69,7 +87,8 @@
 #define GPIO_MATRIX_CONST_ONE_INPUT   (0x38)
 #define GPIO_MATRIX_CONST_ZERO_INPUT  (0x3C)
 
-/* Configuration ************************************************************/
+/* Configuration ***********************************************************
+ */
 
 /* Required system configuration options:
  *
@@ -179,11 +198,11 @@ struct sdmmc_dma_s
   volatile uint32_t des3;        /* Buffer address pointer 2 */
 };
 
-/**
+/****************************************************************************
  * This structure lists pin numbers (if SOC_SDMMC_USE_IOMUX is set)
  * or GPIO Matrix signal numbers (if SOC_SDMMC_USE_GPIO_MATRIX is set)
  * for the SD bus signals. Field names match SD bus signal names.
- */
+ ****************************************************************************/
 
 typedef struct
 {
@@ -199,10 +218,10 @@ typedef struct
     uint8_t d7;
 } sdmmc_slot_io_info_t;
 
-/**
+/****************************************************************************
  * Common SDMMC slot info,
  * doesn't depend on SOC_SDMMC_USE_{IOMUX,GPIO_MATRIX}
- */
+ ****************************************************************************/
 
 typedef struct
 {
@@ -275,11 +294,14 @@ static void __esp32s3_putreg(const char *func, uint32_t val, uint32_t addr);
 #  define esp32s3_putreg(val,addr) putreg32(val,addr)
 #endif
 
-/* Low-level helpers ********************************************************/
+/* Low-level helpers *******************************************************
+ */
 
-/* DMA Helpers **************************************************************/
+/* DMA Helpers *************************************************************
+ */
 
-/* Data Transfer Helpers ****************************************************/
+/* Data Transfer Helpers ***************************************************
+ */
 
 static void esp32s3_eventtimeout(wdparm_t arg);
 static void esp32s3_endwait(struct esp32s3_dev_s *priv,
@@ -287,11 +309,13 @@ static void esp32s3_endwait(struct esp32s3_dev_s *priv,
 static void esp32s3_endtransfer(struct esp32s3_dev_s *priv,
                                 sdio_eventset_t wkupevent);
 
-/* Interrupt Handling *******************************************************/
+/* Interrupt Handling ******************************************************
+ */
 
 static int  esp32s3_interrupt(int irq, void *context, void *arg);
 
-/* SDIO interface methods ***************************************************/
+/* SDIO interface methods **************************************************
+ */
 
 /* Mutual exclusion */
 
@@ -349,7 +373,8 @@ static int  esp32s3_dmasendsetup(struct sdio_dev_s *dev,
                                  const uint8_t *buffer, size_t buflen);
 #endif
 
-/* Initialization/uninitialization/reset ************************************/
+/* Initialization/uninitialization/reset ***********************************
+ */
 
 static void esp32s3_callback(void *arg);
 
@@ -877,7 +902,8 @@ static int esp32s3_interrupt(int irq, void *context, void *arg)
       esp32s3_putreg(enabled, ESP32S3_SDMMC_RINTSTS);
 
 #ifdef CONFIG_MMCSD_HAVE_CARDDETECT
-      /* Handle in card detection events ************************************/
+      /* Handle in card detection events ***********************************
+       */
 
       if ((enabled & SDMMC_INT_CDET) != 0)
         {
@@ -920,7 +946,8 @@ static int esp32s3_interrupt(int irq, void *context, void *arg)
         }
 #endif
 
-      /* Handle data transfer events ****************************************/
+      /* Handle data transfer events ***************************************
+       */
 
       pending = enabled & priv->xfrmask;
       if (pending != 0)
@@ -1045,7 +1072,8 @@ static int esp32s3_interrupt(int irq, void *context, void *arg)
             }
         }
 
-      /* Handle wait events *************************************************/
+      /* Handle wait events ************************************************
+       */
 
       pending = enabled & priv->waitmask;
       if (pending != 0)
@@ -1092,7 +1120,8 @@ static int esp32s3_interrupt(int irq, void *context, void *arg)
     }
 
 #ifdef CONFIG_ESP32S3_SDMMC_DMA
-  /* DMA error events *******************************************************/
+  /* DMA error events ******************************************************
+   */
 
   pending = esp32s3_getreg(ESP32S3_SDMMC_IDSTS);
   if ((pending & priv->dmamask) != 0)
@@ -1179,12 +1208,22 @@ static void esp32s3_reset(struct sdio_dev_s *dev)
     {
     }
 
-  /* Select clock source and init phases */
+  /* Select clock source and init phases
+   *
+   * ⚠️ Fix on 2026-09-01: DIN (Data Input sampling phase) was previously
+   * unconfigured = reset default 0. ESP32-S3 SDMMC sampling point falls on
+   * the edge of the data window → intermittent read failures (EIO/timeout,
+   * Intermittent—same card sometimes reads, sometimes doesn't, independent
+   * of partition/capacity). Set DIN=2 (90°, commonly stable value at 20MHz
+   * card clock). DOUT=1 (45°) holds. If still unstable, try DIN=3 (135°) /
+   * 4 (180°), or CORE=1.
+   */
 
   regval = esp32s3_getreg(ESP32S3_SDMMC_CLOCK);
   regval &= ~(SDMMC_CLOCK_CLK_SEL_MASK | SDMMC_CLOCK_PHASE_MASK);
   regval |= SDMMC_CLOCK_CLK_SEL_PLL160M;
   regval |= 1 << SDMMC_CLOCK_PHASE_DOUT_SHIFT;
+  regval |= 2 << SDMMC_CLOCK_PHASE_DIN_SHIFT;   /* 90° sampling phase */
   esp32s3_putreg(regval, ESP32S3_SDMMC_CLOCK);
 
   /* Select clock divider
@@ -1601,7 +1640,8 @@ static void esp32s3_clock(struct sdio_dev_s *dev, enum sdio_clock_e rate)
       regval = freq_khz * 100 << SDMMC_TMOUT_DATA_SHIFT;
     }
 
-  /* always set response timeout to highest value, it's small enough anyway */
+  /* always set response timeout to highest value, it's small enough anyway
+   */
 
   regval |= SDMMC_TMOUT_RESPONSE_MASK;
   esp32s3_putreg(regval, ESP32S3_SDMMC_TMOUT);
@@ -1818,7 +1858,10 @@ static int esp32s3_recvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
   mcinfo("nbytes=%ld\n", (long) nbytes);
 
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
-  DEBUGASSERT(((uint32_t)buffer & 3) == 0);
+  if (((uintptr_t)buffer & 3u) != 0)
+    {
+      return -EINVAL;   /* PIO path needs 4-byte alignment too */
+    }
 
   /* Save the destination buffer information for use by the interrupt
    * handler.
@@ -1884,7 +1927,10 @@ static int esp32s3_sendsetup(struct sdio_dev_s *dev, const uint8_t *buffer,
   mcinfo("nbytes=%ld\n", (long)nbytes);
 
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
-  DEBUGASSERT(((uint32_t)buffer & 3) == 0);
+  if (((uintptr_t)buffer & 3u) != 0)
+    {
+      return -EINVAL;   /* PIO path needs 4-byte alignment too */
+    }
 
   /* Save the source buffer information for use by the interrupt handler */
 
@@ -1957,7 +2003,7 @@ static int esp32s3_cancel(struct sdio_dev_s *dev)
   wd_cancel(&priv->waitwdog);
 
 #if defined(CONFIG_ESP32S3_SDMMC_DMA) && defined(CONFIG_ESP32S3_SPIRAM)
-  if (!esp32s3_ptr_dma_capable(priv->buffer) && priv->dma_buf)
+  if (esp32s3_needs_bounce(priv->buffer) && priv->dma_buf)
     {
       kmm_free(priv->dma_buf);
       priv->dma_buf = NULL;
@@ -2469,7 +2515,7 @@ out:
   leave_critical_section(flags);
 
 #if defined(CONFIG_ESP32S3_SDMMC_DMA) && defined(CONFIG_ESP32S3_SPIRAM)
-  if (!esp32s3_ptr_dma_capable(priv->buffer) && priv->dma_buf)
+  if (esp32s3_needs_bounce(priv->buffer) && priv->dma_buf)
     {
       if (!priv->wrdir && wkupevent == SDIOWAIT_TRANSFERDONE)
         {
@@ -2567,8 +2613,16 @@ static int esp32s3_fill_dma_desc(struct esp32s3_dev_s *priv)
   uint32_t buffer = (uint32_t)priv->buffer;
 
 #ifdef CONFIG_ESP32S3_SPIRAM
-  if (!esp32s3_ptr_dma_capable(priv->buffer))
+  if (esp32s3_needs_bounce(priv->buffer))
     {
+      if (g_sd_bounce_log < 5)
+        {
+          g_sd_bounce_log++;
+          printf("[SD-DMA] bounce %s buf=%p len=%u caller=%p\n",
+                 priv->wrdir ? "wr" : "rd", priv->buffer,
+                 (unsigned)buflen, __builtin_return_address(0));
+        }
+
       priv->dma_buf = kmm_memalign(16, buflen);
       if (!priv->dma_buf)
         {
@@ -2672,7 +2726,12 @@ static int esp32s3_dmarecvsetup(struct sdio_dev_s *dev, uint8_t *buffer,
 
   DEBUGASSERT(priv != NULL);
 
-  DEBUGASSERT(buffer != NULL && buflen > 0 && ((uint32_t)buffer & 3) == 0);
+  if (buffer == NULL || buflen == 0)
+    {
+      ferr("ERROR: bad dma setup buffer=%p buflen=%u\n",
+           buffer, (unsigned)buflen);
+      return -EINVAL;
+    }
 
   /* Save the destination buffer information for use by the interrupt
    * handler.
@@ -2744,7 +2803,12 @@ static int esp32s3_dmasendsetup(struct sdio_dev_s *dev,
   DEBUGASSERT(priv != NULL);
 
   mcinfo("buflen=%lu\n", (unsigned long)buflen);
-  DEBUGASSERT(buffer != NULL && buflen > 0 && ((uint32_t)buffer & 3) == 0);
+  if (buffer == NULL || buflen == 0)
+    {
+      ferr("ERROR: bad dma setup buffer=%p buflen=%u\n",
+           buffer, (unsigned)buflen);
+      return -EINVAL;
+    }
 
   /* Save the destination buffer information for use by the interrupt
    * handler.

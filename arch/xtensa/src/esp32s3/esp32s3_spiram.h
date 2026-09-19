@@ -215,6 +215,22 @@ uint32_t esp_spiram_allocable_vaddr_start(void);
 
 uint32_t esp_spiram_allocable_vaddr_end(void);
 
+/* PSRAM top carve: 128KB reserved out of the common heap so static-ish
+ * buffers (camera RX/shadow, later voice) can live in PSRAM
+ * deterministically and stop occupying the scarce internal DRAM that
+ * esp_wifi requires. Kept out of the umm region (see xtensa_add_region in
+ * esp32s3_allocateheap.c). 64B aligned bump allocator, no free.
+ */
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#define ESP32S3_PSRAM_STATIC_CARVE_SIZE 0x200000
+
+uint32_t esp32s3_psram_static_base(void);
+void *esp32s3_psram_static_alloc(size_t size);
+
 #ifdef __cplusplus
 }
 #endif

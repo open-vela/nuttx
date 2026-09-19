@@ -49,6 +49,30 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+/* ESP32-S3 DRAM layout (see Zephyr soc/espressif/esp32s3/memory.h):
+ *
+ *   0x3fc88000               SRAM_DRAM_START (NuttX dram0_0_seg origin)
+ *       :                    NuttX static data + heap
+ *   0x3fcd7e00               DRAM_BUFFERS_START (UART/USB/SPI download
+ *                            mode shared buffers; reclaimable at runtime)
+ *   0x3fce9710               PRO CPU stack (reclaimable after RTOS start)
+ *   0x3fceb710               APP CPU stack (reclaimable after RTOS start)
+ *   0x3fced710               ROM .bss/.data (NOT reclaimable)
+ *   0x3fcf0000               SOC_DIRAM_DRAM_HIGH
+ *
+ * The ROM layout table's dram0_rtos_reserved_start points to
+ * DRAM_BUFFERS_START (~0x3fcd7e00), which leaves ~22KB on the table and,
+ * more importantly, can fall *below* _sheap once static data grows,
+ * producing a zero/negative heap and an immediate boot-time assert.
+ *
+ * We therefore cap the flat-build heap at the start of the ROM .bss/.data
+ * region (0x3fced710): the PRO/APP CPU stacks above DRAM_BUFFERS_END are
+ * dead after the 2nd-stage bootloader hands over, so they are safe to
+ * reclaim as heap. This adds ~135KB of heap on a 480x320 UI build.
+ */
+
+#define ESP32S3_HEAP_TOP     0x3fced710
+
 #ifdef CONFIG_MM_KERNEL_HEAP
 #  if defined(CONFIG_ESP32S3_SPIRAM)
 #    define MM_USER_HEAP_EXTRAM
@@ -115,7 +139,7 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
    */
 
   ubase = (uintptr_t)(_sheap) + XTENSA_IMEM_REGION_SIZE;
-  utop  = (uintptr_t)ets_rom_layout_p->dram0_rtos_reserved_start;
+  utop  = ESP32S3_HEAP_TOP;
 #endif /* CONFIG_MM_KERNEL_HEAP */
 
   usize = utop - ubase;
@@ -219,8 +243,13 @@ void xtensa_add_region(void)
 
 #if defined(CONFIG_ESP32S3_SPIRAM_COMMON_HEAP) && !defined(MM_USER_HEAP_EXTRAM)
   start = (void *)esp_spiram_allocable_vaddr_start();
-  end = (void *)(esp_spiram_allocable_vaddr_end() -
-                 esp_himem_reserved_area_size());
+
+  /* Top ESP32S3_PSRAM_STATIC_CARVE_SIZE bytes are kept out of the common
+   * heap (camera RX/shadow etc. via esp32s3_psram_static_alloc) so those
+   * buffers stop eating the internal DRAM that esp_wifi requires.
+   */
+
+  end = (void *)esp32s3_psram_static_base();
   size  = (size_t)(end - start);
 #endif
 
