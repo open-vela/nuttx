@@ -1,0 +1,29 @@
+#
+# RK3576 chip options
+#
+
+config RK3576_SAI
+	bool "SAI (I2S) capture support"
+	default n
+	---help---
+		Enable the SAI2 capture driver used to record from an I2S MEMS
+		microphone wired to the 40-pin header (SCLK/LRCK/SDI on pins
+		18/26/28).  The AMP slave owns SAI2 exclusively; SAI1 stays with
+		Linux for the on-board ES8388 codec.
+
+config RK3576_PDM
+	bool "PDM digital microphone capture support"
+	default n
+	---help---
+		Enable the PDM1 capture driver used to record from a PDM MEMS
+		microphone wired to the 40-pin header: CLK on GPIO4_A6 (pin 7)
+		and GPIO4_B0 (pin 8), DATA on GPIO4_B2 (pin 12).  Those pads
+		belong to uart6 and spi4 in the stock device tree, so the AMP
+		dtsi disables both.  They are also a 1.8 V IO domain, so the
+		microphone must run at 1.8 V or behind a level shifter.
+
+		This is the RK3576's "v2" PDM IP (see rk3576_pdm.c), which
+		shares no register layout with the classic Rockchip PDM.
+
+		Takes precedence over RK3576_SAI when both are enabled: the
+		microphone demo uses one front end at a time.

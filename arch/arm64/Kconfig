@@ -53,6 +53,15 @@ config ARCH_CHIP_RK3399
 	---help---
 		Rockchip RK3399 SoC
 
+config ARCH_CHIP_RK3576
+	bool "Rockchip RK3576"
+	select ARCH_CORTEX_A53
+	select ARCH_HAVE_IRQPRIO
+	---help---
+		Rockchip RK3576 SoC (4x Cortex-A72 + 4x Cortex-A53 + Cortex-M0).
+		Primary use case: openvela as an AMP slave on one A53 core
+		(GIC-400 shared with a master OS, see ARM64_GIC_SLAVE).
+
 config ARCH_CHIP_QEMU_ARM64
 	bool "QEMU virt platform (ARMv8a)"
 	select ARCH_HAVE_ADDRENV
@@ -347,6 +356,7 @@ config ARCH_CHIP
 	string
 	default "a64"       if ARCH_CHIP_A64
 	default "rk3399"    if ARCH_CHIP_RK3399
+	default "rk3576"    if ARCH_CHIP_RK3576
 	default "zynq-mpsoc" if ARCH_CHIP_ZYNQ_MPSOC
 	default "qemu"      if ARCH_CHIP_QEMU_ARM64
 	default "goldfish"  if ARCH_CHIP_GOLDFISH_ARM64
@@ -401,6 +411,17 @@ config ARM64_GIC_VERSION
 		architecture
 
 if ARM64_GIC_VERSION = 2
+
+config ARM64_GIC_SLAVE
+	bool "AMP slave: do not initialize the GIC distributor"
+	default n
+	---help---
+		Build for an AMP slave core that shares a GICv2 with a master OS
+		(e.g. Linux) owning the distributor.  Skip the distributor global
+		initialization (arm_gic0_initialize) entirely: reprogramming
+		GICD_CTLR / priorities / targets / enables here would destroy the
+		master's interrupt configuration.  Only the banked CPU-interface
+		setup and per-IRQ write-1-to-set operations are performed.
 
 config ARM64_GIC_EOIMODE
 	bool
@@ -511,6 +532,10 @@ endif
 
 if ARCH_CHIP_RK3399
 source "arch/arm64/src/rk3399/Kconfig"
+endif
+
+if ARCH_CHIP_RK3576
+source "arch/arm64/src/rk3576/Kconfig"
 endif
 
 if ARCH_CHIP_QEMU_ARM64
