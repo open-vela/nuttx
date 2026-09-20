@@ -1,0 +1,376 @@
+#############################################################################
+# arch/loongarch/src/ls2k0300/Kconfig
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+#############################################################################
+
+comment "LS2K0300 Configuration Options"
+
+config LS2K0300_UBOOT_BOOT
+	bool "Boot from U-Boot"
+	default n
+	---help---
+		Enable U-Boot boot support. When enabled, the system expects to be
+		loaded by U-Boot at address 0x9000000098000000. The L2 scache will
+		not be locked as memory.
+
+menu "LS2K0300 Peripheral Support"
+
+config LS2K0300_HAVE_UART0
+	bool
+	default y
+	select UART0_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config LS2K0300_HAVE_UART1
+	bool
+	default y
+	select UART1_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config LS2K0300_HAVE_UART2
+	bool
+	default y
+	select UART2_SERIALDRIVER
+	select ARCH_HAVE_SERIAL_TERMIOS
+
+config LS2K0300_UART0
+	bool "UART0"
+	default y
+	select ARCH_HAVE_UART0
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select LS2K0300_UART
+
+config LS2K0300_UART1
+	bool "UART1"
+	default n
+	select ARCH_HAVE_UART1
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select LS2K0300_UART
+
+config LS2K0300_UART2
+	bool "UART2"
+	default n
+	select ARCH_HAVE_UART2
+	select ARCH_HAVE_SERIAL_TERMIOS
+	select LS2K0300_UART
+
+config LS2K0300_UART
+	bool
+
+config LS2K0300_ADC
+	bool "ADC"
+	default n
+	select ANALOG
+	select ADC
+	---help---
+		Enable LS2K0300 ADC driver support
+
+config LS2K0300_RTC
+	bool "RTC"
+	default n
+	select RTC
+	select RTC_DATETIME
+	select RTC_DRIVER
+	select RTC_ARCH
+	---help---
+		Enable LS2K0300 RTC driver support
+
+config LS2K0300_I2C
+	bool "I2C"
+	default n
+	select I2C
+	select I2C_DRIVER
+	---help---
+		Enable LS2K0300 I2C driver support
+
+if LS2K0300_I2C
+
+config LS2K0300_I2C0
+	bool "I2C0"
+	default n
+	---help---
+		Enable LS2K0300 I2C0 controller
+
+config LS2K0300_I2C1
+	bool "I2C1"
+	default n
+	---help---
+		Enable LS2K0300 I2C1 controller
+
+config LS2K0300_I2C2
+	bool "I2C2"
+	default n
+	---help---
+		Enable LS2K0300 I2C2 controller
+
+config LS2K0300_I2C3
+	bool "I2C3"
+	default n
+	---help---
+		Enable LS2K0300 I2C3 controller
+
+endif
+
+config LS2K0300_PWM
+	bool "PWM"
+	default n
+	select PWM
+	---help---
+		Enable LS2K0300 PWM controller driver support
+
+if LS2K0300_PWM
+
+config LS2K0300_PWM0
+	bool "PWM0"
+	default n
+	---help---
+		Enable LS2K0300 PWM0 controller
+
+config LS2K0300_PWM1
+	bool "PWM1"
+	default n
+	---help---
+		Enable LS2K0300 PWM1 controller
+
+config LS2K0300_PWM2
+	bool "PWM2"
+	default n
+	---help---
+		Enable LS2K0300 PWM2 controller
+
+config LS2K0300_PWM3
+	bool "PWM3"
+	default n
+	---help---
+		Enable LS2K0300 PWM3 controller
+
+endif
+
+config LS2K0300_SPI
+	bool "SPI Flash Controller"
+	default n
+	select SPI
+	---help---
+		Enable LS2K0300 SPI flash controller driver support
+
+if LS2K0300_SPI
+
+config LS2K0300_SPI0
+	bool "SPI0"
+	default n
+	---help---
+		Enable LS2K0300 SPI0 controller
+
+config LS2K0300_SPI1
+	bool "SPI1"
+	default n
+	---help---
+		Enable LS2K0300 SPI1 controller
+
+endif
+
+config LS2K0300_SPIIO
+	bool "SPI IO Controller"
+	default n
+	select SPI
+	---help---
+		Enable LS2K0300 SPI IO controller driver support
+
+if LS2K0300_SPIIO
+
+config LS2K0300_SPIIO2
+	bool "SPIIO2"
+	default n
+	---help---
+		Enable LS2K0300 SPI2 (IO) controller
+
+config LS2K0300_SPIIO3
+	bool "SPIIO3"
+	default n
+	---help---
+		Enable LS2K0300 SPI3 (IO) controller
+
+endif
+
+config LS2K0300_THERMAL
+	bool "Thermal"
+	default n
+	---help---
+		Enable LS2K0300 thermal sensor driver support
+
+config LS2K0300_WDT
+	bool "Watchdog"
+	default n
+	select WATCHDOG
+	---help---
+		Enable LS2K0300 watchdog timer driver support
+
+config LS2K0300_GPIO
+	bool "GPIO"
+	default n
+	select DEV_GPIO
+	---help---
+		Enable LS2K0300 GPIO driver support
+
+if LS2K0300_GPIO
+
+config LS2K0300_GPIO_IRQ
+	bool "GPIO interrupt support"
+	default n
+	depends on LS2K0300_GPIO
+	---help---
+		Enable GPIO interrupt support
+
+endif
+
+config LS2K0300_PINCTRL
+	bool "Pin Controller"
+	default n
+	select PINCTRL
+	---help---
+		Enable LS2K0300 pin controller driver support
+
+config LS2K0300_ETHERNET
+	bool "Ethernet"
+	default n
+	select NET
+	select NET_ETHERNET
+	select NET_STATISTICS
+	---help---
+		Enable LS2K0300 Ethernet driver support
+
+if LS2K0300_ETHERNET
+
+config LS2K0300_ETHERNET0
+	bool "Ethernet0 (GMAC0)"
+	default y
+	---help---
+		Enable LS2K0300 GMAC0 Ethernet controller
+
+config LS2K0300_ETHERNET_PHY_ADDR
+	int "PHY Address"
+	default 0
+	---help---
+		PHY address for MDIO communication
+
+config LS2K0300_ETHERNET_WORKQUEUE
+	bool "Use Work Queue"
+	default y
+	depends on SCHED_WORKQUEUE
+	---help---
+		Use work queue for interrupt handling
+
+endif
+
+endmenu
+
+menu "LS2K0300 UART Configuration"
+
+config UART0_BAUD
+	int "UART0 Baud Rate"
+	default 115200
+	depends on LS2K0300_UART0
+
+config UART0_BITS
+	int "UART0 Bits"
+	default 8
+	depends on LS2K0300_UART0
+
+config UART0_PARITY
+	int "UART0 Parity"
+	default 0
+	depends on LS2K0300_UART0
+
+config UART0_2STOP
+	int "UART0 Stop Bits"
+	default 0
+	depends on LS2K0300_UART0
+
+config UART0_RXBUFSIZE
+	int "UART0 Rx Buffer Size"
+	default 256
+	depends on LS2K0300_UART0
+
+config UART0_TXBUFSIZE
+	int "UART0 Tx Buffer Size"
+	default 256
+	depends on LS2K0300_UART0
+
+config UART1_BAUD
+	int "UART1 Baud Rate"
+	default 115200
+	depends on LS2K0300_UART1
+
+config UART1_BITS
+	int "UART1 Bits"
+	default 8
+	depends on LS2K0300_UART1
+
+config UART1_PARITY
+	int "UART1 Parity"
+	default 0
+	depends on LS2K0300_UART1
+
+config UART1_2STOP
+	int "UART1 Stop Bits"
+	default 0
+	depends on LS2K0300_UART1
+
+config UART1_RXBUFSIZE
+	int "UART1 Rx Buffer Size"
+	default 256
+	depends on LS2K0300_UART1
+
+config UART1_TXBUFSIZE
+	int "UART1 Tx Buffer Size"
+	default 256
+	depends on LS2K0300_UART1
+
+config UART2_BAUD
+	int "UART2 Baud Rate"
+	default 115200
+	depends on LS2K0300_UART2
+
+config UART2_BITS
+	int "UART2 Bits"
+	default 8
+	depends on LS2K0300_UART2
+
+config UART2_PARITY
+	int "UART2 Parity"
+	default 0
+	depends on LS2K0300_UART2
+
+config UART2_2STOP
+	int "UART2 Stop Bits"
+	default 0
+	depends on LS2K0300_UART2
+
+config UART2_RXBUFSIZE
+	int "UART2 Rx Buffer Size"
+	default 256
+	depends on LS2K0300_UART2
+
+config UART2_TXBUFSIZE
+	int "UART2 Tx Buffer Size"
+	default 256
+	depends on LS2K0300_UART2
+
+endmenu
