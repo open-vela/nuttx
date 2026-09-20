@@ -113,7 +113,7 @@ retry:
 
   board_autoled_off(LED_SIGNAL);
 
-  g_running_task = NULL;
+  g_running_tasks[this_cpu()] = this_task();
   rtcb->xcp.regs = rtcb->xcp.saved_regs;
   rtcb->xcp.saved_regs = NULL;
   xtensa_context_restore();
