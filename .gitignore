@@ -78,3 +78,7 @@ kwarning
 SAVEMake.defs
 SAVEconfig
 .aider*
+
+# Session logs and unused JPEG driver draft (kept out of tree)
+logs/
+drivers/video/esp32p4_jpeg_enc.c

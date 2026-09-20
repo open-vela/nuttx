@@ -656,10 +656,6 @@ static void convert_to_imgdatafmt(FAR video_format_t *video,
         data->pixelformat = IMGDATA_PIX_FMT_RGB565;
         break;
 
-      case V4L2_PIX_FMT_RGB565X:
-        data->pixelformat = IMGDATA_PIX_FMT_RGB565X;
-        break;
-
       case V4L2_PIX_FMT_JPEG:
         data->pixelformat = IMGDATA_PIX_FMT_JPEG;
         break;
@@ -701,10 +697,6 @@ static void convert_to_imgsensorfmt(FAR video_format_t *video,
 
       case V4L2_PIX_FMT_RGB565:
         sensor->pixelformat = IMGSENSOR_PIX_FMT_RGB565;
-        break;
-
-      case V4L2_PIX_FMT_RGB565X:
-        sensor->pixelformat = IMGSENSOR_PIX_FMT_RGB565X;
         break;
 
       case V4L2_PIX_FMT_JPEG:
@@ -1360,7 +1352,6 @@ static size_t get_bufsize(FAR video_format_t *vf)
       case V4L2_PIX_FMT_YUYV:
       case V4L2_PIX_FMT_UYVY:
       case V4L2_PIX_FMT_RGB565:
-      case V4L2_PIX_FMT_RGB565X:
       default:
         return ret * 2;
       case V4L2_PIX_FMT_JPEG:
@@ -2618,7 +2609,9 @@ static int capture_try_fmt(FAR struct file *filep,
                sizeof(video_format_t));
         vf[CAPTURE_FMT_SUB].width       = fmt->fmt.pix.width;
         vf[CAPTURE_FMT_SUB].height      = fmt->fmt.pix.height;
-        vf[CAPTURE_FMT_SUB].sizeimage   = fmt->fmt.pix.sizeimage;
+        vf[CAPTURE_FMT_SUB].sizeimage   = fmt->fmt.pix.sizeimage ?
+                                            fmt->fmt.pix.sizeimage :
+                                            get_bufsize(&vf[CAPTURE_FMT_SUB]);
         vf[CAPTURE_FMT_SUB].pixelformat =
             fmt->fmt.pix.pixelformat == V4L2_PIX_FMT_SUBIMG_UYVY ?
               V4L2_PIX_FMT_UYVY : V4L2_PIX_FMT_RGB565;
@@ -2628,7 +2621,6 @@ static int capture_try_fmt(FAR struct file *filep,
       case V4L2_PIX_FMT_YUYV:
       case V4L2_PIX_FMT_UYVY:
       case V4L2_PIX_FMT_RGB565:
-      case V4L2_PIX_FMT_RGB565X:
       case V4L2_PIX_FMT_JPEG:
       case V4L2_PIX_FMT_ENTROPY:
       case V4L2_PIX_FMT_JPEG_WITH_SUBIMG:
@@ -2636,11 +2628,25 @@ static int capture_try_fmt(FAR struct file *filep,
         vf[CAPTURE_FMT_MAIN].width       = fmt->fmt.pix.width;
         vf[CAPTURE_FMT_MAIN].height      = fmt->fmt.pix.height;
         vf[CAPTURE_FMT_MAIN].pixelformat = fmt->fmt.pix.pixelformat;
-        vf[CAPTURE_FMT_MAIN].sizeimage   = fmt->fmt.pix.sizeimage;
+        vf[CAPTURE_FMT_MAIN].sizeimage   = fmt->fmt.pix.sizeimage ?
+                                            fmt->fmt.pix.sizeimage :
+                                            get_bufsize(&vf[CAPTURE_FMT_MAIN]);
         break;
 
       default:
         return -EINVAL;
+    }
+
+  /* Write the resolved sizeimage back to the caller's format.  S_FMT
+   * subsequently stores fmt->fmt.pix.sizeimage into the stored format, and
+   * G_FMT reports it.  If we left it at 0 (userspace commonly passes 0 and
+   * expects the driver to fill it in), a capture app would allocate a
+   * zero-length buffer and DMA would write past it.
+   */
+
+  if (nr_fmt == 1)
+    {
+      fmt->fmt.pix.sizeimage = vf[CAPTURE_FMT_MAIN].sizeimage;
     }
 
   return validate_frame_setting(cmng,

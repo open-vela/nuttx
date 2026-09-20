@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_rtc.c
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -25,7 +27,7 @@
 #include <nuttx/config.h>
 
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <string.h>
@@ -39,23 +41,13 @@
 
 #include "esp_hr_timer.h"
 #include "esp_rtc.h"
+#include "esp_rtc_time.h"
 #include "riscv_internal.h"
 
 #include "esp_attr.h"
 #include "soc/rtc.h"
 
-/* Chip-dependent headers from esp-hal-3rdparty */
-
-#ifdef CONFIG_ESPRESSIF_ESP32C3
-#include "esp32c3/rtc.h"
-#include "esp32c3/rom/rtc.h"
-#elif defined(CONFIG_ESPRESSIF_ESP32C6)
-#include "esp32c6/rtc.h"
-#include "esp32c6/rom/rtc.h"
-#elif defined(CONFIG_ESPRESSIF_ESP32H2)
-#include "esp32h2/rtc.h"
-#include "esp32h2/rom/rtc.h"
-#endif
+#include "rom/rtc.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -453,6 +445,8 @@ static int esp_rtc_setalarm_nolock(struct rtc_lowerhalf_s *lower,
       cbinfo->index          = id;
       hr_timer_args.arg      = cbinfo;
       hr_timer_args.callback = rtc_hr_timer_cb;
+      hr_timer_args.name     = "rtc_alarm";
+      hr_timer_args.skip_unhandled_events = false;
 
       ret = esp_hr_timer_create(&hr_timer_args, &cbinfo->alarm_hdl);
       if (ret < 0)
@@ -618,6 +612,7 @@ static int esp_rtc_rdalarm(struct rtc_lowerhalf_s *lower,
   struct timespec ts;
   struct alm_cbinfo_s *cbinfo;
   irqstate_t flags;
+  uint64_t time_us;
 
   DEBUGASSERT(lower != NULL);
   DEBUGASSERT(alarminfo != NULL);
@@ -631,13 +626,13 @@ static int esp_rtc_rdalarm(struct rtc_lowerhalf_s *lower,
 
   cbinfo = &priv->alarmcb[alarminfo->id];
 
-  ts.tv_sec = (esp_hr_timer_time_us() + g_rtc_save->offset +
-              cbinfo->deadline_us) / USEC_PER_SEC;
-  ts.tv_nsec = ((esp_hr_timer_time_us() + g_rtc_save->offset +
-              cbinfo->deadline_us) % USEC_PER_SEC) * NSEC_PER_USEC;
+  time_us = esp_hr_timer_time_us() + g_rtc_save->offset +
+            cbinfo->deadline_us;
 
-  localtime_r((const time_t *)&ts.tv_sec,
-              (struct tm *)alarminfo->time);
+  ts.tv_sec = time_us / USEC_PER_SEC;
+  ts.tv_nsec = (time_us % USEC_PER_SEC) * NSEC_PER_USEC;
+
+  localtime_r(&ts.tv_sec, (struct tm *)alarminfo->time);
 
   spin_unlock_irqrestore(&priv->lock, flags);
 
@@ -705,7 +700,7 @@ time_t up_rtc_time(void)
 
   spin_unlock_irqrestore(&g_rtc_lowerhalf.lock, flags);
 
-  return (time_t)(time_us / USEC_PER_SEC);
+  return time_us / USEC_PER_SEC;
 }
 #endif /* !CONFIG_RTC_HIRES */
 
@@ -781,7 +776,7 @@ int up_rtc_settime(const struct timespec *ts)
 
   flags = spin_lock_irqsave(&g_rtc_lowerhalf.lock);
 
-  now_us = ((uint64_t) ts->tv_sec) * USEC_PER_SEC +
+  now_us = ts->tv_sec * USEC_PER_SEC +
           ts->tv_nsec / NSEC_PER_USEC;
 
 #ifdef CONFIG_RTC_DRIVER
@@ -847,6 +842,91 @@ int up_rtc_initialize(void)
 
   return OK;
 }
+
+/****************************************************************************
+ * Name: esp_set_time_from_rtc
+ *
+ * Description:
+ *   Update the offset between RTC timer and HR-Timer after light sleep
+ *   wake-up. This function is called by the ESP-HAL sleep_modes.c after
+ *   waking from light sleep to resynchronize the timers.
+ *
+ * Input Parameters:
+ *   None.
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_RTC_DRIVER) && defined(CONFIG_ESPRESSIF_HR_TIMER)
+void esp_set_time_from_rtc(void)
+{
+  irqstate_t flags;
+
+  flags = spin_lock_irqsave(&g_rtc_lowerhalf.lock);
+
+  if (g_hr_timer_enabled)
+    {
+      /* Update offset between RTC and HR Timer */
+
+      g_rtc_save->offset = esp_rtc_get_time_us() - esp_hr_timer_time_us();
+    }
+
+  spin_unlock_irqrestore(&g_rtc_lowerhalf.lock, flags);
+}
+#endif /* CONFIG_RTC_DRIVER && CONFIG_ESPRESSIF_HR_TIMER */
+
+/****************************************************************************
+ * Name: esp_sync_timekeeping_timers
+ *
+ * Description:
+ *   Synchronize the RTC timer and HR-Timer by recalculating and adjusting
+ *   the offset between them. This function can be called periodically to
+ *   compensate for any drift between the two time sources.
+ *
+ * Input Parameters:
+ *   None.
+ *
+ * Returned Value:
+ *   None.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_RTC_DRIVER) && defined(CONFIG_ESPRESSIF_HR_TIMER)
+void esp_sync_timekeeping_timers(void)
+{
+  irqstate_t flags;
+  int64_t new_offset;
+  int64_t drift;
+
+  flags = spin_lock_irqsave(&g_rtc_lowerhalf.lock);
+
+  if (g_hr_timer_enabled)
+    {
+      /* Recalculate the offset between RTC and HR Timer */
+
+      new_offset = esp_rtc_get_time_us() - esp_hr_timer_time_us();
+
+      /* Calculate the drift between the old and new offset */
+
+      drift = g_rtc_save->offset - new_offset;
+
+      /* Adjust the boot time to compensate for the drift.
+       * This ensures that the absolute time remains consistent
+       * across both time sources.
+       */
+
+      esp_rtc_set_boot_time(esp_rtc_get_boot_time() + drift);
+
+      /* Update the offset with the new value */
+
+      g_rtc_save->offset = new_offset;
+    }
+
+  spin_unlock_irqrestore(&g_rtc_lowerhalf.lock, flags);
+}
+#endif /* CONFIG_RTC_DRIVER && CONFIG_ESPRESSIF_HR_TIMER */
 
 /****************************************************************************
  * Name: esp_rtc_driverinit

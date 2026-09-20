@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_tickless.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -44,7 +46,7 @@
  *
  * Returned Value:
  *   The time in system ticks remaining for idle.
- *   Zero means system is busy.
+ *   Zero means that the system is in idle mode without any timer running.
  *
  ****************************************************************************/
 

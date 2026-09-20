@@ -37,6 +37,7 @@
 
 #include "riscv_internal.h"
 
+
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
@@ -127,9 +128,40 @@ static uintreg_t *riscv_doirq_top(int irq, uintreg_t *regs)
 
   nxsched_suspend_scheduler(tcb);
 
-  /* Deliver the IRQ */
+  /* Deliver the IRQ.
+   *
+   * ESP-HAL peripheral ISRs are compiled against ESP-IDF and do not preserve
+   * callee-saved registers (they stash the IRQ number in s1 and clobber
+   * s0-s5). Save s0-s5 across the dispatch so the g_running_tasks base,
+   * restore_context, and the g_readytorun base survive and the comparisons
+   * below do not fault. */
 
-  IRQ_DISPATCH(irq, regs);
+  {
+    uint32_t saved[6];
+
+    __asm__ volatile(
+      "sw s0,  0(%0)\n"
+      "sw s1,  4(%0)\n"
+      "sw s2,  8(%0)\n"
+      "sw s3, 12(%0)\n"
+      "sw s4, 16(%0)\n"
+      "sw s5, 20(%0)\n"
+      : : "r"(saved) : "memory"
+    );
+
+    IRQ_DISPATCH(irq, regs);
+
+    __asm__ volatile(
+      "lw s0,  0(%0)\n"
+      "lw s1,  4(%0)\n"
+      "lw s2,  8(%0)\n"
+      "lw s3, 12(%0)\n"
+      "lw s4, 16(%0)\n"
+      "lw s5, 20(%0)\n"
+      : : "r"(saved) : "memory"
+    );
+  }
+
   tcb = this_task();
 
   /* Check for a context switch. */

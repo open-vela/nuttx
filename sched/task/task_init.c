@@ -75,13 +75,13 @@ static int task_setup(FAR struct tcb_s *tcb, const char *name, main_t entry,
                       FAR char * const argv[], FAR char * const envp[],
                       int ttype)
 {
-  size_t stacksize = attr->stacksize;
+  size_t stacksize = attr ? attr->stacksize : CONFIG_DEFAULT_TASK_STACKSIZE;
 #ifndef CONFIG_BUILD_KERNEL
-  FAR void *stack = attr->stackaddr;
+  FAR void *stack = attr ? attr->stackaddr : NULL;
 #else
   FAR void *stack = NULL;
 #endif
-  int priority = attr->priority;
+  int priority = attr ? attr->priority : SCHED_NORMAL;
   int ret;
 
   /* Duplicate the parent tasks environment */
@@ -217,7 +217,7 @@ int nxtask_init(FAR struct tcb_s *tcb, const char *name, main_t entry,
 {
   int ttype = atomic_read(&tcb->flags) & TCB_FLAG_TTYPE_MASK;
 #ifdef CONFIG_MM_TASK_HEAP
-  size_t heapsize = attr->heapsize;
+  size_t heapsize = attr ? attr->heapsize : 0;
 #else
   size_t heapsize = 0;
 #endif

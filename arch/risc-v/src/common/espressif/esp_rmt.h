@@ -1,6 +1,8 @@
 /****************************************************************************
  * arch/risc-v/src/common/espressif/esp_rmt.h
  *
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.  The
@@ -27,6 +29,10 @@
 
 #include <nuttx/config.h>
 #include <semaphore.h>
+#include <sys/types.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <nuttx/circbuf.h>
 #include <nuttx/spinlock.h>
 
 /****************************************************************************
@@ -49,6 +55,34 @@
  * Public Types
  ****************************************************************************/
 
+/* The RMT peripheral vtable */
+
+struct rmt_dev_s;
+
+struct rmt_ops_s
+{
+  CODE int      (*open)(FAR struct rmt_dev_s *dev);
+  CODE int      (*close)(FAR struct rmt_dev_s *dev);
+  CODE ssize_t  (*write)(FAR struct rmt_dev_s *dev,
+                         FAR const char *buffer,
+                         size_t buflen);
+  CODE ssize_t  (*read)(FAR struct rmt_dev_s *dev,
+                        FAR char *buffer,
+                        size_t buflen);
+};
+
+/* RMT device structure — initial fields visible to upper-half drivers.
+ * The ESP lower-half extends this with hardware-specific fields.
+ */
+
+struct rmt_dev_s
+{
+  FAR const struct rmt_ops_s *ops;
+  FAR struct circbuf_s       *circbuf;
+  sem_t                      *recvsem;
+  int                         minor;
+};
+
 /****************************************************************************
  * Public Data
  ****************************************************************************/
@@ -66,38 +100,36 @@ extern "C"
 #if defined(CONFIG_ESP_RMT)
 
 /****************************************************************************
- * Name: esp_rmt_tx_init
+ * Name: esp_rmt_rx_init
  *
  * Description:
  *   Initialize the selected RMT device in TX mode
  *
  * Input Parameters:
- *   ch   - The RMT's channel that will be used
- *   pin  - The pin used for the TX channel
+ *   tx_pin  - The pin used for the TX channel
  *
  * Returned Value:
  *   Valid RMT device structure reference on success; NULL, otherwise.
  *
  ****************************************************************************/
 
-struct rmt_dev_s *esp_rmt_tx_init(int ch, int pin);
+struct rmt_dev_s *esp_rmt_rx_init(int tx_pin);
 
 /****************************************************************************
- * Name: esp_rmt_rx_init
+ * Name: esp_rmt_tx_init
  *
  * Description:
- *   Initialize the selected RMT device in RC mode
+ *   Initialize the selected RMT device in RX mode
  *
  * Input Parameters:
- *   ch   - The RMT's channel that will be used
- *   pin  - The pin used for the RX channel
+ *   rx_pin  - The pin used for the RX channel
  *
  * Returned Value:
  *   Valid RMT device structure reference on success; NULL, otherwise.
  *
  ****************************************************************************/
 
-struct rmt_dev_s *esp_rmt_rx_init(int ch, int pin);
+struct rmt_dev_s *esp_rmt_tx_init(int rx_pin);
 
 #endif
 

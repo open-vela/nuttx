@@ -316,7 +316,54 @@ static int uart_putxmitchar(FAR uart_dev_t *dev, int ch, bool oktoblock)
 #endif
               uart_enabletxint(dev);
               uart_spinunlock(dev, true, flags);
+              /* Wakeup-loss probe (RAM markers): bump the block counter right
+               * before sleeping on xmitsem and the wake counter right after
+               * nxsem_wait returns.  If blocks > wakeups at hang time, a
+               * writer is stuck in nxsem_wait forever.
+               * 0x5010ff68 = #blocks, 0x5010ff6c = #wakeups. */
+              *((volatile uint32_t *)0x5010ff68) += 1;
+              /* Block-time snapshot (RAM markers, survives reset), written on
+               * EVERY block so the last write always captures the stranded
+               * block (blocks-wakeups == 1).  Self-check: the snapshot's seq
+               * (0x5010ff24) must equal the blocks counter (0x5010ff68) read
+               * by the boot M dump; if the boot wrote to the console before
+               * the dump the two differ and the snapshot is discarded.  The
+               * boot dump reads these BEFORE its own console output, so boot
+               * pollution is not expected.  jbk (0x5010ff28) records the
+               * jpegnc stage marker at the block to identify the writer.
+               *   0x5010ff14 = USJ int_ena (IN_EMPTY = bit3, RX = bit2)
+               *   0x5010ff18 = USJ int_st  (IN_EMPTY pending = bit3)
+               *   0x5010ff1c = xmit head<<16 | tail
+               *   0x5010ff20 = xmitsem count (signed)
+               *   0x5010ff24 = blocks sequence number at this block
+               *   0x5010ff28 = jbk stage marker (0x5052 = app final printf)
+               *   0x5010ff2c = mstatus (CSR 0x300) — MIE bit at wedge time
+               *   0x5010ff30 = mcause  (CSR 0x342) — last trap before wedge
+               *   0x5010ff34 = mintthresh (CSR 0x347) — CLIC priority threshold
+               *   0x5010ff38 = USJ EP1_CONF — TX FIFO free bytes */
+              {
+                volatile uint32_t *usj = (volatile uint32_t *)0x500D2000;
+                int16_t semv = *(volatile int16_t *)&dev->xmitsem;
+                uint32_t ms, mc, mt;
+                *((volatile uint32_t *)0x5010ff14) = usj[0x10 / 4];
+                *((volatile uint32_t *)0x5010ff18) = usj[0x0c / 4];
+                *((volatile uint32_t *)0x5010ff1c) =
+                  ((uint32_t)dev->xmit.head << 16) | dev->xmit.tail;
+                *((volatile uint32_t *)0x5010ff20) = (uint32_t)semv;
+                *((volatile uint32_t *)0x5010ff24) =
+                  *((volatile uint32_t *)0x5010ff68);
+                *((volatile uint32_t *)0x5010ff28) =
+                  *((volatile uint32_t *)0x5010ff9c);
+                asm volatile("csrr %0, 0x300" : "=r"(ms));  /* mstatus */
+                asm volatile("csrr %0, 0x342" : "=r"(mc));  /* mcause */
+                asm volatile("csrr %0, 0x347" : "=r"(mt));  /* mintthresh */
+                *((volatile uint32_t *)0x5010ff2c) = ms;
+                *((volatile uint32_t *)0x5010ff30) = mc;
+                *((volatile uint32_t *)0x5010ff34) = mt;
+                *((volatile uint32_t *)0x5010ff38) = usj[0x04 / 4]; /* EP1_CONF */
+              }
               ret = nxsem_wait(&dev->xmitsem);
+              *((volatile uint32_t *)0x5010ff6c) += 1;
               flags = uart_spinlock(dev, true);
               uart_disabletxint(dev);
             }
@@ -482,6 +529,8 @@ static int uart_tcdrain(FAR uart_dev_t *dev,
       irqstate_t flags;
       clock_t start;
 
+      *((volatile uint32_t *)0x5010ff50) = 0x54444c4b; /* tcdrain lock acquired */
+
       /* Trigger emission to flush the contents of the tx buffer */
 
       flags = uart_spinlock(dev, true);
@@ -567,6 +616,7 @@ static int uart_tcdrain(FAR uart_dev_t *dev,
             }
         }
 
+      *((volatile uint32_t *)0x5010ff54) = 0x5444554e; /* tcdrain unlock */
       nxmutex_unlock(&dev->xmit.lock);
     }
 
@@ -1413,6 +1463,8 @@ static ssize_t uart_write(FAR struct file *filep, FAR const char *buffer,
       return ret;
     }
 
+  *((volatile uint32_t *)0x5010ff44) = 0x57524c4b; /* uart_write lock acquired */
+
 #ifdef CONFIG_SERIAL_REMOVABLE
   /* If the removable device is no longer connected, refuse to write to the
    * device.  This check occurs after taking the xmit.lock because the
@@ -1524,8 +1576,10 @@ static ssize_t uart_write(FAR struct file *filep, FAR const char *buffer,
       uart_spinunlock(dev, true, flags);
 #endif
       uart_enabletxint(dev);
+      *((volatile uint32_t *)0x5010ff48) = 0x5752454e; /* uart_write txint enabled */
     }
 
+  *((volatile uint32_t *)0x5010ff4c) = 0x5752554e; /* uart_write unlock */
   nxmutex_unlock(&dev->xmit.lock);
   return nwritten;
 }
@@ -2196,6 +2250,26 @@ void uart_datareceived(FAR uart_dev_t *dev)
 
 void uart_datasent(FAR uart_dev_t *dev)
 {
+  /* Wakeup-loss probe (RAM markers): count every drain-and-wakeup, and
+   * record xmitsem's value at wakeup time so a hang can distinguish
+   * "ISR drained but wakeup post lost" from "ISR never drained".
+   * 0x5010ff60 = datasent call count, 0x5010ff64 = xmitsem sval at wakeup
+   * (bit31 set if nxsem_get_value failed -> uart_wakeup skips the post). */
+
+  {
+    int sval;
+    *((volatile uint32_t *)0x5010ff60) += 1;
+    if (nxsem_get_value(&dev->xmitsem, &sval) != OK)
+      {
+        *((volatile uint32_t *)0x5010ff64) = 0x80000000u |
+          (*((volatile uint32_t *)0x5010ff64) & 0x7fffffffu);
+      }
+    else
+      {
+        *((volatile uint32_t *)0x5010ff64) = (uint32_t)sval;
+      }
+  }
+
   /* Notify all poll/select waiters that they can write to xmit buffer */
 
   uart_poll_notify(dev, 0, CONFIG_SERIAL_NPOLLWAITERS, POLLOUT);

@@ -44,6 +44,7 @@
 #include <nuttx/signal.h>
 #include <nuttx/spinlock.h>
 #include <nuttx/mutex.h>
+#include <nuttx/wqueue.h>
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/input/touchscreen.h>
 #include <nuttx/input/gt9xx.h>
@@ -99,6 +100,11 @@ struct gt9xx_dev_s
   /* Poll Waiters for device */
 
   FAR struct pollfd *fds[CONFIG_INPUT_GT9XX_NPOLLWAITERS];
+
+  /* Polling work queue (when no IRQ pin available) */
+
+  struct work_s poll_work;
+  bool polling;
 };
 
 /****************************************************************************
@@ -632,16 +638,18 @@ static int gt9xx_open(FAR struct file *filep)
     {
       /* If first user, power on the Touch Panel */
 
-      DEBUGASSERT(priv->board->set_power != NULL);
-      ret = priv->board->set_power(priv->board, true);
-      if (ret < 0)
+      if (priv->board && priv->board->set_power)
         {
-          goto out_lock;
+          ret = priv->board->set_power(priv->board, true);
+          if (ret < 0)
+            {
+              goto out_lock;
+            }
+
+          /* Let Touch Panel power up before probing */
+
+          nxsig_usleep(100 * 1000);
         }
-
-      /* Let Touch Panel power up before probing */
-
-      nxsig_usleep(100 * 1000);
 
       /* Check that Touch Panel exists on I2C */
 
@@ -650,14 +658,20 @@ static int gt9xx_open(FAR struct file *filep)
         {
           /* No such device, power off the Touch Panel */
 
-          priv->board->set_power(priv->board, false);
+          if (priv->board && priv->board->set_power)
+            {
+              priv->board->set_power(priv->board, false);
+            }
+
           goto out_lock;
         }
 
-      /* Enable Touch Panel Interrupts */
+      /* Enable Touch Panel Interrupts (IRQ mode only) */
 
-      DEBUGASSERT(priv->board->irq_enable);
-      priv->board->irq_enable(priv->board, true);
+      if (priv->board && priv->board->irq_enable)
+        {
+          priv->board->irq_enable(priv->board, true);
+        }
     }
 
   /* Set the Reference Count */
@@ -715,15 +729,19 @@ static int gt9xx_close(FAR struct file *filep)
   DEBUGASSERT(use_count >= 0);
   if (use_count == 0)
     {
-      /* If final user, disable Touch Panel Interrupts */
+      /* If final user, disable Touch Panel Interrupts (IRQ mode only) */
 
-      DEBUGASSERT(priv->board && priv->board->irq_enable);
-      priv->board->irq_enable(priv->board, false);
+      if (priv->board && priv->board->irq_enable)
+        {
+          priv->board->irq_enable(priv->board, false);
+        }
 
       /* Power off the Touch Panel */
 
-      DEBUGASSERT(priv->board->set_power);
-      priv->board->set_power(priv->board, false);
+      if (priv->board && priv->board->set_power)
+        {
+          priv->board->set_power(priv->board, false);
+        }
     }
 
   /* Set the Reference Count */
@@ -883,6 +901,65 @@ static int gt9xx_isr_handler(int irq, FAR void *context, FAR void *arg)
 }
 
 /****************************************************************************
+ * Name: gt9xx_poll_worker
+ *
+ * Description:
+ *   Polling work callback.  Called periodically when no IRQ pin is
+ *   available.  Reads the touch status register via I2C and if touches
+ *   are detected, signals the poll waiters.
+ *
+ * Input Parameters:
+ *   arg - Touch Panel Device
+ *
+ ****************************************************************************/
+
+static void gt9xx_poll_worker(FAR void *arg)
+{
+  FAR struct gt9xx_dev_s *priv = (FAR struct gt9xx_dev_s *)arg;
+  uint8_t status;
+  int ret;
+
+  DEBUGASSERT(priv);
+
+  /* Read GT9xx touch status register (0x814E) */
+
+  ret = gt9xx_i2c_read(priv, 0x814e, &status, 1);
+  if (ret < 0)
+    {
+      /* Reschedule and try again later */
+
+      if (priv->polling)
+        {
+          work_queue(HPWORK, &priv->poll_work, gt9xx_poll_worker,
+                     priv, MSEC2TICK(50));
+        }
+
+      return;
+    }
+
+  /* Check if touch data is ready (status & 0x80) */
+
+  if ((status & 0x80) != 0 && priv->polling)
+    {
+      irqstate_t flags;
+
+      flags = enter_critical_section();
+      priv->int_pending = true;
+      leave_critical_section(flags);
+
+      poll_notify(priv->fds, CONFIG_INPUT_GT9XX_NPOLLWAITERS, POLLIN);
+    }
+
+  /* Reschedule the poll worker */
+
+  if (priv->polling)
+    {
+      work_queue(HPWORK, &priv->poll_work, gt9xx_poll_worker,
+                 priv, MSEC2TICK(50));
+    }
+}
+
+/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
@@ -913,7 +990,7 @@ int gt9xx_register(FAR const char *devpath,
   int ret = 0;
 
   iinfo("devpath=%s, i2c_devaddr=%d\n", devpath, i2c_devaddr);
-  DEBUGASSERT(devpath != NULL && i2c_dev != NULL && board_config != NULL);
+  DEBUGASSERT(devpath != NULL && i2c_dev != NULL);
 
   /* Allocate the Touch Panel Device Structure */
 
@@ -942,15 +1019,29 @@ int gt9xx_register(FAR const char *devpath,
       return ret;
     }
 
-  /* Attach the Interrupt Handler */
+  /* Setup IRQ or Polling */
 
-  DEBUGASSERT(priv->board->irq_attach);
-  priv->board->irq_attach(priv->board, gt9xx_isr_handler, priv);
+  if (priv->board != NULL && priv->board->irq_attach != NULL)
+    {
+      /* IRQ mode: Attach the Interrupt Handler */
 
-  /* Disable Touch Panel Interrupts */
+      priv->board->irq_attach(priv->board, gt9xx_isr_handler, priv);
 
-  DEBUGASSERT(priv->board->irq_enable);
-  priv->board->irq_enable(priv->board, false);
+      /* Disable Touch Panel Interrupts */
+
+      if (priv->board->irq_enable != NULL)
+        {
+          priv->board->irq_enable(priv->board, false);
+        }
+    }
+  else
+    {
+      /* Polling mode: Start periodic work queue to read touch status */
+
+      priv->polling = true;
+      work_queue(HPWORK, &priv->poll_work, gt9xx_poll_worker,
+                 priv, MSEC2TICK(100));
+    }
 
   iinfo("GT9XX Touch Panel registered\n");
   return OK;

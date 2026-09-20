@@ -1,0 +1,21 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
+
+config ESP32P4_GT911_SHIM
+	bool "GT911 board-level polling shim"
+	default n
+	depends on I2C
+	---help---
+		Build the board-level Goodix GT911 polling shim (gt911_board.c).
+		The GT911 INT pin is not routed to the ESP32-P4 on this board, so
+		the interrupt-driven NuttX gt9xx driver cannot be used.  This shim
+		reads raw touch coordinates over I2C0 in polling mode and is
+		consumed directly by the campilot LVGL pointer input device.
+
+		Enable together with EXAMPLES_CAMPILOT_UI.
+
+endif # ARCH_BOARD_ESP32P4_FUNCTION_EV_BOARD
