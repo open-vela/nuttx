@@ -309,6 +309,16 @@ static int fatfs_convert_oflags(int oflags)
       ret |= FA_WRITE;
     }
 
+  /* Exclusive creation must win over open-always, append and truncate.
+   * Otherwise O_CREAT | O_EXCL can silently reopen an existing file.
+   * FatFs checks existence atomically while holding its volume lock.
+   */
+
+  if ((oflags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL))
+    {
+      return ret | FA_CREATE_NEW;
+    }
+
   if ((oflags & O_CREAT) != 0)
     {
       ret |= FA_OPEN_ALWAYS;

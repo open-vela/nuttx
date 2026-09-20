@@ -51,6 +51,7 @@
 #include <nuttx/i2c/i2c_master.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/mqueue.h>
+#include <nuttx/mutex.h>
 #include <nuttx/queue.h>
 #include <nuttx/wqueue.h>
 #include <nuttx/spinlock.h>
@@ -1042,13 +1043,22 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
         priv->samprate  = caps->ac_controls.hw[0];
         priv->bpsamp    = caps->ac_controls.b[2];
 
-        ret = es8311_setsamplerate(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setsamplerate(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
+
         if (ret < 0)
           {
             break;
           }
 
-        ret = es8311_setbitspersample(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setbitspersample(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
       }
       break;
 
@@ -1089,13 +1099,22 @@ static int es8311_configure(FAR struct audio_lowerhalf_s *dev,
         priv->samprate  = caps->ac_controls.hw[0];
         priv->bpsamp    = caps->ac_controls.b[2];
 
-        ret = es8311_setsamplerate(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setsamplerate(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
+
         if (ret != OK)
           {
             break;
           }
 
-        ret = es8311_setbitspersample(priv) == -ENOTTY ? OK : ret;
+        ret = es8311_setbitspersample(priv);
+        if (ret == -ENOTTY)
+          {
+            ret = OK;
+          }
       }
       break;
 

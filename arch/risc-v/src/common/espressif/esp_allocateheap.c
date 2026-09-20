@@ -30,10 +30,16 @@
 #include <arch/board/board.h>
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
+#include <nuttx/kmalloc.h>
 #include <nuttx/mm/mm.h>
 
 #include "riscv_internal.h"
 #include "rom/rom_layout.h"
+
+#ifdef CONFIG_ESPRESSIF_SPIRAM
+#  include "esp_psram.h"
+#  include "esp_private/esp_psram_extram.h"
+#endif
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -77,10 +83,42 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
 
   board_autoled_on(LED_HEAPALLOCATE);
 
+#if defined(CONFIG_MM_KERNEL_HEAP) && \
+    defined(CONFIG_ESPRESSIF_SPIRAM_USER_HEAP)
+  DEBUGASSERT(esp_psram_is_initialized());
+
+  *heap_start = (void *)esp_psram_extram_vaddr_start();
+  *heap_size  = esp_psram_extram_vaddr_end() -
+                esp_psram_extram_vaddr_start();
+#else
   *heap_start = (void *)g_idle_topstack;
   *heap_size  = (uintptr_t)ets_rom_layout_p->dram0_rtos_reserved_start -
                            g_idle_topstack;
+#endif
 }
+
+/****************************************************************************
+ * Name: up_allocate_kheap
+ *
+ * Description:
+ *   Keep the kernel heap in internal SRAM.  In particular, buffers used by
+ *   SPI Flash operations must remain accessible while the external-memory
+ *   cache is disabled.
+ ****************************************************************************/
+
+#ifdef CONFIG_MM_KERNEL_HEAP
+void up_allocate_kheap(void **heap_start, size_t *heap_size)
+{
+  uintptr_t start = g_idle_topstack;
+  uintptr_t end = (uintptr_t)ets_rom_layout_p->dram0_rtos_reserved_start;
+
+  DEBUGASSERT(end > start);
+
+  board_autoled_on(LED_HEAPALLOCATE);
+  *heap_start = (void *)start;
+  *heap_size  = end - start;
+}
+#endif
 
 /****************************************************************************
  * Name: riscv_addregion
@@ -100,6 +138,18 @@ void up_allocate_heap(void **heap_start, size_t *heap_size)
 #if CONFIG_MM_REGIONS > 1
 void riscv_addregion(void)
 {
+#if defined(CONFIG_ESPRESSIF_SPIRAM_USER_HEAP) && \
+    !defined(CONFIG_MM_KERNEL_HEAP)
+  if (esp_psram_is_initialized())
+    {
+      uintptr_t start = esp_psram_extram_vaddr_start();
+      uintptr_t end   = esp_psram_extram_vaddr_end();
+
+      if (end > start)
+        {
+          kumm_addregion((void *)start, end - start);
+        }
+    }
+#endif
 }
 #endif
-
