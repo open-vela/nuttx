@@ -40,6 +40,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/irq.h>
 
 #include <stdbool.h>
 #include <string.h>
@@ -88,7 +89,7 @@ struct notify_data_s
 {
   FAR const void *data;
   size_t len;
-  uint8_t handle;
+  uint16_t handle;
 };
 
 /****************************************************************************
@@ -97,6 +98,8 @@ struct notify_data_s
 
 static FAR const struct bt_gatt_attr_s *g_db = NULL;
 static size_t g_attr_count = 0;
+static bt_gatt_connection_func_t g_connection_callback;
+static FAR void *g_connection_user_data;
 
 /****************************************************************************
  * Public Functions
@@ -106,6 +109,34 @@ void bt_gatt_register(FAR const struct bt_gatt_attr_s *attrs, size_t count)
 {
   g_db         = attrs;
   g_attr_count = count;
+}
+
+void bt_gatt_set_connection_callback(bt_gatt_connection_func_t callback,
+                                     FAR void *user_data)
+{
+  irqstate_t flags = enter_critical_section();
+
+  g_connection_callback = callback;
+  g_connection_user_data = callback != NULL ? user_data : NULL;
+  leave_critical_section(flags);
+}
+
+static void gatt_report_connection(FAR struct bt_conn_s *conn,
+                                   bool connected)
+{
+  bt_gatt_connection_func_t callback;
+  FAR void *user_data;
+  irqstate_t flags;
+
+  flags = enter_critical_section();
+  callback = g_connection_callback;
+  user_data = g_connection_user_data;
+  leave_critical_section(flags);
+
+  if (callback != NULL)
+    {
+      callback(conn, connected, user_data);
+    }
 }
 
 int bt_gatt_attr_read(FAR struct bt_conn_s *conn,
@@ -416,7 +447,7 @@ static uint8_t notify_cb(FAR const struct bt_gatt_attr_s *attr,
 
       /* TODO: Handle indications */
 
-      if (ccc->value != BT_GATT_CCC_NOTIFY)
+      if (ccc->cfg[i].value != BT_GATT_CCC_NOTIFY)
         {
           continue;
         }
@@ -508,6 +539,7 @@ void bt_gatt_connected(FAR struct bt_conn_s *conn)
 {
   wlinfo("conn %p\n", conn);
   bt_gatt_foreach_attr(0x0001, 0xffff, connected_cb, conn);
+  gatt_report_connection(conn, true);
 }
 
 static uint8_t disconnected_cb(FAR const struct bt_gatt_attr_s *attr,
@@ -535,6 +567,15 @@ static uint8_t disconnected_cb(FAR const struct bt_gatt_attr_s *attr,
 
   for (i = 0; i < ccc->cfg_len; i++)
     {
+      /* Non-bonded CCC state is valid only for the current connection. */
+
+      if (!ccc->cfg[i].valid &&
+          !bt_addr_le_cmp(&conn->dst, &ccc->cfg[i].peer))
+        {
+          memset(&ccc->cfg[i], 0, sizeof(ccc->cfg[i]));
+          continue;
+        }
+
       /* Ignore configurations with disabled value */
 
       if (!ccc->cfg[i].value)
@@ -570,6 +611,7 @@ void bt_gatt_disconnected(FAR struct bt_conn_s *conn)
 {
   wlinfo("conn %p\n", conn);
   bt_gatt_foreach_attr(0x0001, 0xffff, disconnected_cb, conn);
+  gatt_report_connection(conn, false);
 }
 
 static void gatt_mtu_rsp(FAR struct bt_conn_s *conn, uint8_t err,

@@ -2169,7 +2169,20 @@ static void esp_evt_work_cb(void *arg)
             break;
 
           case WIFI_ADPT_EVT_STA_CONNECT:
-            wlinfo("Wi-Fi sta connect\n");
+            {
+              FAR wifi_event_sta_connected_t *connected =
+                (FAR wifi_event_sta_connected_t *)evt_adpt->buf;
+
+              wlinfo("Wi-Fi sta connected bssid="
+                     "%02x:%02x:%02x:%02x:%02x:%02x channel=%u "
+                     "authmode=%u\n",
+                     connected->bssid[0], connected->bssid[1],
+                     connected->bssid[2], connected->bssid[3],
+                     connected->bssid[4], connected->bssid[5],
+                     (unsigned)connected->channel,
+                     (unsigned)connected->authmode);
+            }
+
             g_sta_connected = true;
             ret = esp32s3_wlan_sta_set_linkstatus(true);
             if (ret < 0)
@@ -2180,7 +2193,15 @@ static void esp_evt_work_cb(void *arg)
             break;
 
           case WIFI_ADPT_EVT_STA_DISCONNECT:
-            wlinfo("Wi-Fi sta disconnect\n");
+            {
+              FAR wifi_event_sta_disconnected_t *disconnected =
+                (FAR wifi_event_sta_disconnected_t *)evt_adpt->buf;
+
+              wlinfo("Wi-Fi sta disconnected reason=%u rssi=%d\n",
+                     (unsigned)disconnected->reason,
+                     (int)disconnected->rssi);
+            }
+
             g_sta_connected = false;
             ret = esp32s3_wlan_sta_set_linkstatus(false);
             if (ret < 0)
@@ -4662,7 +4683,16 @@ int esp_wifi_adapter_init(void)
   wifi_cfg.rx_ba_win          = CONFIG_ESP32S3_WIFI_RXBA_AMPDU_WZ;
   wifi_cfg.static_rx_buf_num  = CONFIG_ESP32S3_WIFI_STATIC_RXBUF_NUM;
   wifi_cfg.dynamic_rx_buf_num = CONFIG_ESP32S3_WIFI_DYNAMIC_RXBUF_NUM;
+
+#ifdef CONFIG_ESP32S3_WIFI_STATIC_TXBUF
+  wifi_cfg.tx_buf_type        = 0;
+  wifi_cfg.static_tx_buf_num  = CONFIG_ESP32S3_WIFI_STATIC_TXBUF_NUM;
+  wifi_cfg.dynamic_tx_buf_num = 0;
+#else
+  wifi_cfg.tx_buf_type        = 1;
+  wifi_cfg.static_tx_buf_num  = 0;
   wifi_cfg.dynamic_tx_buf_num = CONFIG_ESP32S3_WIFI_DYNAMIC_TXBUF_NUM;
+#endif
 
   ret = esp_wifi_init(&wifi_cfg);
   if (ret)
@@ -5103,6 +5133,9 @@ int esp_wifi_sta_essid(struct iwreq *iwr, bool set)
     {
       memset(wifi_cfg.sta.ssid, 0x0, SSID_MAX_LEN);
       memcpy(wifi_cfg.sta.ssid, pdata, len);
+      wifi_cfg.sta.channel = 0; /* Scan all channels; phone hotspots may move. */
+      wifi_cfg.sta.bssid_set = false;
+      memset(wifi_cfg.sta.bssid, 0, sizeof(wifi_cfg.sta.bssid));
       memset(wifi_cfg.sta.sae_h2e_identifier, 0x0, SAE_H2E_IDENTIFIER_LEN);
       wifi_cfg.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
 
@@ -5114,23 +5147,26 @@ int esp_wifi_sta_essid(struct iwreq *iwr, bool set)
               wlerr("Failed to disconnect from Wi-Fi AP ret=%d\n", ret);
               return ret;
             }
-
-          ret = esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
-          if (ret)
-            {
-              wlerr("Failed to set Wi-Fi config data ret=%d\n", ret);
-              return wifi_errno_trans(ret);
-            }
-
-          ret = esp_wifi_sta_connect();
-          if (ret)
-            {
-              wlerr("Failed to connect to Wi-Fi AP ret=%d\n", ret);
-              return ret;
-            }
         }
 
+      /* Publish the staged SSID before esp_wifi_sta_connect(); that helper
+       * reapplies g_sta_wifi_cfg and would otherwise overwrite this local
+       * configuration with the previous (often empty) SSID. */
+
       g_sta_wifi_cfg = wifi_cfg;
+      ret = esp_wifi_set_config(WIFI_IF_STA, &g_sta_wifi_cfg);
+      if (ret)
+        {
+          wlerr("Failed to set Wi-Fi config data ret=%d\n", ret);
+          return wifi_errno_trans(ret);
+        }
+
+      ret = esp_wifi_sta_connect();
+      if (ret)
+        {
+          wlerr("Failed to connect to Wi-Fi AP ret=%d\n", ret);
+          return ret;
+        }
     }
   else
     {

@@ -320,6 +320,7 @@ struct uart_dev_s
 #endif
   bool                 isconsole;    /* true: This is the serial console */
   bool                 unlinked;     /* true: This device driver has been unlinked. */
+  uint32_t             xmit_timeout; /* TX full wait in ticks; zero waits forever */
 
 #if defined(CONFIG_TTY_SIGINT) || defined(CONFIG_TTY_SIGTSTP) || \
     defined(CONFIG_TTY_FORCE_PANIC) || defined(CONFIG_TTY_LAUNCH)

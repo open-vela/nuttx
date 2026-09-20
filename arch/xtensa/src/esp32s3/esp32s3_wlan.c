@@ -57,9 +57,11 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
-/* TX timeout = 1 minute */
+/* Retry transient ESP Wi-Fi TX credit exhaustion without monopolizing the
+ * low-priority work queue needed by the Wi-Fi driver.
+ */
 
-#define WLAN_TXTOUT               (60 * CLK_TCK)
+#define WLAN_TXTOUT               MSEC2TICK(100)
 
 /* Low-priority work queue processes RX/TX */
 
@@ -239,7 +241,7 @@ static const struct wlan_ops g_softap_ops =
 
 static struct wlan_pktbuf *wlan_recvframe(struct wlan_priv_s *priv);
 static struct wlan_pktbuf *wlan_txframe(struct wlan_priv_s *priv);
-static void wlan_transmit(struct wlan_priv_s *priv);
+static bool wlan_transmit(struct wlan_priv_s *priv);
 static void wlan_rxpoll(void *arg);
 static int  wlan_txpoll(struct net_driver_s *dev);
 static void wlan_dopoll(struct wlan_priv_s *priv);
@@ -505,18 +507,19 @@ static struct wlan_pktbuf *wlan_txframe(struct wlan_priv_s *priv)
  * Name: wlan_transmit
  *
  * Description:
- *   Try to send all TX packets in TX ready queue to Wi-Fi driver. If this
- *    sending fails, then breaks loop and returns.
+ *   Try to send all TX packets in TX ready queue to Wi-Fi driver. If Wi-Fi
+ *   has no TX credits, cache the frame and schedule a short retry.
  *
  * Input Parameters:
  *   priv - Reference to the driver state structure
  *
  * Returned Value:
- *   None
+ *   true if the cached TX queue was drained; false if TX is temporarily
+ *   blocked.
  *
  ****************************************************************************/
 
-static void wlan_transmit(struct wlan_priv_s *priv)
+static bool wlan_transmit(struct wlan_priv_s *priv)
 {
   struct wlan_pktbuf *pktbuf;
   int ret;
@@ -524,12 +527,18 @@ static void wlan_transmit(struct wlan_priv_s *priv)
   while ((pktbuf = wlan_txframe(priv)))
     {
       ret = priv->ops->send(pktbuf->buffer, pktbuf->len);
+
       if (ret == -ENOMEM)
         {
+          /* The vendor driver did not accept this frame.  Preserve its
+           * ownership and retry after a TX-done notification or, if no
+           * frame is currently in flight, after the watchdog fallback.
+           */
+
           wlan_add_txpkt_head(priv, pktbuf);
           wd_start(&priv->txtimeout, WLAN_TXTOUT,
                    wlan_txtimeout_expiry, (uint32_t)priv);
-          break;
+          return false;
         }
       else
         {
@@ -541,6 +550,14 @@ static void wlan_transmit(struct wlan_priv_s *priv)
           wlan_free_buffer(priv, pktbuf->buffer);
         }
     }
+
+  /* Cancel the fallback only after the serialized worker observes that the
+   * cached queue has really drained.  wlan_tx_done() deliberately leaves it
+   * armed until this point.
+   */
+
+  wd_cancel(&priv->txtimeout);
+  return true;
 }
 
 /****************************************************************************
@@ -560,7 +577,10 @@ static void wlan_transmit(struct wlan_priv_s *priv)
 
 static void wlan_tx_done(struct wlan_priv_s *priv)
 {
-  wd_cancel(&priv->txtimeout);
+  /* Keep txtimeout armed until a serialized worker observes that txb has
+   * drained.  It remains the fallback when no accepted frame is in flight
+   * to produce another TX-done notification.
+   */
 
   wlan_txavail(&priv->dev);
 }
@@ -663,15 +683,25 @@ static void wlan_rxpoll(void *arg)
   uint32_t rbytes = 0;
 #endif
 
-  /* Try to send all cached TX packets for TX ack and so on */
-
-  wlan_transmit(priv);
-
-  /* Loop while while wlan_recvframe() successfully retrieves valid
-   * Ethernet frames.
+  /* Serialize TX queue/watchdog state with the other WLAN workers and with
+   * interface shutdown.  A queued RX worker must not transmit after stop.
    */
 
   net_lock();
+
+  if (!priv->ifup)
+    {
+      net_unlock();
+      return;
+    }
+
+  /* Try to send all cached TX packets for TX ACKs and so on. */
+
+  wlan_transmit(priv);
+
+  /* Loop while wlan_recvframe() successfully retrieves valid Ethernet
+   * frames.
+   */
 
   while ((pktbuf = wlan_recvframe(priv)) != NULL)
     {
@@ -811,6 +841,17 @@ static void wlan_rxpoll(void *arg)
           net_unlock();
           rbytes = 0;
           net_lock();
+
+          /* Interface shutdown may have completed while yielding the
+           * network lock.  Do not continue processing or transmit after
+           * the vendor interface has stopped.
+           */
+
+          if (!priv->ifup)
+            {
+              net_unlock();
+              return;
+            }
         }
 #endif
     }
@@ -943,18 +984,27 @@ static void wlan_txtimeout_work(void *arg)
 {
   struct wlan_priv_s *priv = (struct wlan_priv_s *)arg;
 
-  /* Try to send all cached TX packets */
-
-  wlan_transmit(priv);
+  /* Serialize transmission with interface shutdown and every other WLAN
+   * worker.  This also makes the txb-empty/watchdog-cancel decision atomic
+   * with respect to another worker requeueing an -ENOMEM frame.
+   */
 
   net_lock();
 
-  wlan_ifdown(&priv->dev);
-  wlan_ifup(&priv->dev);
+  if (!priv->ifup)
+    {
+      net_unlock();
+      return;
+    }
 
-  /* Then poll for new XMIT data */
+  /* Retry the cached frame.  wlan_transmit() rearms the watchdog if ESP
+   * Wi-Fi still has no TX credits.  Poll only after the queue drains.
+   */
 
-  wlan_dopoll(priv);
+  if (wlan_transmit(priv))
+    {
+      wlan_dopoll(priv);
+    }
 
   net_unlock();
 }
@@ -963,8 +1013,8 @@ static void wlan_txtimeout_work(void *arg)
  * Function: wlan_txtimeout_expiry
  *
  * Description:
- *   Our TX watchdog timed out.  Called from the timer callback handler.
- *   The last TX never completed.  Reset the hardware and start again.
+ *   Retry transmission after the Wi-Fi driver remained out of TX resources
+ *   without delivering another TX-done notification.
  *
  * Input Parameters:
  *   argc - The number of available arguments
@@ -978,12 +1028,33 @@ static void wlan_txtimeout_work(void *arg)
 static void wlan_txtimeout_expiry(wdparm_t arg)
 {
   struct wlan_priv_s *priv = (struct wlan_priv_s *)arg;
+  int ret;
 
-  /* Schedule to perform the TX timeout processing on the worker thread. */
+  /* Schedule TX retry work.  A one-shot watchdog can expire while the
+   * previous timeout work is still queued or finishing.  Dropping that
+   * expiry can strand an -ENOMEM frame forever when no accepted frame is
+   * left in flight to generate another TX-done callback.  Keep retrying the
+   * scheduling operation until the worker becomes available.
+   */
 
-  if (work_available(&priv->toutwork))
+  if (!priv->ifup)
     {
-      work_queue(WLAN_WORK, &priv->toutwork, wlan_txtimeout_work, priv, 0);
+      return;
+    }
+
+  if (!work_available(&priv->toutwork))
+    {
+      wd_start(&priv->txtimeout, WLAN_TXTOUT,
+               wlan_txtimeout_expiry, arg);
+      return;
+    }
+
+  ret = work_queue(WLAN_WORK, &priv->toutwork,
+                   wlan_txtimeout_work, priv, 0);
+  if (ret < 0)
+    {
+      wd_start(&priv->txtimeout, WLAN_TXTOUT,
+               wlan_txtimeout_expiry, arg);
     }
 }
 
@@ -1008,24 +1079,21 @@ static void wlan_txavail_work(void *arg)
 {
   struct wlan_priv_s *priv = (struct wlan_priv_s *)arg;
 
-  /* Try to send all cached TX packets even if net is down */
-
-  wlan_transmit(priv);
-
-  /* Lock the network and serialize driver operations if necessary.
-   * NOTE: Serialization is only required in the case where the driver work
-   * is performed on an LP worker thread and where more than one LP worker
-   * thread has been configured.
+  /* Serialize transmission with interface shutdown and every other WLAN
+   * worker.  Do not poll TCP for more frames while ESP Wi-Fi is out of TX
+   * credits.
    */
 
   net_lock();
 
-  /* Ignore the notification if the interface is not yet up */
-
-  if (priv->ifup)
+  if (!priv->ifup)
     {
-      /* Poll the network for new XMIT data */
+      net_unlock();
+      return;
+    }
 
+  if (wlan_transmit(priv))
+    {
       wlan_dopoll(priv);
     }
 

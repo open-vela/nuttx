@@ -1015,6 +1015,13 @@ FAR struct lcd_dev_s *st7789_lcdinitialize(FAR struct spi_dev_s *spi)
   g_lcddev.yoff = yoff;
 #endif
 
+  /* The LCD is not necessarily power-cycled when the MCU resets.  Put the
+   * controller into a known state before applying the remaining setup.
+   */
+
+  st7789_sendcmd(priv, ST7789_SWRESET);
+  up_mdelay(150);
+
   /* Init the hardware and clear the display */
 
   st7789_sleep(priv, false);

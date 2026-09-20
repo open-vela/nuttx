@@ -26,6 +26,8 @@
 
 #include <nuttx/config.h>
 
+#include <sys/stat.h>
+#include <unistd.h>
 #include <syslog.h>
 #include <debug.h>
 
@@ -33,6 +35,10 @@
 #include <nuttx/mmcsd.h>
 
 extern struct sdio_dev_s *sdio_initialize(int slotno);
+
+#define ESP32S3_SDMMC_DEVPATH         "/dev/mmcsd1"
+#define ESP32S3_SDMMC_PROBE_RETRIES   15
+#define ESP32S3_SDMMC_PROBE_DELAY_US  500000
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -55,6 +61,8 @@ extern struct sdio_dev_s *sdio_initialize(int slotno);
 int board_sdmmc_initialize(void)
 {
   struct sdio_dev_s *sdio;
+  struct stat st;
+  int retry;
   int rv;
 
   sdio = sdio_initialize(1);
@@ -67,9 +75,39 @@ int board_sdmmc_initialize(void)
   rv = mmcsd_slotinitialize(1, sdio);
   if (rv < 0)
     {
-      syslog(LOG_ERR, "Failed to bind SPI port to SD slot\n");
+      syslog(LOG_ERR, "Failed to bind SDIO port to SD slot: %d\n", rv);
       return rv;
     }
 
-  return OK;
+  /* This board has no separate card-detect GPIO; the controller card-
+   * detect input is tied to the present state.  If the first identification
+   * attempt fails there can be no later insertion edge to trigger another
+   * probe.  Re-enable the existing media callback instead of initializing
+   * another SDIO/MMCSD instance.
+   */
+
+  for (retry = 0; retry <= ESP32S3_SDMMC_PROBE_RETRIES; retry++)
+    {
+      if (stat(ESP32S3_SDMMC_DEVPATH, &st) == 0)
+        {
+          if (retry > 0)
+            {
+              syslog(LOG_INFO, "SD card ready after %d reprobes\n", retry);
+            }
+
+          return OK;
+        }
+
+      if (retry == ESP32S3_SDMMC_PROBE_RETRIES)
+        {
+          break;
+        }
+
+      usleep(ESP32S3_SDMMC_PROBE_DELAY_US);
+      SDIO_CALLBACKENABLE(sdio, SDIOMEDIA_INSERTED);
+    }
+
+  syslog(LOG_ERR, "SD card probe failed after %d retries\n",
+         ESP32S3_SDMMC_PROBE_RETRIES);
+  return -ENODEV;
 }
