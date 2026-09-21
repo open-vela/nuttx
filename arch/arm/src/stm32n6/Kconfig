@@ -1,0 +1,63 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_STM32N6
+
+comment "STM32N6 Configuration Options"
+
+config STM32_N6_PERIPHERALS
+	bool
+	default y
+
+config STM32_STM32N6XXXX
+	bool
+	default y
+
+choice
+	prompt "STM32 N6 Chip Selection"
+	default ARCH_CHIP_STM32N647X0
+	depends on ARCH_CHIP_STM32N6
+
+config ARCH_CHIP_STM32N647X0
+	bool "STM32N647X0"
+	select STM32_STM32N6XXXX
+
+config ARCH_CHIP_STM32N657X0
+	bool "STM32N657X0"
+	select STM32_STM32N6XXXX
+
+endchoice
+
+config STM32_USART
+	bool
+	default n
+
+config STM32_SERIALDRIVER
+	bool
+	default n
+
+config STM32_USART1
+	bool "USART1"
+	default n
+	select STM32_USART
+
+menu "U[S]ART Configuration"
+	depends on STM32_USART
+
+choice
+	prompt "USART1 Driver Configuration"
+	default STM32N6_USART1_SERIALDRIVER
+	depends on STM32_USART1
+
+config STM32N6_USART1_SERIALDRIVER
+	bool "Standard serial driver"
+	select USART1_SERIALDRIVER
+	select STM32_SERIALDRIVER
+
+endchoice
+
+endmenu
+
+endif # ARCH_CHIP_STM32N6
