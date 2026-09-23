@@ -33,7 +33,7 @@
 #include <nuttx/nuttx.h>
 #include <nuttx/userspace.h>
 #include <arch/board/board.h>
-#ifdef CONFIG_MM_KERNEL_HEAP
+#ifdef CONFIG_BUILD_PROTECTED
 #include <arch/board/board_memorymap.h>
 #endif
 

@@ -30,6 +30,7 @@
 #include <sys/param.h>
 
 #include <nuttx/kmalloc.h>
+#include <nuttx/semaphore.h>
 #include <nuttx/spinlock.h>
 #include <nuttx/wireless/wireless.h>
 
@@ -128,7 +129,7 @@ int esp_wifi_start_scan(struct iwreq *iwr)
   int i;
   uint8_t target_mac[MAC_LEN];
   uint8_t target_ssid[SSID_MAX_LEN + 1];
-  memset(target_ssid, 0x0, sizeof(SSID_MAX_LEN + 1));
+  memset(target_ssid, 0x0, sizeof(target_ssid));
 
   if (iwr == NULL)
     {

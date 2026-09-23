@@ -178,6 +178,10 @@ else
 endif
 endif
 
+ifeq ($(CONFIG_SENSORS_QMI8658),y)
+  CSRCS += qmi8658.c
+endif
+
 ifeq ($(CONFIG_SENSORS_BMM150),y)
   CSRCS += bmm150.c
 endif

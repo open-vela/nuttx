@@ -889,13 +889,12 @@ FAR struct audio_lowerhalf_s *audio_null_initialize(bool playback)
       /* Initialize the null audio device structure.
        * Since we used kmm_zalloc, only the non-zero elements
        * of the structure need to be initialized.
-       */
+      */
 
       priv->dev.ops = &g_audioops;
+      priv->playback = playback;
       return &priv->dev;
     }
-
-  priv->playback = playback;
 
   auderr("ERROR: Failed to allocate null audio device\n");
   return NULL;

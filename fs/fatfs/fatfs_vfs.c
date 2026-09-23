@@ -438,8 +438,11 @@ static ssize_t fatfs_read(FAR struct file *filep, FAR char *buffer,
 {
   FAR struct fatfs_mountpt_s *fs;
   FAR struct fatfs_file_s *fp;
+  FAR char *out = buffer;
   ssize_t ret;
+  ssize_t total = 0;
   UINT size;
+  size_t left = buflen;
 
   fp = filep->f_priv;
   fs = filep->f_inode->i_private;
@@ -458,14 +461,45 @@ static ssize_t fatfs_read(FAR struct file *filep, FAR char *buffer,
         }
     }
 
-  ret = fatfs_convert_result(f_read(&fp->f, buffer, buflen, &size));
+  ret = fatfs_convert_result(f_read(&fp->f, out, buflen, &size));
   if (ret >= 0)
     {
       filep->f_pos += size;
       ret = size;
+      goto out;
+    }
+
+  if ((ret == -ENOMEM || ret == -EFAULT) && buflen > 1)
+    {
+      while (left > 0)
+        {
+          size_t chunk = left > 512 ? 512 : left;
+
+          size = 0;
+          if (f_read(&fp->f, out, chunk, &size) != FR_OK || size == 0)
+            {
+              ret = total > 0 ? total : (size > 0 ? (ssize_t)size : ret);
+              break;
+            }
+
+          filep->f_pos += size;
+          out += size;
+          left -= size;
+          total += size;
+        }
+
+      if (total > 0)
+        {
+          ret = total;
+          goto out;
+        }
     }
 
 errout_with_sem:
+  nxmutex_unlock(&fs->lock);
+  return ret;
+
+out:
   nxmutex_unlock(&fs->lock);
   return ret;
 }
@@ -1714,7 +1748,10 @@ DSTATUS disk_initialize(BYTE pdrv)
 DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
 {
   FAR struct inode *drv;
+  struct geometry geo;
   ssize_t size;
+  ssize_t retry;
+  UINT i;
 
   DEBUGASSERT(pdrv < FF_VOLUMES);
   drv = g_drv[pdrv].drv;
@@ -1722,10 +1759,36 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
   size = drv->u.i_bops->read(drv, buff, sector * g_drv[pdrv].ratio, count);
   if (size != count)
     {
+      if (size < 0 && count > 1 && (size == -ENOMEM || size == -EFAULT))
+        {
+          if (drv->u.i_bops->geometry(drv, &geo) < 0)
+            {
+              return RES_ERROR;
+            }
+
+          ferr("Read fallback: ret=%zd sector=%" PRIu32 " count=%u\n",
+               size, (uint32_t)(sector * g_drv[pdrv].ratio), count);
+
+          for (i = 0; i < count; i++)
+            {
+              retry = drv->u.i_bops->read(drv, buff + (i * geo.geo_sectorsize),
+                                          sector * g_drv[pdrv].ratio + i, 1);
+              if (retry != 1)
+                {
+                  ferr("Read fallback failed: ret=%zd sector=%" PRIu32 "\n",
+                       retry, (uint32_t)(sector * g_drv[pdrv].ratio + i));
+                  return RES_ERROR;
+                }
+            }
+
+          goto success;
+        }
+
       ferr("Read failed: %zd\n", size);
       return RES_ERROR;
     }
 
+success:
 #ifdef CONFIG_FS_FATFS_DEBUG
   disk_check(drv, sector * g_drv[pdrv].ratio, count, buff);
 #endif
@@ -1753,7 +1816,10 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
 DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
 {
   FAR struct inode *drv;
+  struct geometry geo;
   ssize_t size;
+  ssize_t retry;
+  UINT i;
 
   DEBUGASSERT(pdrv < FF_VOLUMES);
   drv = g_drv[pdrv].drv;
@@ -1761,10 +1827,36 @@ DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
   size = drv->u.i_bops->write(drv, buff, sector * g_drv[pdrv].ratio, count);
   if (size != count)
     {
+      if (size < 0 && count > 1 && (size == -ENOMEM || size == -EFAULT))
+        {
+          if (drv->u.i_bops->geometry(drv, &geo) < 0)
+            {
+              return RES_ERROR;
+            }
+
+          ferr("Write fallback: ret=%zd sector=%" PRIu32 " count=%u\n",
+               size, (uint32_t)(sector * g_drv[pdrv].ratio), count);
+
+          for (i = 0; i < count; i++)
+            {
+              retry = drv->u.i_bops->write(drv, buff + (i * geo.geo_sectorsize),
+                                           sector * g_drv[pdrv].ratio + i, 1);
+              if (retry != 1)
+                {
+                  ferr("Write fallback failed: ret=%zd sector=%" PRIu32 "\n",
+                       retry, (uint32_t)(sector * g_drv[pdrv].ratio + i));
+                  return RES_ERROR;
+                }
+            }
+
+          goto success;
+        }
+
       ferr("Write failed: %zd\n", size);
       return RES_ERROR;
     }
 
+success:
 #ifdef CONFIG_FS_FATFS_DEBUG
   disk_check(drv, sector * g_drv[pdrv].ratio, count, buff);
 #endif

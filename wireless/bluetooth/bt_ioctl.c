@@ -606,8 +606,7 @@ int btnet_ioctl(FAR struct net_driver_s *netdev, int cmd, unsigned long arg)
       case SIOCBTADVSTOP:
         {
           wlinfo("Stop advertising\n");
-          bt_stop_advertising();
-          ret = OK;
+          ret = bt_stop_advertising();
         }
         break;
 

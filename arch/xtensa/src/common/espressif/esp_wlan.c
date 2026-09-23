@@ -1363,7 +1363,11 @@ static int wlan_ioctl(struct net_driver_s *dev,
               }
 
             ret = ops->connect();
-            if (ret < 0)
+            if (ret == -EAGAIN)
+              {
+                ret = 0;
+              }
+            else if (ret < 0)
               {
                 nerr("ERROR: Failed to connect\n");
                 break;

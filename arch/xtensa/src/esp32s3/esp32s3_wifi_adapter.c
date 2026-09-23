@@ -407,7 +407,7 @@ static wifi_config_t g_softap_wifi_cfg;
 
 /* Device specific lock */
 
-static spinlock_t g_lock;
+static spinlock_t g_lock = SP_UNLOCKED;
 
 /****************************************************************************
  * Public Data
@@ -5083,6 +5083,7 @@ int esp_wifi_sta_essid(struct iwreq *iwr, bool set)
   struct iw_point *essid = &iwr->u.essid;
   uint8_t *pdata;
   uint8_t len;
+  bool initial_connect;
 #ifdef CONFIG_DEBUG_WIRELESS_INFO
   char buf[SSID_MAX_LEN + 1];
 #endif
@@ -5101,6 +5102,7 @@ int esp_wifi_sta_essid(struct iwreq *iwr, bool set)
 
   if (set)
     {
+      initial_connect = !g_sta_connected && essid->flags == IW_ESSID_ON;
       memset(wifi_cfg.sta.ssid, 0x0, SSID_MAX_LEN);
       memcpy(wifi_cfg.sta.ssid, pdata, len);
       memset(wifi_cfg.sta.sae_h2e_identifier, 0x0, SAE_H2E_IDENTIFIER_LEN);
@@ -5131,6 +5133,16 @@ int esp_wifi_sta_essid(struct iwreq *iwr, bool set)
         }
 
       g_sta_wifi_cfg = wifi_cfg;
+
+      if (initial_connect)
+        {
+          ret = esp_wifi_sta_connect();
+          if (ret)
+            {
+              wlerr("Failed to connect to Wi-Fi AP ret=%d\n", ret);
+              return ret;
+            }
+        }
     }
   else
     {

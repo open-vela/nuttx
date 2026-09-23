@@ -36,6 +36,7 @@
 #include <nuttx/timers/rtc.h>
 
 #include "esp32s3_rtc.h"
+#include "esp32s3_rt_timer.h"
 #include "hardware/esp32s3_tim.h"
 
 /****************************************************************************
@@ -47,6 +48,17 @@ struct esp32s3_cbinfo_s
 {
   volatile rtc_alarm_callback_t cb;  /* Callback when the alarm expires */
   volatile void *priv;               /* Private argurment to accompany callback */
+  struct rtc_time time;              /* Alarm expiration time */
+};
+#endif
+
+#ifdef CONFIG_RTC_PERIODIC
+struct esp32s3_periodic_s
+{
+  struct rt_timer_s *timer_hdl;       /* Timer id point to here */
+  volatile rtc_wakeup_callback_t cb;  /* Callback when the wakeup expires */
+  volatile void *priv;                /* Private argurment to accompany callback */
+  uint8_t id;                         /* Wakeup ID */
 };
 #endif
 
@@ -66,6 +78,12 @@ struct esp32s3_lowerhalf_s
   /* Alarm callback information */
 
   struct esp32s3_cbinfo_s cbinfo[RTC_ALARM_LAST];
+#endif
+
+#ifdef CONFIG_RTC_PERIODIC
+  /* Periodic wakeup callback information */
+
+  struct esp32s3_periodic_s periodic;
 #endif
 };
 
@@ -93,6 +111,14 @@ static int rtc_lh_rdalarm(struct rtc_lowerhalf_s *lower,
                           struct lower_rdalarm_s *alarminfo);
 #endif
 
+#ifdef CONFIG_RTC_PERIODIC
+static void rtc_lh_periodic_callback(void *arg);
+static int rtc_lh_setperiodic(struct rtc_lowerhalf_s *lower,
+                         const struct lower_setperiodic_s *alarminfo);
+static int rtc_lh_cancelperiodic(struct rtc_lowerhalf_s *lower,
+                                 int alarmid);
+#endif
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -109,6 +135,10 @@ static const struct rtc_ops_s g_rtc_ops =
   .setrelative = rtc_lh_setrelative,
   .cancelalarm = rtc_lh_cancelalarm,
   .rdalarm     = rtc_lh_rdalarm,
+#endif
+#ifdef CONFIG_RTC_PERIODIC
+  .setperiodic    = rtc_lh_setperiodic,
+  .cancelperiodic = rtc_lh_cancelperiodic,
 #endif
 };
 
@@ -167,6 +197,40 @@ static void rtc_lh_alarm_callback(void *arg, unsigned int alarmid)
     }
 }
 #endif /* CONFIG_RTC_ALARM */
+
+/****************************************************************************
+ * Name: rtc_lh_periodic_callback
+ *
+ * Description:
+ *   This is the function that is called from the RT timer when the periodic
+ *   wakeup expires. It just invokes the upper half driver's callback.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_RTC_PERIODIC
+static void rtc_lh_periodic_callback(void *arg)
+{
+  struct esp32s3_periodic_s *periodic;
+  rtc_wakeup_callback_t cb;
+  void *priv;
+  uint8_t id;
+
+  DEBUGASSERT(arg != NULL);
+
+  periodic = (struct esp32s3_periodic_s *)arg;
+  cb       = (rtc_wakeup_callback_t)periodic->cb;
+  priv     = (void *)periodic->priv;
+  id       = periodic->id;
+
+  if (cb != NULL)
+    {
+      cb(priv, id);
+    }
+}
+#endif /* CONFIG_RTC_PERIODIC */
 
 /****************************************************************************
  * Name: rtc_lh_rdtime
@@ -332,6 +396,7 @@ static int rtc_lh_setalarm(struct rtc_lowerhalf_s *lower,
   cbinfo            = &priv->cbinfo[alarminfo->id];
   cbinfo->cb        = alarminfo->cb;
   cbinfo->priv      = alarminfo->priv;
+  memcpy(&cbinfo->time, &alarminfo->time, sizeof(cbinfo->time));
 
   /* Set the alarm */
 
@@ -392,7 +457,7 @@ static int rtc_lh_setrelative(struct rtc_lowerhalf_s *lower,
     {
       flags = spin_lock_irqsave(&priv->lock);
 
-      seconds = alarminfo->reltime;
+      seconds = up_rtc_time() + alarminfo->reltime;
       gmtime_r(&seconds, (struct tm *)&setalarm.time);
 
       /* The set the alarm using this absolute time */
@@ -442,6 +507,7 @@ static int rtc_lh_cancelalarm(struct rtc_lowerhalf_s *lower, int alarmid)
   cbinfo       = &priv->cbinfo[alarmid];
   cbinfo->cb   = NULL;
   cbinfo->priv = NULL;
+  memset(&cbinfo->time, 0, sizeof(cbinfo->time));
 
   /* Then cancel the alarm */
 
@@ -470,8 +536,6 @@ static int rtc_lh_rdalarm(struct rtc_lowerhalf_s *lower,
                           struct lower_rdalarm_s *alarminfo)
 {
   struct esp32s3_lowerhalf_s *priv = (struct esp32s3_lowerhalf_s *)lower;
-  struct timespec ts;
-  int ret;
   irqstate_t flags;
 
   DEBUGASSERT(lower != NULL && alarminfo != NULL && alarminfo->time != NULL);
@@ -480,15 +544,120 @@ static int rtc_lh_rdalarm(struct rtc_lowerhalf_s *lower,
 
   flags = spin_lock_irqsave(&priv->lock);
 
-  ret = up_rtc_rdalarm(&ts, alarminfo->id);
-  localtime_r((const time_t *)&ts.tv_sec,
-              (struct tm *)alarminfo->time);
+  memcpy(alarminfo->time, &priv->cbinfo[alarminfo->id].time,
+         sizeof(*alarminfo->time));
+
+  spin_unlock_irqrestore(&priv->lock, flags);
+
+  return OK;
+}
+#endif /* CONFIG_RTC_ALARM */
+
+/****************************************************************************
+ * Name: rtc_lh_setperiodic
+ *
+ * Description:
+ *   Set a new periodic wakeup. This function implements the setperiodic()
+ *   method of the RTC driver interface.
+ *
+ * Input Parameters:
+ *   lower     - A reference to RTC lower half driver state structure
+ *   alarminfo - Provided information needed to set the wakeup
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned
+ *   on any failure.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_RTC_PERIODIC
+static int rtc_lh_setperiodic(struct rtc_lowerhalf_s *lower,
+                         const struct lower_setperiodic_s *alarminfo)
+{
+  struct esp32s3_lowerhalf_s *priv = (struct esp32s3_lowerhalf_s *)lower;
+  struct rt_timer_args_s rt_timer_args;
+  uint64_t period_us;
+  irqstate_t flags;
+  int ret = OK;
+
+  DEBUGASSERT(lower != NULL && alarminfo != NULL);
+
+  period_us = (uint64_t)alarminfo->period.tv_sec * USEC_PER_SEC +
+              alarminfo->period.tv_nsec / NSEC_PER_USEC;
+  if (period_us == 0)
+    {
+      return -EINVAL;
+    }
+
+  flags = spin_lock_irqsave(&priv->lock);
+
+  if (priv->periodic.timer_hdl == NULL)
+    {
+      priv->periodic.id = alarminfo->id;
+      rt_timer_args.arg = &priv->periodic;
+      rt_timer_args.callback = rtc_lh_periodic_callback;
+      ret = esp32s3_rt_timer_create(&rt_timer_args,
+                                    &priv->periodic.timer_hdl);
+      if (ret < 0)
+        {
+          spin_unlock_irqrestore(&priv->lock, flags);
+          return ret;
+        }
+    }
+
+  priv->periodic.cb = alarminfo->cb;
+  priv->periodic.priv = alarminfo->priv;
+  priv->periodic.id = alarminfo->id;
+
+  esp32s3_rt_timer_start(priv->periodic.timer_hdl, period_us, true);
 
   spin_unlock_irqrestore(&priv->lock, flags);
 
   return ret;
 }
-#endif /* CONFIG_RTC_ALARM */
+
+/****************************************************************************
+ * Name: rtc_lh_cancelperiodic
+ *
+ * Description:
+ *   Cancel the current periodic wakeup. This function implements the
+ *   cancelperiodic() method of the RTC driver interface.
+ *
+ * Input Parameters:
+ *   lower   - A reference to RTC lower half driver state structure
+ *   alarmid - The wakeup id
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned
+ *   on any failure.
+ *
+ ****************************************************************************/
+
+static int rtc_lh_cancelperiodic(struct rtc_lowerhalf_s *lower, int alarmid)
+{
+  struct esp32s3_lowerhalf_s *priv = (struct esp32s3_lowerhalf_s *)lower;
+  irqstate_t flags;
+  int ret = -ENODATA;
+
+  DEBUGASSERT(lower != NULL);
+
+  flags = spin_lock_irqsave(&priv->lock);
+
+  if (priv->periodic.timer_hdl != NULL)
+    {
+      esp32s3_rt_timer_stop(priv->periodic.timer_hdl);
+      esp32s3_rt_timer_delete(priv->periodic.timer_hdl);
+      priv->periodic.timer_hdl = NULL;
+      priv->periodic.cb = NULL;
+      priv->periodic.priv = NULL;
+      ret = OK;
+    }
+
+  spin_unlock_irqrestore(&priv->lock, flags);
+
+  return ret;
+}
+#endif /* CONFIG_RTC_PERIODIC */
 
 /****************************************************************************
  * Public Functions

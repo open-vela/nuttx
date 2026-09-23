@@ -287,6 +287,26 @@ endchoice # I2C Address
 
 endif # SENSORS_BMI160
 
+config SENSORS_QMI8658
+	bool "QST QMI8658C Inertial Measurement Sensor support"
+	default n
+	select I2C
+	---help---
+		Enable character driver support for the QST QMI8658C inertial
+		measurement sensor.
+
+if SENSORS_QMI8658
+
+config QMI8658_I2C_ADDR
+	hex "QMI8658C I2C address"
+	default 0x6a
+
+config QMI8658_I2C_FREQUENCY
+	int "QMI8658C I2C frequency"
+	default 400000
+
+endif # SENSORS_QMI8658
+
 config SENSORS_BMI270
 	bool "Bosch BMI270 Inertial Measurement Sensor support"
 	default n

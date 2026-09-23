@@ -29,6 +29,7 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
@@ -128,6 +129,10 @@
 #endif
 
 #define ST7789_LUT_SIZE    CONFIG_LCD_ST7789_YRES
+
+#ifdef CONFIG_LCD_ST7789_SWAP_BYTES
+#  define ST7789_SWAPBUF_SIZE 64
+#endif
 
 #if defined(CONFIG_LCD_LANDSCAPE) || defined(CONFIG_LCD_RLANDSCAPE)
 #  define ST7789_XRES       CONFIG_LCD_ST7789_YRES
@@ -276,7 +281,7 @@ static int st7789_setcontrast(FAR struct lcd_dev_s *dev,
  * Private Data
  ****************************************************************************/
 
-static struct st7789_dev_s g_lcddev;
+static FAR struct st7789_dev_s *g_lcddev;
 
 /****************************************************************************
  * Private Functions
@@ -617,6 +622,11 @@ static void st7789_wrram(FAR struct st7789_dev_s *dev,
   size_t i;
 #ifdef CONFIG_LCD_ST7789_3WIRE
   size_t j;
+#elif defined(CONFIG_LCD_ST7789_SWAP_BYTES)
+  size_t chunk;
+  size_t j;
+  size_t offset;
+  uint8_t swapbuff[ST7789_SWAPBUF_SIZE];
 #endif
 
   st7789_sendcmd(dev, ST7789_RAMWR);
@@ -651,6 +661,32 @@ static void st7789_wrram(FAR struct st7789_dev_s *dev,
         }
 
       SPI_SNDBLOCK(dev->spi, rowbuff, size);
+    }
+#elif defined(CONFIG_LCD_ST7789_SWAP_BYTES)
+  st7789_select(dev->spi, LCD_ST7789_SPI_BITS);
+
+  for (i = 0; i < count; i++)
+    {
+      offset = 0;
+      while (offset < size)
+        {
+          chunk = size - offset;
+          if (chunk > sizeof(swapbuff))
+            {
+              chunk = sizeof(swapbuff);
+            }
+
+          for (j = 0; j < chunk; j += ST7789_BYTESPP)
+            {
+              swapbuff[j] = buff[offset + j + 1 +
+                                 (i * (size + skip))];
+              swapbuff[j + 1] = buff[offset + j +
+                                     (i * (size + skip))];
+            }
+
+          SPI_SNDBLOCK(dev->spi, swapbuff, chunk);
+          offset += chunk;
+        }
     }
 #else
   st7789_select(dev->spi, ST7789_BYTESPP * LCD_ST7789_SPI_BITS);
@@ -707,6 +743,14 @@ static void st7789_fill(FAR struct st7789_dev_s *dev, uint16_t color)
     {
       SPI_SEND(dev->spi, LCD_ST7789_DATA_PREFIX | (color & 0xff));
       SPI_SEND(dev->spi, LCD_ST7789_DATA_PREFIX | (color & 0xff00) >> 8);
+    }
+#elif defined(CONFIG_LCD_ST7789_SWAP_BYTES)
+  st7789_select(dev->spi, LCD_ST7789_SPI_BITS);
+
+  for (i = 0; i < ST7789_XRES * ST7789_YRES; i++)
+    {
+      SPI_SEND(dev->spi, (color >> 8) & 0xff);
+      SPI_SEND(dev->spi, color & 0xff);
     }
 #else
   st7789_select(dev->spi, ST7789_BYTESPP * LCD_ST7789_SPI_BITS);
@@ -797,7 +841,11 @@ static int st7789_putarea(FAR struct lcd_dev_s *dev,
       /* simpler case, we can just send the whole buffer */
 
       ginfo("Using full screen/full row mode\n");
+#ifdef CONFIG_LCD_ST7789_SWAP_BYTES
+      st7789_wrram(priv, buffer, row_size, 0, rows);
+#else
       st7789_wrram(priv, buffer, rows * row_size, 0, 1);
+#endif
     }
   else
     {
@@ -998,7 +1046,18 @@ FAR struct lcd_dev_s *st7789_lcdinitialize(FAR struct spi_dev_s *spi,
 FAR struct lcd_dev_s *st7789_lcdinitialize(FAR struct spi_dev_s *spi)
 #endif
 {
-  FAR struct st7789_dev_s *priv = &g_lcddev;
+  FAR struct st7789_dev_s *priv = g_lcddev;
+
+  if (priv == NULL)
+    {
+      priv = calloc(1, sizeof(*priv));
+      if (priv == NULL)
+        {
+          return NULL;
+        }
+
+      g_lcddev = priv;
+    }
 
   /* Initialize the driver data structure */
 
@@ -1011,8 +1070,8 @@ FAR struct lcd_dev_s *st7789_lcdinitialize(FAR struct spi_dev_s *spi)
   priv->spi              = spi;
 
 #ifdef CONFIG_LCD_DYN_ORIENTATION
-  g_lcddev.xoff = xoff;
-  g_lcddev.yoff = yoff;
+  g_lcddev->xoff = xoff;
+  g_lcddev->yoff = yoff;
 #endif
 
   /* Init the hardware and clear the display */

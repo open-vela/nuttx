@@ -244,6 +244,13 @@ static int wdt_lh_start(struct watchdog_lowerhalf_s *lower)
 
       ESP32S3_WDT_UNLOCK(priv->wdt);
 
+      ESP32S3_WDT_STG_CONF(priv->wdt, ESP32S3_WDT_STAGE1,
+                           ESP32S3_WDT_STAGE_ACTION_OFF);
+      ESP32S3_WDT_STG_CONF(priv->wdt, ESP32S3_WDT_STAGE2,
+                           ESP32S3_WDT_STAGE_ACTION_OFF);
+      ESP32S3_WDT_STG_CONF(priv->wdt, ESP32S3_WDT_STAGE3,
+                           ESP32S3_WDT_STAGE_ACTION_OFF);
+
       /* No User Handler */
 
       if (priv->handler == NULL)
@@ -590,6 +597,7 @@ static xcpt_t wdt_lh_capture(struct watchdog_lowerhalf_s *lower,
     (struct esp32s3_wdt_lowerhalf_s *)lower;
   irqstate_t flags;
   xcpt_t oldhandler;
+  bool was_started;
 
   DEBUGASSERT(priv);
 
@@ -598,10 +606,22 @@ static xcpt_t wdt_lh_capture(struct watchdog_lowerhalf_s *lower,
   /* Get the old handler to return it */
 
   oldhandler = priv->handler;
+  was_started = priv->started;
 
   ESP32S3_WDT_UNLOCK(priv->wdt);
 
   flags = spin_lock_irqsave(&priv->lock);
+
+  /* Reconfigure an active watchdog only while it is stopped.  Otherwise a
+   * stage that has already expired may retain its previous action until the
+   * next watchdog cycle. */
+
+  if (was_started)
+    {
+      ESP32S3_WDT_STOP(priv->wdt);
+      ESP32S3_WDT_DISABLEINT(priv->wdt);
+      ESP32S3_WDT_ACKINT(priv->wdt);
+    }
 
   /* Save the new user handler */
 
@@ -614,6 +634,13 @@ static xcpt_t wdt_lh_capture(struct watchdog_lowerhalf_s *lower,
 
   if (priv->handler != NULL && priv->started)
     {
+      ESP32S3_WDT_STG_CONF(priv->wdt, ESP32S3_WDT_STAGE1,
+                           ESP32S3_WDT_STAGE_ACTION_OFF);
+      ESP32S3_WDT_STG_CONF(priv->wdt, ESP32S3_WDT_STAGE2,
+                           ESP32S3_WDT_STAGE_ACTION_OFF);
+      ESP32S3_WDT_STG_CONF(priv->wdt, ESP32S3_WDT_STAGE3,
+                           ESP32S3_WDT_STAGE_ACTION_OFF);
+
       /* Deallocate the previous allocated interrupt
        * If there is a previous allocated interrupt.
        */
@@ -636,6 +663,12 @@ static xcpt_t wdt_lh_capture(struct watchdog_lowerhalf_s *lower,
 
       ESP32S3_WDT_SETISR(priv->wdt, wdt_handler, priv);
       ESP32S3_WDT_ENABLEINT(priv->wdt);
+
+      /* Start a fresh stage-0 interval with the new action. */
+
+      priv->lastreset = clock_systime_ticks();
+      ESP32S3_WDT_FEED(priv->wdt);
+      ESP32S3_WDT_START(priv->wdt);
     }
 
   /* In case the user wants to disable the callback */
@@ -656,6 +689,15 @@ static xcpt_t wdt_lh_capture(struct watchdog_lowerhalf_s *lower,
         {
           ESP32S3_WDT_STG_CONF(priv->wdt, ESP32S3_WDT_STAGE0,
                                ESP32S3_WDT_STAGE_ACTION_RESET_RTC);
+        }
+
+      if (was_started)
+        {
+          /* Restore reset mode without carrying over the old deadline. */
+
+          priv->lastreset = clock_systime_ticks();
+          ESP32S3_WDT_FEED(priv->wdt);
+          ESP32S3_WDT_START(priv->wdt);
         }
     }
 
@@ -711,17 +753,21 @@ static int wdt_handler(int irq, void *context, void *arg)
 {
   struct esp32s3_wdt_lowerhalf_s *priv = arg;
 
-  /* Run the user callback */
-
-  priv->handler(irq, context, priv->upper);
-
-  /* Clear the Interrupt */
+  /* Clear the interrupt before invoking the callback.  The callback may
+   * wake a task that immediately changes or stops the watchdog. */
 
   ESP32S3_WDT_UNLOCK(priv->wdt);
 
   ESP32S3_WDT_ACKINT(priv->wdt);
 
   ESP32S3_WDT_LOCK(priv->wdt);
+
+  /* Run the user callback */
+
+  if (priv->handler != NULL)
+    {
+      priv->handler(irq, context, priv->upper);
+    }
 
   return OK;
 }

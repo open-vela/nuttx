@@ -713,6 +713,12 @@ static int pcm_getcaps(FAR struct audio_lowerhalf_s *dev, int type,
     {
       caps->ac_format.hw = (1 << (AUDIO_FMT_PCM - 1));
     }
+  else if (caps->ac_type == AUDIO_TYPE_QUERY &&
+           caps->ac_subtype == AUDIO_FMT_PCM)
+    {
+      caps->ac_controls.b[0] = AUDIO_SUBFMT_PCM_S16_LE;
+      caps->ac_controls.b[1] = AUDIO_SUBFMT_END;
+    }
 
   return caps->ac_len;
 }
