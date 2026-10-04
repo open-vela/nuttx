@@ -13,6 +13,7 @@ choice
 config ARCH_CHIP_LS2K0300
 	bool "LS2K0300"
 	select ARCH_USE_MMU
+	select ARCH_HAVE_SETJMP
 	---help---
 		Loongson LS2K0300 SoC, LoongArch 64-bit
 
