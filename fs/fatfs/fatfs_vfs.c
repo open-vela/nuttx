@@ -449,6 +449,16 @@ static ssize_t fatfs_read(FAR struct file *filep, FAR char *buffer,
       return ret;
     }
 
+  /* FatFs f_lseek() expands writable files when seeking beyond EOF.
+   * A POSIX read, including pread(), must never change the file size.
+   */
+
+  if (buflen == 0 || filep->f_pos >= f_size(&fp->f))
+    {
+      ret = 0;
+      goto errout_with_sem;
+    }
+
   if (filep->f_pos != f_tell(&fp->f))
     {
       ret = fatfs_convert_result(f_lseek(&fp->f, filep->f_pos));
