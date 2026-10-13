@@ -95,8 +95,12 @@ void up_timer_initialize(void)
   timer_freq = ls2k0300_const_freq();
   tval = timer_freq / TICK_PER_SEC;
 
-  tcfg  = tval << CSR_TCFG_VAL_SHIFT;
-  tcfg |= CSR_TCFG_PERIOD | CSR_TCFG_EN;
+  /* LS2K0300 (LA264): TCFG init value is the raw tick count, EN/PERIOD bits
+   * OR-ed at bit0/bit1. No left shift -- Linux time.c writes it the same way
+   * (period & CSR_TCFG_VAL | EN | PERIOD), verified against Linux dmesg
+   * and measured tick interval. */
+
+  tcfg  = (tval & CSR_TCFG_VAL) | CSR_TCFG_PERIOD | CSR_TCFG_EN;
 
   csr_writeq(tcfg, LOONGARCH_CSR_TCFG);
 
