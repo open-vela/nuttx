@@ -1,0 +1,17 @@
+{
+    "module": {
+        "include_module": [],
+        "exclude_module":
+        [
+            "Nuttx_System_Fs_Fs"
+        ],
+        "exclude_test":
+        [
+            "test_ltp_integration[ltp_interfaces_pthread_rwlock_unlock_4_2]"
+        ],
+        "order": []
+    },
+    "args": {
+        "kv": []
+    }
+}
