@@ -381,10 +381,10 @@
 
 #define BOARD_SDRAM2_SIZE               (8*1024*1024)
 
-/* 2MB: keep the heap well clear of the LVGL framebuffer reserve (1MB).
- * A render-path out-of-bounds write was landing at SDRAM+1MB (right at
- * the old heap start) and smashing free-node metadata; the extra 1MB
- * dead zone keeps heap metadata out of reach.
+/* Keep the conservative 2 MB display reserve. The former corruption near
+ * SDRAM+1MB was caused by RGB565 setup driving PG0/PG1 (SDRAM A10/A11)
+ * instead of LCD G0/G1 on PJ7/PJ8; see stm32h750b-dk.h. A reserve alone
+ * cannot protect against SDRAM address aliasing from a wrong pinmux.
  */
 
 #define BOARD_SDRAM2_HEAP_OFFSET        (2*1024*1024)
