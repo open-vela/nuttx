@@ -2509,16 +2509,28 @@ static int up_interrupt(int irq, void *context, void *arg)
    * from SR register - sending data affects TC, but without refresh we
    * will not know that...
    *
-   * Do NOT drop DIR to RX here.  Flip DIR in up_txempty() after tcdrain
-   * sees TXE|TC (thread context), or in up_shutdown().  ISR-only DIR drops
-   * were implicated in mid-frame bus floats when combined with a bad USB
-   * adapter; LA on DI/DIR proved MCU timing fine once the peer PHY was OK.
+   * Release the RS-485 transceiver here, in the same interrupt that reports
+   * TC.  This is where upstream NuttX STM32 drivers do it, and it is also
+   * what the STM32 hardware does for its own DE output (DEDT = 0).
+   *
+   * Doing it from up_txempty() instead put the tcdrain() poll granularity on
+   * the release path.  uart_tcdrain() polls with
+   * nxsig_usleep(POLL_DELAY_USEC) where POLL_DELAY_USEC is 1000us, but
+   * nxsig_usleep() rounds up to the system tick and CONFIG_USEC_PER_TICK is
+   * 10000 here.  Measured on the board, one poll interval was
+   * 12.7-13.8ms, so DIR stayed asserted for up to ~13ms after the last stop
+   * bit and any slave answering inside that window lost the frame.
    */
 
   if ((priv->sr & USART_ISR_TC) != 0 &&
       (priv->ie & USART_CR1_TCIE) != 0 &&
       (priv->ie & USART_CR1_TXEIE) == 0)
     {
+      if (priv->rs485_dir_gpio != 0)
+        {
+          stm32_gpiowrite(priv->rs485_dir_gpio, !priv->rs485_dir_polarity);
+        }
+
       up_restoreusartint(priv, priv->ie & ~USART_CR1_TCIE);
     }
 #endif
@@ -3597,8 +3609,9 @@ static bool up_txready(struct uart_dev_s *dev)
  *
  * Description:
  *   Return true when the transmitter is fully idle.  For RS-485 require
- *   TXE|TC then force DIR to receive so tcdrain() outlives the shift
- *   register without an app-layer usleep().
+ *   TXE as well as TC: TXE alone is set while the last byte is still in the
+ *   shift register, so reporting empty then would let tcdrain() return with
+ *   the line still busy.
  *
  ****************************************************************************/
 
@@ -3616,13 +3629,12 @@ static bool up_txempty(struct uart_dev_s *dev)
           return false;
         }
 
-      /* TC means the stop bit has left the shifter.  Dropping DIR in the
-       * same instant lets A/B float; USB-RS485 then appends 0x7F/0xFF
-       * onto an otherwise valid CRC (Communication_log_4: D5 CA 7F).
-       * 9600 bit ≈ 104us; hold ~4 bit times.
+      /* The TX-complete interrupt normally released DIR already.  Drop it
+       * again here so that a transmit path which never enabled TCIE still
+       * leaves the transceiver in receive mode.  Writing the same level
+       * twice is harmless.
        */
 
-      up_udelay(400);
       stm32_gpiowrite(priv->rs485_dir_gpio, !priv->rs485_dir_polarity);
       return true;
     }
