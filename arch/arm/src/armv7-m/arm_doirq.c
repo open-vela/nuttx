@@ -37,6 +37,9 @@
 #include "arm_internal.h"
 #include "exc_return.h"
 #include "nvic.h"
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+#  include "arm_freeze_diag.h"
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -88,6 +91,34 @@ uint32_t *arm_doirq(int irq, uint32_t *regs)
 
   if (irq == NVIC_IRQ_PENDSV)
     {
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+
+      /* QA-04 temporary: one entry sample of the masking state and of the
+       * context pointers the PendSV branch is about to use.  Read-only for
+       * this build; the values are only interpreted after a freeze.
+       */
+
+      ARM_FREEZE_DIAG->pendsv_last_basepri = getbasepri();
+      ARM_FREEZE_DIAG->pendsv_last_primask = getprimask();
+      ARM_FREEZE_DIAG->pendsv_last_ipsr    = getipsr();
+      if (regs != NULL)
+        {
+          ARM_FREEZE_DIAG->pendsv_last_xpsr = regs[REG_XPSR];
+        }
+      else
+        {
+          ARM_FREEZE_DIAG->pendsv_null_regs++;
+        }
+
+      if (tcb != NULL)
+        {
+          ARM_FREEZE_DIAG->pendsv_last_regs  = (uint32_t)tcb->xcp.regs;
+          ARM_FREEZE_DIAG->pendsv_last_saved = (uint32_t)tcb->xcp.saved_regs;
+        }
+
+      ARM_FREEZE_DIAG->pendsv_entries++;
+#endif
+
 #ifdef CONFIG_ARCH_HIPRI_INTERRUPT
       /* Dispatch the PendSV interrupt */
 
@@ -98,8 +129,15 @@ uint32_t *arm_doirq(int irq, uint32_t *regs)
         {
           /* Pendsv able to access running tcb with no critical section */
 
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+          ARM_FREEZE_DIAG->pendsv_sigaction++;
+#endif
           up_schedule_sigaction(tcb);
         }
+#endif
+
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+      ARM_FREEZE_DIAG->pendsv_exits++;
 #endif
 
       up_irq_save();

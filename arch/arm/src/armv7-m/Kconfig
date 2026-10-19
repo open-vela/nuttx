@@ -13,6 +13,17 @@ config ARMV7M_HAVE_DCACHE
 	bool
 	default n
 
+config DEBUG_FREEZE_DIAG
+	bool "Temporary freeze diagnostics (QA-04)"
+	default n
+	---help---
+		Adds a handful of word counters to the SysTick, PendSV and USART2
+		receive paths plus one shared struct in .bss, so a debugger can
+		tell after a freeze which contexts were still running.  The
+		counters are one load/add/store each; nothing prints, waits,
+		allocates or takes a lock.  They describe activity, not a cause,
+		and they are for a temporary diagnostic build only.
+
 config ARMV7M_BASEPRI_WAR
 	bool "Cortex-M7 r0p1 Errata 837070 Workaround"
 	default n

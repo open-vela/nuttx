@@ -67,6 +67,10 @@ ifeq ($(CONFIG_SCHED_THREAD_LOCAL),y)
   CMN_CSRCS += arm_tls.c
 endif
 
+ifeq ($(CONFIG_DEBUG_FREEZE_DIAG),y)
+  CMN_CSRCS += arm_freeze_diag.c
+endif
+
 ifeq ($(CONFIG_UNWINDER_FRAME_POINTER),y)
   CMN_CSRCS += arm_backtrace_fp.c
 endif

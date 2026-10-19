@@ -47,6 +47,9 @@
 
 #include "arm_internal.h"
 #include "chip.h"
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+#  include "arm_freeze_diag.h"
+#endif
 #include "stm32_gpio.h"
 #include "hardware/stm32_pinmap.h"
 #include "stm32_dma.h"
@@ -2467,6 +2470,19 @@ static int up_interrupt(int irq, void *context, void *arg)
 
   DEBUGASSERT(priv != NULL);
 
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+
+  /* QA-04 temporary: USART2 entry counter and the hardware state seen at
+   * that entry.  A difference between entries and exits only means a call
+   * had not returned when the sample was taken; read it with the PC.
+   */
+
+  if (priv->irq == STM32_IRQ_USART2)
+    {
+      ARM_FREEZE_DIAG->usart2_entries++;
+    }
+#endif
+
   /* Report serial activity to the power management logic */
 
 #if defined(CONFIG_PM) && CONFIG_STM32H7_PM_SERIAL_ACTIVITY > 0
@@ -2476,6 +2492,15 @@ static int up_interrupt(int irq, void *context, void *arg)
   /* Get the masked USART status word. */
 
   priv->sr = up_serialin(priv, STM32_USART_ISR_OFFSET);
+
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+  if (priv->irq == STM32_IRQ_USART2)
+    {
+      ARM_FREEZE_DIAG->usart2_last_isr     = priv->sr;
+      ARM_FREEZE_DIAG->usart2_last_ie      = priv->ie;
+      ARM_FREEZE_DIAG->usart2_last_rxlevel = priv->sr & 0x0f;
+    }
+#endif
 
   /* USART interrupts:
    *
@@ -2558,7 +2583,21 @@ static int up_interrupt(int irq, void *context, void *arg)
        * RX interrupts are disabled.
        */
 
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+      if (priv->irq == STM32_IRQ_USART2)
+        {
+          ARM_FREEZE_DIAG->usart2_recv_before++;
+        }
+#endif
+
       uart_recvchars(&priv->dev);
+
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+      if (priv->irq == STM32_IRQ_USART2)
+        {
+          ARM_FREEZE_DIAG->usart2_recv_after++;
+        }
+#endif
     }
 
   /* We may still have to read from the DR register to clear any pending
@@ -2585,6 +2624,13 @@ static int up_interrupt(int irq, void *context, void *arg)
 
       uart_xmitchars(&priv->dev);
     }
+
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+  if (priv->irq == STM32_IRQ_USART2)
+    {
+      ARM_FREEZE_DIAG->usart2_exits++;
+    }
+#endif
 
   return OK;
 }

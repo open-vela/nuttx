@@ -34,6 +34,9 @@
 #include "clock/clock.h"
 #include "arm_internal.h"
 #include "chip.h"
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+#  include "arm_freeze_diag.h"
+#endif
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -112,9 +115,25 @@
 
 static int stm32_timerisr(int irq, uint32_t *regs, void *arg)
 {
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+
+  /* QA-04 temporary: count vector entries and exits.  The counter pair
+   * says whether this handler keeps being reached; it says nothing about
+   * why a freeze happened and must be read together with the PC.
+   */
+
+  ARM_FREEZE_DIAG->systick_entries++;
+#endif
+
   /* Process timer interrupt */
 
   nxsched_process_timer();
+
+#ifdef CONFIG_DEBUG_FREEZE_DIAG
+  ARM_FREEZE_DIAG->systick_last_tick = g_system_ticks;
+  ARM_FREEZE_DIAG->systick_exits++;
+#endif
+
   return 0;
 }
 
