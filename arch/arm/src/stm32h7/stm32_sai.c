@@ -740,6 +740,20 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
       return -EINVAL;
     }
 
+  /* The transfer count register is 16 bits wide.  A larger count is silently
+   * truncated there, and a truncated count of zero leaves the stream enabled
+   * with nothing to transfer: the completion callback never fires and the
+   * caller waits until its timeout.  Reject it here instead.
+   */
+
+  if (ntransfers > DMA_SNDTR_NDT_MASK)
+    {
+      i2serr("ERROR: %zu transfers exceed the %lu limit\n",
+             ntransfers, (unsigned long)DMA_SNDTR_NDT_MASK);
+      sai_buf_free(priv, bfcontainer);
+      return -E2BIG;
+    }
+
   /* Reject buffers the DMA controller cannot reach.  DMA1 and DMA2 see the
    * D2 domain and the AXI SRAM, but not the tightly coupled DTCM at
    * 0x20000000: a buffer that lands there makes the transfer fail with a
@@ -1199,7 +1213,33 @@ static int sai_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 #else
   ret = -ENOSYS;
 #endif
-  DEBUGASSERT(ret == OK);
+
+  /* A setup failure has to reach the caller.  Returning OK while nothing is
+   * in flight leaves the caller waiting for a completion callback that will
+   * never arrive.  DEBUGASSERT would express the same intent but it is
+   * compiled out of a release build, so the error would simply vanish.
+   *
+   * The queued container holds a reference to the audio buffer, so releasing
+   * it is part of undoing the request.
+   */
+
+  if (ret < 0)
+    {
+      while (!sq_empty(&priv->pend))
+        {
+          struct sai_buffer_s *pending =
+            (struct sai_buffer_s *)sq_remfirst(&priv->pend);
+
+          apb_free(pending->apb);
+          sai_buf_free(priv, pending);
+        }
+
+      priv->txenab = priv->rxenab = false;
+      leave_critical_section(flags);
+      nxmutex_unlock(&priv->lock);
+      return ret;
+    }
+
   leave_critical_section(flags);
   nxmutex_unlock(&priv->lock);
   return OK;
@@ -1278,7 +1318,33 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 #else
   ret = -ENOSYS;
 #endif
-  DEBUGASSERT(ret == OK);
+
+  /* A setup failure has to reach the caller.  Returning OK while nothing is
+   * in flight leaves the caller waiting for a completion callback that will
+   * never arrive.  DEBUGASSERT would express the same intent but it is
+   * compiled out of a release build, so the error would simply vanish.
+   *
+   * The queued container holds a reference to the audio buffer, so releasing
+   * it is part of undoing the request.
+   */
+
+  if (ret < 0)
+    {
+      while (!sq_empty(&priv->pend))
+        {
+          struct sai_buffer_s *pending =
+            (struct sai_buffer_s *)sq_remfirst(&priv->pend);
+
+          apb_free(pending->apb);
+          sai_buf_free(priv, pending);
+        }
+
+      priv->txenab = priv->rxenab = false;
+      leave_critical_section(flags);
+      nxmutex_unlock(&priv->lock);
+      return ret;
+    }
+
   leave_critical_section(flags);
   nxmutex_unlock(&priv->lock);
   return OK;
