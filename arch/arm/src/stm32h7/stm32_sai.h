@@ -86,6 +86,34 @@ typedef uint32_t (*stm32_sai_sampleratecb_t)(struct i2s_dev_s *dev,
 struct i2s_dev_s *stm32_sai_initialize(int intf,
                   stm32_sai_sampleratecb_t sampleratecb);
 
+/****************************************************************************
+ * Name: stm32_sai_staterecord
+ *
+ * Description:
+ *   Copy the register snapshot that the driver took when the last transfer
+ *   ended into the caller's array.
+ *
+ *   SAI reports overrun and a wrong clock configuration through status bits
+ *   that the DMA controller does not expose, so a failed transfer surfaces as
+ *   a bare -EIO without saying why.  This accessor hands back what the
+ *   hardware was showing at that moment.
+ *
+ * Input Parameters:
+ *   dev  - Device from stm32_sai_initialize(), or NULL for "the only device"
+ *   regs - Receives STM32H7_SAI_DIAG_NREGS words, in the order documented at
+ *          the driver's definition.
+ *
+ * Returned Value:
+ *   Zero on success, a negated errno on failure.
+ *
+ ****************************************************************************/
+
+#define STM32H7_SAI_DIAG_NREGS  6
+#define STM32H7_SAI_DIAG_NALL   11
+
+int stm32_sai_staterecord(struct i2s_dev_s *dev, uint32_t *regs, int nregs);
+
+
 #undef EXTERN
 #ifdef __cplusplus
 }

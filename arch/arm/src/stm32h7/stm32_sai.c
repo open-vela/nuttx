@@ -120,14 +120,32 @@
  * The width matters for PDM: ST's reference configuration for this board
  * reads the PDM bitstream as 16-bit half-words, so the DMA must be sized to
  * match or every other half-word is skipped.
+ *
+ * The controller runs in direct mode, matching ST's configuration for this
+ * board's capture path: no FIFO, single-beat transfers on both sides.  With
+ * FIFO mode disabled the burst fields must stay at single, because a burst
+ * longer than the peripheral's request granularity raises a transfer error.
+ * PFCTRL stays clear: the SAI block drives the request line as a normal DMA
+ * request, not as a flow-control handshake.
  */
 
-#define SAI_RXDMA16_CONFIG   (DMA_SCR_PFCTRL | DMA_SCR_DIR_P2M | \
+#define SAI_RXDMA16_CONFIG   (DMA_SCR_DIR_P2M | \
                               DMA_SCR_MINC | SAI_DMA_PRIO | \
                               DMA_SCR_PSIZE_16BITS | DMA_SCR_MSIZE_16BITS | \
                               DMA_SCR_PBURST_SINGLE | DMA_SCR_MBURST_SINGLE)
 
-#define SAI_RXDMA32_CONFIG   (DMA_SCR_PFCTRL | DMA_SCR_DIR_P2M | \
+/* Byte-wide receive, used for PDM.  The PDM interface hands one bitstream
+ * byte per request: the data register's upper half repeats the lower one
+ * when read as a half-word, which shows up as adjacent identical bytes in
+ * the captured stream.
+ */
+
+#define SAI_RXDMA8_CONFIG    (DMA_SCR_DIR_P2M | \
+                              DMA_SCR_MINC | SAI_DMA_PRIO | \
+                              DMA_SCR_PSIZE_8BITS | DMA_SCR_MSIZE_8BITS | \
+                              DMA_SCR_PBURST_SINGLE | DMA_SCR_MBURST_SINGLE)
+
+#define SAI_RXDMA32_CONFIG   (DMA_SCR_DIR_P2M | \
                               DMA_SCR_MINC | SAI_DMA_PRIO | \
                               DMA_SCR_PSIZE_32BITS | DMA_SCR_MSIZE_32BITS | \
                               DMA_SCR_PBURST_SINGLE | DMA_SCR_MBURST_SINGLE)
@@ -142,12 +160,26 @@
                               DMA_SCR_PSIZE_32BITS | DMA_SCR_MSIZE_32BITS | \
                               DMA_SCR_PBURST_SINGLE | DMA_SCR_MBURST_SINGLE)
 
-/* Master clock divider arithmetic.  With NODIV=0 the kernel clock feeds the
- * MCLK generator, and FRL drives the frame rate:
+/* Master clock divider arithmetic.  The kernel clock reaches the audio
+ * interface through one divider, and NODIV decides what that divider drives:
  *
- *   FRL+1 = (frame bits)          (set from the slot layout)
- *   FS    = CK / (MCKDIV * 2 * 256)          for OSR = 0
- *   FS    = CK / (MCKDIV * 2 * 256 * 2)      for OSR = 1
+ *   NODIV = 0   MCLK = CK / MCKDIV, and the frame rate follows from the
+ *               fixed 256-cycle master clock per sample:
+ *
+ *                 FS = CK / (MCKDIV * 256)          for OSR = 0
+ *                 FS = CK / (MCKDIV * 256 * 2)      for OSR = 1
+ *
+ *   NODIV = 1   the same divider feeds the bit clock directly, and the frame
+ *               rate follows from the frame length instead:
+ *
+ *                 FS = CK / (MCKDIV * FRL)
+ *
+ * PDM uses the NODIV = 1 form.  Its reference configuration asks for a frame
+ * rate of eight times the sample rate because the frame is 32 bits wide, so
+ * the product is 256 * FS in either case and the divider expression collapses
+ * to the same number.  What differs is which register field the divider
+ * lands in, and getting that wrong leaves the microphone with no bit clock
+ * at all.
  *
  * Rounding is done in tenths of a hertz to keep the significant digits, the
  * same technique the ST HAL uses.  A divider below 1 is clamped to 1: the
@@ -159,14 +191,23 @@
 #define SAI_MCKDIV_MAX       (63)
 
 /* PDM frame geometry, taken from the reference configuration ST ships for
- * this board's microphone path: frame length 32, one active slot, 16-bit
- * data.  Together with MCLK = 128 * FS this gives a 2.048 MHz bit clock at
- * 16 kHz.
+ * this board's microphone path: frame length 32, two slots, one active,
+ * 16-bit data.  The PDM interface derives its bitstream clock from the master
+ * clock, so a 32-bit frame turns MCLK into the 1.024 MHz sample stream the
+ * microphone produces, and 64 decimation steps bring that back to 16 kHz.
  */
 
 #define SAI_PDM_FRAME_LENGTH      (32)
-#define SAI_PDM_SLOT_COUNT        (1)
+#define SAI_PDM_SLOT_COUNT        (2)
 #define SAI_PDM_ACTIVE_FRAME_LEN  (1)
+
+/* Microphone pairs declared to the PDM interface, and the slot enable mask.
+ * The reference configuration declares two pairs and enables slot 1; slot 0
+ * stays off even though the frame has two slots.
+ */
+
+#define SAI_PDM_MIC_PAIRS         (2)
+#define SAI_PDM_SLOT_ENABLE       (0x0002)
 
 /****************************************************************************
  * Private Types
@@ -204,17 +245,40 @@ struct stm32h7_sai_s
   mutex_t lock;                /* Assures mutually exclusive access to SAI */
   uint32_t frequency;          /* SAI kernel clock frequency */
   uint32_t dmamap;             /* DMAMUX request for this sub-block */
+  uint32_t dmamux_ccr;         /* DMAMUX request number, for diagnosis */
   bool pdm;                    /* True: PDM microphone mode */
   uint8_t or;                  /* Oversampling ratio flag */
 #ifdef CONFIG_STM32H7_SAI_DMA
   DMA_HANDLE dma;              /* DMA channel handle */
   uint32_t dma_ccr;            /* DMA control register */
+  uint32_t dma_scr;            /* DMA stream config as programmed */
+  uint32_t dma_sndtr;          /* DMA transfer count as programmed */
+  uint32_t dma_spar;           /* DMA peripheral address as programmed */
+  uint32_t dma_sm0ar;          /* DMA memory address as programmed */
 #endif
   uint8_t datalen;             /* Data width in bits */
   uint32_t samplerate;         /* Data sample rate */
   uint8_t rxenab:1;            /* True: RX transfers enabled */
   uint8_t txenab:1;            /* True: TX transfers enabled */
   struct wdog_s dog;           /* Watchdog that handles timeouts */
+
+  /* Snapshot taken when a transfer ends.  SAI reports overrun and a wrong
+   * clock configuration through bits that DMA does not see, so a bare -EIO
+   * from the DMA callback is not enough to tell the two apart.  These are
+   * written from interrupt level and read afterwards for diagnosis.
+   */
+
+  uint8_t last_isr;            /* DMA interrupt status at completion */
+  uint32_t last_sr;            /* SAI status register */
+  uint32_t last_cr1;           /* SAI configuration register 1 */
+  uint32_t last_frcr;          /* SAI frame configuration register */
+  uint32_t last_slotr;         /* SAI slot register */
+  uint32_t last_pdmcr;         /* SAI PDM control register (PDM only) */
+  uint32_t last_dma_scr;       /* DMA stream configuration at start */
+  uint32_t last_dma_sndtr;     /* DMA transfer count at start */
+  uint32_t last_dma_spar;      /* DMA peripheral address at start */
+  uint32_t last_dma_sm0ar;     /* DMA memory address at start */
+  uint32_t last_dmamux_ccr;    /* DMAMUX request number */
   sq_queue_t pend;             /* A queue of pending transfers */
   sq_queue_t act;              /* A queue of active transfers */
   sq_queue_t done;             /* A queue of completed transfers */
@@ -480,19 +544,22 @@ static void sai_modifyreg(struct stm32h7_sai_s *priv, uint8_t offset,
  * Name: sai_mckdivider
  *
  * Description:
- *   Program MCKDIV so that MCLK comes out at 256 * FS from the kernel clock.
+ *   Program MCKDIV so that the interface produces 256 * FS worth of bit
+ *   clock from the kernel clock.
  *
- *   MCLK = CK / (MCKDIV * 2), so
+ *   With NODIV = 0, MCLK = CK / MCKDIV and
  *
- *     MCKDIV = CK / (FS * 2 * 256)
+ *     MCKDIV = CK / (FS * 256)
  *
- *   An odd over sampling ratio halves the achievable MCLK, doubling the
- *   divider.  The same expression covers PDM: in that mode the interface
- *   derives its bit clock from this MCLK and a frame of FRL bits, so the
- *   256 * FS target still holds.  ST's reference configuration for this
- *   board's microphone path lands on the same value (MCKDIV=12 from a
- *   49.14 MHz kernel clock at 16 kHz), which is what makes MCLK equal to
- *   128 * FS and the bit clock 2.048 MHz.
+ *   With NODIV = 1, the divider feeds the bit clock and the frame length
+ *   enters instead:
+ *
+ *     MCKDIV = CK / (FS * FRL)
+ *
+ *   PDM picks the second form because that is what ST's reference
+ *   configuration does, and it requests a frame rate of FS * 8 so that the
+ *   32-bit frame yields 256 * FS.  Both forms reduce to the same numeric
+ *   divider for this board: 49.143 MHz / (16000 * 256) = 12.
  *
  *   Only meaningful in master mode; hardware ignores the field in slave
  *   mode, so writing it is harmless there.
@@ -507,11 +574,12 @@ static void sai_mckdivider(struct stm32h7_sai_s *priv)
   DEBUGASSERT(priv && priv->samplerate > 0 && priv->frequency > 0);
 
   /* Keep tenths of a hertz during the division to preserve significant
-   * digits, then round.
+   * digits, then round.  PDM overrides the divisor below, so start from the
+   * PCM form.
    */
 
   tmpval = (priv->frequency * 10) /
-           (priv->samplerate * 2 * 256 * (priv->or ? 2 : 1));
+           (priv->samplerate * 256 * (priv->or ? 2 : 1));
   mckdiv = tmpval / 10;
 
   if ((tmpval % 10) > 8)
@@ -528,9 +596,16 @@ static void sai_mckdivider(struct stm32h7_sai_s *priv)
       mckdiv = SAI_MCKDIV_MAX;
     }
 
+  /* NODIV selects which way the divider is interpreted.  PCM keeps the
+   * master clock at 256 * FS for the codec; PDM takes the bit clock straight
+   * from the divider, as ST's reference configuration for this board does.
+   */
+
   sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET,
                 SAI_CR1_MCKDIV_MASK | SAI_CR1_NODIV | SAI_CR1_OSR,
-                SAI_CR1_MCKDIV(mckdiv) | (priv->or ? SAI_CR1_OSR : 0));
+                SAI_CR1_MCKDIV(mckdiv) |
+                (priv->pdm ? SAI_CR1_NODIV : 0) |
+                (priv->or ? SAI_CR1_OSR : 0));
 }
 
 /****************************************************************************
@@ -634,9 +709,18 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
   else if (priv->rxenab)
     {
       nbytes = apb->nmaxbytes - apb->curbyte;
-      priv->dma_ccr = (priv->datalen > 16) ? SAI_RXDMA32_CONFIG :
-                                             SAI_RXDMA16_CONFIG;
-      unit = (priv->datalen > 16) ? 4 : 2;
+
+      if (priv->pdm)
+        {
+          priv->dma_ccr = SAI_RXDMA8_CONFIG;
+          unit = 1;
+        }
+      else
+        {
+          priv->dma_ccr = (priv->datalen > 16) ? SAI_RXDMA32_CONFIG :
+                                                 SAI_RXDMA16_CONFIG;
+          unit = (priv->datalen > 16) ? 4 : 2;
+        }
     }
   else
     {
@@ -654,6 +738,27 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
     {
       sai_buf_free(priv, bfcontainer);
       return -EINVAL;
+    }
+
+  /* Reject buffers the DMA controller cannot reach.  DMA1 and DMA2 see the
+   * D2 domain and the AXI SRAM, but not the tightly coupled DTCM at
+   * 0x20000000: a buffer that lands there makes the transfer fail with a
+   * TEIF after the block has already been enabled, which looks like a
+   * peripheral fault rather than a buffer placement problem.
+   *
+   * The board configuration excludes DTCM from the heap for this reason, so
+   * a buffer from the allocator cannot land there.  This check still matters
+   * for static buffers and for any future configuration that puts DTCM back:
+   * failing here names the address instead of surfacing as an unexplained
+   * transfer error later.
+   */
+
+  if (samp >= STM32_DTCRAM_BASE && samp < (STM32_DTCRAM_BASE + 0x20000))
+    {
+      i2serr("ERROR: buffer at 0x%08" PRIxPTR " is in DTCM, "
+             "unreachable by DMA\n", samp);
+      sai_buf_free(priv, bfcontainer);
+      return -EFAULT;
     }
 
   /* RX buffers must not retain cached lines that the DMA is about to
@@ -678,6 +783,15 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
   cfg.ndata = ntransfers;
 
   stm32_dmasetup(priv->dma, &cfg);
+
+  /* Keep what was programmed so a failed transfer can be diagnosed without
+   * guessing which side was misconfigured.
+   */
+
+  priv->dma_scr   = priv->dma_ccr;
+  priv->dma_sndtr = (uint32_t)ntransfers;
+  priv->dma_spar  = cfg.paddr;
+  priv->dma_sm0ar = cfg.maddr;
 
   /* Add the container to the list of active DMAs */
 
@@ -844,12 +958,46 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
   uintptr_t samp;
   uintptr_t end;
   size_t unit;
+  bool failed;
 
   DEBUGASSERT(priv);
 
   /* Cancel the watchdog timeout */
 
   wd_cancel(&priv->dog);
+
+  failed = (isr & (DMA_STATUS_TEIF | DMA_STATUS_DMEIF)) != 0;
+
+  /* Record why the transfer ended, together with the block's status register
+   * at that moment.  SAI reports overrun and wrong-clock-configuration
+   * separately from the DMA error flags, and only the SAI bits distinguish a
+   * misconfigured clock from a bus fault.  The value is read here rather than
+   * later because CLRFR and the next transfer both overwrite it.
+   */
+
+  priv->last_isr  = isr;
+  priv->last_sr   = sai_getreg(priv, STM32H7_SAI_SR_OFFSET);
+  priv->last_cr1  = sai_getreg(priv, STM32H7_SAI_CR1_OFFSET);
+  priv->last_frcr = sai_getreg(priv, STM32H7_SAI_FRCR_OFFSET);
+  priv->last_slotr = sai_getreg(priv, STM32H7_SAI_SLOTR_OFFSET);
+#ifdef CONFIG_STM32H7_SAI_PDM_MODE
+  priv->last_pdmcr = priv->pdm ?
+    getreg32(priv->pdmbase + STM32H7_SAI_PDMCR_OFFSET) : 0;
+#else
+  priv->last_pdmcr = 0;
+#endif
+
+  /* The DMA side matters as much as the SAI side: a transfer error can come
+   * from a peripheral address that is not the data register, from an
+   * unmapped request, or from a size mismatch.  Record what the controller
+   * was actually programmed with.
+   */
+
+  priv->last_dma_scr   = priv->dma_scr;
+  priv->last_dma_sndtr = priv->dma_sndtr;
+  priv->last_dma_spar  = priv->dma_spar;
+  priv->last_dma_sm0ar = priv->dma_sm0ar;
+  priv->last_dmamux_ccr = priv->dmamux_ccr;
 
   /* Data landed in the RX buffers while the cache still holds the lines that
    * the CPU may have touched before the transfer started.  Invalidate now,
@@ -863,7 +1011,19 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
       bfcontainer = (struct sai_buffer_s *)sq_peek(&priv->act);
       if (bfcontainer != NULL)
         {
-          unit = (priv->datalen > 16) ? 4 : 2;
+          /* The transfer unit must match the one sai_dma_setup() chose, or
+           * the invalidated range ends short of where the DMA wrote.
+           */
+
+          if (priv->pdm)
+            {
+              unit = 1;
+            }
+          else
+            {
+              unit = (priv->datalen > 16) ? 4 : 2;
+            }
+
           samp = (uintptr_t)&bfcontainer->apb->samp[bfcontainer->apb->curbyte];
           end  = samp + ((bfcontainer->apb->nmaxbytes -
                           bfcontainer->apb->curbyte) / unit * unit);
@@ -871,10 +1031,17 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
         }
     }
 
+  /* Stop driving the microphone.  Without this the block stays enabled after
+   * the last buffer completes, keeps its bit clock running to the microphone
+   * and keeps requesting DMA service that nothing will ever satisfy.  The
+   * next transfer re-enables it in sai_dma_setup().
+   */
+
+  sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN, 0);
+
   /* Then schedule completion of the transfer to occur on the worker thread */
 
-  sai_schedule(priv, (isr & (DMA_STATUS_TEIF | DMA_STATUS_DMEIF)) ?
-                      -EIO : OK);
+  sai_schedule(priv, failed ? -EIO : OK);
 }
 #endif
 
@@ -1273,13 +1440,14 @@ static void sai_pdmconfig(struct stm32h7_sai_s *priv)
   putreg32(regval, priv->pdmbase + STM32H7_SAI_PDMCR_OFFSET);
 
   /* The reference configuration enables the clock of bitstream 2 only, since
-   * that is the clock line the board's microphone is wired to.  The number
-   * of microphone pairs is encoded one-based.
+   * that is the clock line the board's microphone is wired to.  MICNBR counts
+   * microphone pairs and is encoded one-based; the reference value of two
+   * covers a stereo pair even though only one microphone is fitted.
    */
 
   regval &= ~(SAI_PDMCR_MICNBR_MASK | SAI_PDMCR_CKEN1 | SAI_PDMCR_CKEN2 |
               SAI_PDMCR_CKEN3 | SAI_PDMCR_CKEN4);
-  regval |= SAI_PDMCR_CKEN2 | SAI_PDMCR_MICNBR(1);
+  regval |= SAI_PDMCR_CKEN2 | SAI_PDMCR_MICNBR(SAI_PDM_MIC_PAIRS);
   putreg32(regval, priv->pdmbase + STM32H7_SAI_PDMCR_OFFSET);
 
   /* No per-microphone delay: the microphone is soldered next to the SoC and
@@ -1296,9 +1464,25 @@ static void sai_pdmconfig(struct stm32h7_sai_s *priv)
   sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_LSBFIRST,
                 SAI_CR1_LSBFIRST);
 
+  /* Sample on the falling edge.  ST's reference configuration for this
+   * board's microphone uses SAI_CLOCKSTROBING_FALLINGEDGE, and in receive
+   * mode that maps to CKSTR being set.  The microphone drives its data out
+   * on one edge of the clock it is given, so sampling on the wrong edge
+   * yields a bitstream whose adjacent bytes repeat rather than carrying two
+   * separate half-words.
+   */
+
+  sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_CKSTR,
+                SAI_CR1_CKSTR);
+
   /* Frame geometry.  The PDM interface defines the slot layout itself, so
    * these values come from the reference configuration rather than from the
    * PCM paths, which set their own frame in sai_datawidth().
+   *
+   * SLOTEN is written explicitly: the reference enables slot 1, not slot 0.
+   * That is not interchangeable with a one-slot frame, because NBSLOT stays
+   * at two and the enabled slot selects which half of the 32-bit frame
+   * carries the microphone data.
    */
 
   sai_modifyreg(priv, STM32H7_SAI_FRCR_OFFSET,
@@ -1308,7 +1492,8 @@ static void sai_pdmconfig(struct stm32h7_sai_s *priv)
 
   sai_modifyreg(priv, STM32H7_SAI_SLOTR_OFFSET,
                 SAI_SLOTR_NBSLOT_MASK | SAI_SLOTR_SLOTEN_MASK,
-                SAI_SLOTR_NBSLOT(SAI_PDM_SLOT_COUNT));
+                SAI_SLOTR_NBSLOT(SAI_PDM_SLOT_COUNT) |
+                SAI_SLOTR_SLOTEN(SAI_PDM_SLOT_ENABLE));
 
   /* Enable the PDM interface last: the frame and slot registers must be
    * stable before the interface starts driving clocks to the microphone.
@@ -1343,6 +1528,13 @@ static void sai_portinitialize(struct stm32h7_sai_s *priv)
 
   priv->dma = stm32_dmachannel(priv->dmamap);
   DEBUGASSERT(priv->dma);
+
+  /* DMAMUX programming is not readable through the DMA driver's public
+   * interface, so record what the request number should be.  The register
+   * dump shows whether the controller saw the mapping.
+   */
+
+  priv->dmamux_ccr = priv->dmamap & 0xff;
 
   sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, 0, SAI_CR1_DMAEN);
 #endif
@@ -1518,6 +1710,65 @@ struct i2s_dev_s *stm32_sai_initialize(int intf,
 err:
   leave_critical_section(flags);
   return NULL;
+}
+
+/****************************************************************************
+ * Name: stm32_sai_staterecord
+ *
+ * Description:
+ *   Return the register snapshot taken at the end of the last transfer.  The
+ *   array order is:
+ *
+ *     [0] DMA interrupt status   [1] SAI SR     [2] SAI CR1
+ *     [3] SAI FRCR               [4] SAI SLOTR  [5] SAI PDMCR
+ *
+ ****************************************************************************/
+
+int stm32_sai_staterecord(struct i2s_dev_s *dev, uint32_t *regs, int nregs)
+{
+  struct stm32h7_sai_s *priv;
+
+  if (regs == NULL || nregs < STM32H7_SAI_DIAG_NREGS)
+    {
+      return -EINVAL;
+    }
+
+  if (dev != NULL)
+    {
+      priv = (struct stm32h7_sai_s *)dev;
+    }
+  else
+    {
+      /* Fall back to the PDM-capable block, which is the only one the
+       * bring-up path creates.
+       */
+
+#ifdef CONFIG_STM32H7_SAI1_A
+      priv = &g_sai1a_priv;
+#elif defined(CONFIG_STM32H7_SAI4_A)
+      priv = &g_sai4a_priv;
+#else
+      return -ENODEV;
+#endif
+    }
+
+  regs[0] = priv->last_isr;
+  regs[1] = priv->last_sr;
+  regs[2] = priv->last_cr1;
+  regs[3] = priv->last_frcr;
+  regs[4] = priv->last_slotr;
+  regs[5] = priv->last_pdmcr;
+
+  if (nregs > STM32H7_SAI_DIAG_NREGS)
+    {
+      regs[6]  = priv->last_dma_scr;
+      regs[7]  = priv->last_dma_sndtr;
+      regs[8]  = priv->last_dma_spar;
+      regs[9]  = priv->last_dma_sm0ar;
+      regs[10] = priv->last_dmamux_ccr;
+    }
+
+  return OK;
 }
 
 #endif /* CONFIG_STM32H7_SAI */

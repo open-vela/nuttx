@@ -57,7 +57,21 @@
 #  include <nuttx/input/buttons.h>
 #endif
 
+#ifdef CONFIG_I2S
+#  include <nuttx/audio/i2s.h>
+#endif
+
 #include "stm32_gpio.h"
+
+#ifdef CONFIG_STM32H7_SAI1_A
+#  include "stm32_sai.h"
+
+/* Set once by stm32_bringup() and served to the bring-up capture tool through
+ * the accessor below.  There is exactly one PDM microphone on the board.
+ */
+
+static FAR struct i2s_dev_s *g_pdm_i2s;
+#endif
 
 #include "stm32h750b-dk.h"
 
@@ -411,6 +425,35 @@ int stm32_bringup(void)
   stm32_configgpio(GPIO_ESP_RST);
 #endif
 
+#ifdef CONFIG_STM32H7_SAI1_A
+  /* Bring up the on-board PDM microphone path as a raw I2S capture device.
+   *
+   * SAI1 block A drives the microphone clock on PE5 (SAI1_CK2, AF2) and reads
+   * its bitstream on PE4 (SAI1_D2, AF2).  Those are the same two pins SAI4
+   * uses for the same purpose at AF10, so this is a straight route choice
+   * rather than a wiring difference.
+   *
+   * SAI1 was chosen over SAI4 for this first bring-up because its data
+   * register sits in the D2 domain and is served by DMA1/DMA2, which can
+   * reach the ordinary heap.  SAI4 lives in D3 and can only be served by
+   * BDMA, whose buffers must come from SRAM4 and which depends on the
+   * experimental BDMA option.
+   *
+   * No sample rate callback is passed: PLL2 is programmed statically in
+   * board.h and the driver does not reprogram it at runtime.
+   */
+
+  g_pdm_i2s = stm32_sai_initialize(SAI1_BLOCK_A, NULL);
+  if (g_pdm_i2s == NULL)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_sai_initialize(SAI1_A) failed\n");
+    }
+  else
+    {
+      syslog(LOG_INFO, "PDM capture device ready on SAI1 block A\n");
+    }
+#endif
+
 #ifdef HAVE_SDIO
   /* Initialize on-board eMMC (SDMMC1) and try FAT at /mnt/emmc.
    * First boot may lack a filesystem — mount failure is logged only;
@@ -446,3 +489,37 @@ int stm32_bringup(void)
 
   return OK;
 }
+
+#ifdef CONFIG_STM32H7_SAI1_A
+/****************************************************************************
+ * Name: stm32_sai_pdm_device
+ *
+ * Description:
+ *   Return the PDM capture device created above.  See the prototype in
+ *   board.h for why this accessor exists.
+ *
+ ****************************************************************************/
+
+FAR struct i2s_dev_s *stm32_sai_pdm_device(void)
+{
+  return g_pdm_i2s;
+}
+
+/****************************************************************************
+ * Name: stm32_pdm_staterecord
+ *
+ * Description:
+ *   Return the driver's end-of-transfer register snapshot.  See board.h.
+ *
+ ****************************************************************************/
+
+int stm32_pdm_staterecord(FAR uint32_t *regs, int nregs)
+{
+  if (g_pdm_i2s == NULL)
+    {
+      return -ENODEV;
+    }
+
+  return stm32_sai_staterecord(g_pdm_i2s, regs, nregs);
+}
+#endif
