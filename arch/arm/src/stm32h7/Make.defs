@@ -122,6 +122,10 @@ CHIP_CSRCS += stm32_rtc_lowerhalf.c
 endif
 endif
 
+ifeq ($(CONFIG_STM32H7_SAI),y)
+CHIP_CSRCS += stm32_sai.c
+endif
+
 ifeq ($(CONFIG_STM32H7_SPI),y)
 CHIP_CSRCS += stm32_spi.c
 endif
