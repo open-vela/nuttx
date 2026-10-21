@@ -121,8 +121,8 @@
  * reads the PDM bitstream as 16-bit half-words, so the DMA must be sized to
  * match or every other half-word is skipped.
  *
- * The controller runs in direct mode, matching ST's configuration for this
- * board's capture path: no FIFO, single-beat transfers on both sides.  With
+ * Transfers use single-beat requests on both sides.  The DMA layer selects
+ * its own FIFO policy (normal DMA uses FIFO with the full threshold).  With
  * FIFO mode disabled the burst fields must stay at single, because a burst
  * longer than the peripheral's request granularity raises a transfer error.
  * PFCTRL stays clear: the SAI block drives the request line as a normal DMA
@@ -268,6 +268,12 @@ struct stm32h7_sai_s
    * written from interrupt level and read afterwards for diagnosis.
    */
 
+  uint32_t completed;
+  uint32_t errors;
+  uint32_t timeouts;
+  uint32_t txbytes;
+  uint32_t underruns;
+  uint32_t clockerrors;
   uint8_t last_isr;            /* DMA interrupt status at completion */
   uint32_t last_sr;            /* SAI status register */
   uint32_t last_cr1;           /* SAI configuration register 1 */
@@ -628,12 +634,14 @@ static void sai_timeout(wdparm_t arg)
   /* Cancel the DMA */
 
   stm32_dmastop(priv->dma);
+  sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN, 0);
 #endif
 
   /* Then schedule completion of the transfer to occur on the worker
    * thread.
    */
 
+  priv->timeouts++;
   sai_schedule(priv, -ETIMEDOUT);
 }
 
@@ -685,7 +693,7 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
 
   /* Remove the pending transfer at the head of the pending queue. */
 
-  bfcontainer = (struct sai_buffer_s *)sq_remfirst(&priv->pend);
+  bfcontainer = (struct sai_buffer_s *)sq_peek(&priv->pend);
   DEBUGASSERT(bfcontainer && bfcontainer->apb);
 
   apb = bfcontainer->apb;
@@ -725,7 +733,6 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
   else
     {
       DEBUGASSERT(false);
-      sai_buf_free(priv, bfcontainer);
       return -EINVAL;
     }
 
@@ -736,7 +743,6 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
   ntransfers = nbytes / unit;
   if (ntransfers == 0)
     {
-      sai_buf_free(priv, bfcontainer);
       return -EINVAL;
     }
 
@@ -748,9 +754,6 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
 
   if (ntransfers > DMA_SNDTR_NDT_MASK)
     {
-      i2serr("ERROR: %zu transfers exceed the %lu limit\n",
-             ntransfers, (unsigned long)DMA_SNDTR_NDT_MASK);
-      sai_buf_free(priv, bfcontainer);
       return -E2BIG;
     }
 
@@ -769,9 +772,6 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
 
   if (samp >= STM32_DTCRAM_BASE && samp < (STM32_DTCRAM_BASE + 0x20000))
     {
-      i2serr("ERROR: buffer at 0x%08" PRIxPTR " is in DTCM, "
-             "unreachable by DMA\n", samp);
-      sai_buf_free(priv, bfcontainer);
       return -EFAULT;
     }
 
@@ -807,8 +807,9 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
   priv->dma_spar  = cfg.paddr;
   priv->dma_sm0ar = cfg.maddr;
 
-  /* Add the container to the list of active DMAs */
+  /* Ownership moves only after setup validation succeeds. */
 
+  sq_remfirst(&priv->pend);
   sq_addlast((sq_entry_t *)bfcontainer, &priv->act);
 
   /* Start the DMA, saving the container as the current active transfer */
@@ -834,7 +835,7 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
 
       if (ret < 0)
         {
-          i2serr("ERROR: wd_start failed: %d\n", ret);
+          priv->timeouts++;
         }
     }
 
@@ -858,6 +859,52 @@ static void sai_worker(void *arg)
 
   DEBUGASSERT(priv);
 
+  nxmutex_lock(&priv->lock);
+
+  if (priv->txenab && sq_empty(&priv->act) && sq_empty(&priv->pend))
+    {
+      unsigned int us;
+
+      /* DMA completion only means data reached the peripheral FIFO.  Let
+       * the final FIFO and shift register drain before stopping clocks.
+       * This bounded wait runs in worker context with interrupts enabled.
+       */
+
+      for (us = 0; us < 2000; us++)
+        {
+          if ((sai_getreg(priv, STM32H7_SAI_SR_OFFSET) &
+               SAI_SR_FLVL_MASK) == 0)
+            {
+              break;
+            }
+
+          up_udelay(1);
+        }
+
+      if (us == 2000)
+        {
+          priv->timeouts++;
+        }
+
+      up_udelay((1000000u + priv->samplerate - 1) / priv->samplerate);
+      sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN, 0);
+      for (us = 0; us < 250; us++)
+        {
+          if ((sai_getreg(priv, STM32H7_SAI_CR1_OFFSET) &
+               SAI_CR1_SAIEN) == 0)
+            {
+              break;
+            }
+
+          up_udelay(1);
+        }
+
+      if (us == 250)
+        {
+          priv->timeouts++;
+        }
+    }
+
   /* Check if IDLE */
 
   if (sq_empty(&priv->act))
@@ -868,10 +915,22 @@ static void sai_worker(void *arg)
 
       flags = enter_critical_section();
 #ifdef CONFIG_STM32H7_SAI_DMA
-      sai_dma_setup(priv);
+      while (sai_dma_setup(priv) < 0)
+        {
+          bfcontainer = (struct sai_buffer_s *)sq_remfirst(&priv->pend);
+          if (bfcontainer == NULL)
+            {
+              break;
+            }
+
+          bfcontainer->result = -EIO;
+          sq_addlast((sq_entry_t *)bfcontainer, &priv->done);
+        }
 #endif
       leave_critical_section(flags);
     }
+
+  nxmutex_unlock(&priv->lock);
 
   /* Process each buffer in the done queue */
 
@@ -939,6 +998,26 @@ static void sai_schedule(struct stm32h7_sai_s *priv, int result)
       sq_addlast((sq_entry_t *)bfcontainer, &priv->done);
     }
 
+  /* TX needs a bounded handoff before its FIFO drains.  HPWORK can be
+   * occupied by other peripherals longer than one FIFO of audio.  Accepted
+   * TX requests are validated before enqueueing and own their buffers until
+   * done, so rearm the next normal DMA here without allocation or logging.
+   * Normal-mode TC has already cleared the DMA stream EN bit; setup does
+   * not wait for an active stream.  Client callbacks still run in HPWORK.
+   */
+
+  if (result == OK && priv->txenab && !sq_empty(&priv->pend))
+    {
+      int setupret = sai_dma_setup(priv);
+      if (setupret < 0)
+        {
+          bfcontainer = (struct sai_buffer_s *)sq_remfirst(&priv->pend);
+          bfcontainer->result = setupret;
+          sq_addlast((sq_entry_t *)bfcontainer, &priv->done);
+          priv->errors++;
+        }
+    }
+
   /* If the worker has completed running, then reschedule the working thread.
    * REVISIT:  There may be a race condition here.  So we do nothing is the
    * worker is not available.
@@ -951,7 +1030,7 @@ static void sai_schedule(struct stm32h7_sai_s *priv, int result)
       ret = work_queue(HPWORK, &priv->work, sai_worker, priv, 0);
       if (ret != 0)
         {
-          i2serr("ERROR: Failed to queue work: %d\n", ret);
+          /* Retain done queue ownership for the next worker invocation. */
         }
     }
 }
@@ -989,8 +1068,32 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
    * later because CLRFR and the next transfer both overwrite it.
    */
 
+  priv->completed++;
+  if (failed)
+    {
+      priv->errors++;
+    }
+  else if (priv->txenab)
+    {
+      bfcontainer = (struct sai_buffer_s *)sq_peek(&priv->act);
+      if (bfcontainer != NULL)
+        {
+          priv->txbytes += bfcontainer->apb->nbytes -
+                           bfcontainer->apb->curbyte;
+        }
+    }
+
   priv->last_isr  = isr;
   priv->last_sr   = sai_getreg(priv, STM32H7_SAI_SR_OFFSET);
+  if (priv->txenab && (priv->last_sr & SAI_INT_OVRUDR) != 0)
+    {
+      priv->underruns++;
+    }
+
+  if ((priv->last_sr & SAI_INT_WCKCFG) != 0)
+    {
+      priv->clockerrors++;
+    }
   priv->last_cr1  = sai_getreg(priv, STM32H7_SAI_CR1_OFFSET);
   priv->last_frcr = sai_getreg(priv, STM32H7_SAI_FRCR_OFFSET);
   priv->last_slotr = sai_getreg(priv, STM32H7_SAI_SLOTR_OFFSET);
@@ -1051,7 +1154,14 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
    * next transfer re-enables it in sai_dma_setup().
    */
 
-  sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN, 0);
+  if (priv->rxenab || failed)
+    {
+      sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN, 0);
+    }
+
+  /* TX keeps clocks running between queued DMA blocks.  Only the worker
+   * drains and disables the final FIFO; there is no waiting in this IRQ.
+   */
 
   /* Then schedule completion of the transfer to occur on the worker thread */
 
@@ -1266,6 +1376,34 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   i2sinfo("apb=%p nbytes=%d arg=%p timeout=%" PRId32 "\n",
           apb, apb->nbytes - apb->curbyte, arg, timeout);
 
+  if (callback == NULL || apb->curbyte > apb->nbytes ||
+      apb->nbytes > apb->nmaxbytes)
+    {
+      return -EINVAL;
+    }
+
+  {
+    size_t unit = priv->datalen > 16 ? 4 : 2;
+    size_t bytes = apb->nbytes - apb->curbyte;
+    uintptr_t addr = (uintptr_t)&apb->samp[apb->curbyte];
+
+    if (bytes == 0 || bytes % unit != 0 || addr % unit != 0)
+      {
+        return -EINVAL;
+      }
+
+    if (bytes / unit > DMA_SNDTR_NDT_MASK)
+      {
+        return -E2BIG;
+      }
+
+    if (addr < STM32_DTCRAM_BASE + 0x20000 &&
+        addr + bytes > STM32_DTCRAM_BASE)
+      {
+        return -EFAULT;
+      }
+  }
+
   /* Allocate a buffer container in advance */
 
   bfcontainer = sai_buf_allocate(priv);
@@ -1285,11 +1423,19 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
     }
 
   /* Transmitter is master: it drives the bit clock and frame sync towards
-   * the codec, which is the only topology this driver is used in.
+   * the codec.  NOMCK=0 generates MCLK; bit 27 is reserved on RM0433.
    */
 
-  sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_MODE_MASK,
-                SAI_CR1_MODE_MASTER_TX);
+  if (!priv->txenab)
+    {
+      sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_MODE_MASK,
+                    SAI_CR1_MODE_MASTER_TX);
+      sai_putreg(priv, STM32H7_SAI_CLRFR_OFFSET,
+                 SAI_INT_OVRUDR | SAI_INT_WCKCFG);
+      sai_modifyreg(priv, STM32H7_SAI_CR2_OFFSET, SAI_CR2_FTH_MASK,
+                    SAI_CR2_FTH_FULL);
+    }
+
   priv->txenab = true;
 
   /* Add a reference to the audio buffer */
@@ -1618,20 +1764,45 @@ static void sai_portinitialize(struct stm32h7_sai_s *priv)
                 SAI_CR2_FTH_MASK | SAI_CR2_COMP_MASK,
                 SAI_CR2_FTH_1QF | SAI_CR2_COMP_NONE);
 
-  /* Free protocol, frame sync as a start-of-frame pulse, active high, on the
-   * first bit of slot 0.  In PDM mode the slot layout is fixed by the PDM
-   * interface, so the SLOTR values below only matter for PCM blocks.
+  /* Frame geometry differs between the two ways this driver is used.
+   *
+   * PDM: the interface defines its own frame, and sai_pdmconfig() rewrites
+   * FRCR and SLOTR afterwards with the reference values, so whatever is
+   * programmed here is replaced.
+   *
+   * PCM: the peer is a WM8994 configured for the I2S protocol
+   * (AIF1_FMT_I2S, AIF1 word length 16).  I2S does not use a start-of-frame
+   * pulse; it needs a channel-identification half-frame, active low, starting
+   * one bit before the first bit of the slot, which is what the F7 driver
+   * programs for the same codec.  A start-of-frame pulse active high leaves
+   * the codec's LRCLK decoder without the edge it expects, so it never
+   * latches a sample even though the clocks look present.
    */
 
-  sai_modifyreg(priv, STM32H7_SAI_FRCR_OFFSET,
-                SAI_FRCR_FSDEF | SAI_FRCR_FSPOL | SAI_FRCR_FSOFF,
-                SAI_FRCR_FSDEF_SF | SAI_FRCR_FSPOL_HIGH |
-                  SAI_FRCR_FSOFF_FB);
+  if (priv->pdm)
+    {
+      sai_modifyreg(priv, STM32H7_SAI_FRCR_OFFSET,
+                    SAI_FRCR_FSDEF | SAI_FRCR_FSPOL | SAI_FRCR_FSOFF,
+                    SAI_FRCR_FSDEF_SF | SAI_FRCR_FSPOL_HIGH |
+                      SAI_FRCR_FSOFF_FB);
 
-  sai_modifyreg(priv, STM32H7_SAI_SLOTR_OFFSET,
-                SAI_SLOTR_NBSLOT_MASK | SAI_SLOTR_SLOTEN_MASK,
-                SAI_SLOTR_NBSLOT(2) | SAI_SLOTR_SLOTEN_0 |
-                  SAI_SLOTR_SLOTEN_1);
+      sai_modifyreg(priv, STM32H7_SAI_SLOTR_OFFSET,
+                    SAI_SLOTR_NBSLOT_MASK | SAI_SLOTR_SLOTEN_MASK,
+                    SAI_SLOTR_NBSLOT(2) | SAI_SLOTR_SLOTEN_0 |
+                      SAI_SLOTR_SLOTEN_1);
+    }
+  else
+    {
+      sai_modifyreg(priv, STM32H7_SAI_FRCR_OFFSET,
+                    SAI_FRCR_FSDEF | SAI_FRCR_FSPOL | SAI_FRCR_FSOFF,
+                    SAI_FRCR_FSDEF_CHID | SAI_FRCR_FSPOL_LOW |
+                      SAI_FRCR_FSOFF_BFB);
+
+      sai_modifyreg(priv, STM32H7_SAI_SLOTR_OFFSET,
+                    SAI_SLOTR_NBSLOT_MASK | SAI_SLOTR_SLOTEN_MASK,
+                    SAI_SLOTR_NBSLOT(2) | SAI_SLOTR_SLOTEN_0 |
+                      SAI_SLOTR_SLOTEN_1);
+    }
 
   /* PDM last: it overrides the frame and slot layout above, and the PDM
    * interface must be configured while the block itself is still disabled.
@@ -1825,13 +1996,27 @@ int stm32_sai_staterecord(struct i2s_dev_s *dev, uint32_t *regs, int nregs)
   regs[4] = priv->last_slotr;
   regs[5] = priv->last_pdmcr;
 
-  if (nregs > STM32H7_SAI_DIAG_NREGS)
+  if (nregs >= 11)
     {
       regs[6]  = priv->last_dma_scr;
       regs[7]  = priv->last_dma_sndtr;
       regs[8]  = priv->last_dma_spar;
       regs[9]  = priv->last_dma_sm0ar;
       regs[10] = priv->last_dmamux_ccr;
+    }
+
+  if (nregs >= 15)
+    {
+      regs[11] = priv->completed;
+      regs[12] = priv->errors;
+      regs[13] = priv->timeouts;
+      regs[14] = priv->txbytes;
+    }
+
+  if (nregs >= 17)
+    {
+      regs[15] = priv->underruns;
+      regs[16] = priv->clockerrors;
     }
 
   return OK;

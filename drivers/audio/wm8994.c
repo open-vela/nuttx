@@ -1031,7 +1031,6 @@ static void  wm8994_senddone(FAR struct i2s_dev_s *i2s,
   int ret;
 
   DEBUGASSERT(i2s && priv && priv->running && apb);
-  audinfo("apb=%p inflight=%d result=%d\n", apb, priv->inflight, result);
 
   /* We do not place any restriction on the context in which this function
    * is called.  It may be called from an interrupt handler.  Therefore, the
@@ -1065,11 +1064,11 @@ static void  wm8994_senddone(FAR struct i2s_dev_s *i2s,
    */
 
   msg.msg_id = AUDIO_MSG_COMPLETE;
-  ret = file_mq_send(&priv->mq, (FAR const char *)&msg, sizeof(msg),
-                     CONFIG_WM8994_MSG_PRIO);
+  ret = file_mq_ticksend(&priv->mq, (FAR const char *)&msg, sizeof(msg),
+                     CONFIG_WM8994_MSG_PRIO, 0);
   if (ret < 0)
     {
-      auderr("ERROR: file_mq_send failed: %d\n", ret);
+      /* A full queue already wakes the worker; ownership stays in doneq. */
     }
 }
 
@@ -1176,7 +1175,7 @@ static int wm8994_sendbuffer(FAR struct wm8994_dev_s *priv)
     }
 
   while (priv->inflight < CONFIG_WM8994_INFLIGHT &&
-         dq_peek(&priv->pendq) != NULL && !priv->paused)
+         dq_peek(&priv->pendq) != NULL && !priv->paused && !priv->terminating)
     {
       /* Take next buffer from the queue of pending transfers */
 
@@ -1224,6 +1223,8 @@ static int wm8994_sendbuffer(FAR struct wm8994_dev_s *priv)
       if (ret < 0)
         {
           auderr("ERROR: I2S_SEND failed: %d\n", ret);
+          wm8994_senddone(priv->i2s, apb, priv, ret);
+          priv->terminating = true;
           break;
         }
     }
@@ -1325,18 +1326,35 @@ static int wm8994_stop(FAR struct audio_lowerhalf_s *dev)
   struct audio_msg_s term_msg;
   FAR void *value;
 
-  /* Send a message to stop all audio streaming */
+  int ret = OK;
 
-  term_msg.msg_id = AUDIO_MSG_STOP;
-  term_msg.u.data = 0;
-  file_mq_send(&priv->mq, (FAR const char *)&term_msg,
-               sizeof(term_msg),
-               CONFIG_WM8994_MSG_PRIO);
+  /* Completion may already have closed the worker queue.  Serialize this
+   * decision with worker teardown, and never send to a closed file.
+   */
+
+  nxmutex_lock(&priv->pendlock);
+  if (priv->running)
+    {
+      term_msg.msg_id = AUDIO_MSG_STOP;
+      term_msg.u.data = 0;
+      priv->terminating = true;
+      ret = file_mq_ticksend(&priv->mq, (FAR const char *)&term_msg,
+                            sizeof(term_msg), CONFIG_WM8994_MSG_PRIO, 0);
+    }
+
+  nxmutex_unlock(&priv->pendlock);
+  if (ret < 0 && ret != -ETIMEDOUT && ret != -EAGAIN)
+    {
+      return ret;
+    }
 
   /* Join the worker thread */
 
-  pthread_join(priv->threadid, &value);
-  priv->threadid = 0;
+  if (priv->threadid != 0)
+    {
+      pthread_join(priv->threadid, &value);
+      priv->threadid = 0;
+    }
 
   /* Enter into a reduced power usage mode */
 
@@ -1841,10 +1859,13 @@ static void *wm8994_workerthread(pthread_addr_t pvarg)
 
   wm8994_returnbuffers(priv);
 
-  /* Close the message queue */
+  /* Stop may be called after COMPLETE.  Mark closed before notification. */
 
+  nxmutex_lock(&priv->pendlock);
+  priv->running = false;
   file_mq_close(&priv->mq);
   file_mq_unlink(priv->mqname);
+  nxmutex_unlock(&priv->pendlock);
 
   /* Send an AUDIO_MSG_COMPLETE message to the client */
 

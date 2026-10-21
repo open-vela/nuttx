@@ -257,4 +257,18 @@ int stm32_tsc_setup(int minor);
 int stm32_sdio_initialize(void);
 #endif
 
+/****************************************************************************
+ * Name: stm32_audio_initialize
+ *
+ * Description:
+ *   Initialize the WM8994 audio output path and register it as
+ *   /dev/audio/pcm0p.  SAI2 block A drives the codec; HPOUT1 drives the
+ *   green 3.5 mm jack.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_AUDIO_WM8994
+int stm32_audio_initialize(void);
+#endif
+
 #endif /* __BOARDS_ARM_STM32H7_STM32H750B_DK_SRC_STM32H750B_DK_H */

@@ -135,9 +135,7 @@
 #  define SAI_CR1_MCKDIV(n)        ((uint32_t)(n) << SAI_CR1_MCKDIV_SHIFT)
                                              /* Bit 26: Over sampling ratio */
 #define SAI_CR1_OSR                (1 << 26) /* Bit 26: Master clock over sampling */
-                                             /* Bit 27: Master clock enable */
-#define SAI_CR1_MCKEN              (1 << 27) /* Bit 27: Master clock enable */
-                                             /* Bits 28-31: Reserved */
+                                             /* Bits 27-31: Reserved (RM0433) */
 
 /* SAI Configuration Register 2 */
 

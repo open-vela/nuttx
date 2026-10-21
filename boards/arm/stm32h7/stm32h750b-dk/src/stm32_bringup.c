@@ -290,6 +290,22 @@ int stm32_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_AUDIO_WM8994
+  /* Register the audio output path: WM8994 -> SAI2 block A -> HPOUT1.
+   *
+   * This runs after the touch controller because both share I2C4; taking a
+   * second reference to a bus that is already up leaves the touch device
+   * untouched.  Failure is reported and does not abort bring-up: playback is
+   * not required for the acquisition and alarm paths to work.
+   */
+
+  ret = stm32_audio_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_audio_initialize failed: %d\n", ret);
+    }
+#endif
+
 #ifdef CONFIG_VIDEO_FB
   /* Initialize and register the framebuffer driver */
 

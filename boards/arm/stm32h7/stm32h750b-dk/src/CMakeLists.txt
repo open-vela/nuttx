@@ -50,6 +50,10 @@ if(CONFIG_INPUT_FT5X06)
   list(APPEND SRCS stm32_ft5x06.c)
 endif()
 
+if(CONFIG_AUDIO_WM8994)
+  list(APPEND SRCS stm32_audio.c)
+endif()
+
 if(CONFIG_STM32H7_LTDC)
   list(APPEND SRCS stm32_lcd.c)
 endif()

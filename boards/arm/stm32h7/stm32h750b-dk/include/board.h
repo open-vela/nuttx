@@ -727,6 +727,44 @@ FAR struct i2s_dev_s *stm32_sai_pdm_device(void);
 int stm32_pdm_staterecord(FAR uint32_t *regs, int nregs);
 #endif
 
+#ifdef CONFIG_AUDIO_WM8994
+/****************************************************************************
+ * Name: stm32_audio_codec_readreg
+ *
+ * Description:
+ *   Read one 16-bit register from the WM8994 over the board's I2C4 bus.
+ *
+ *   The bring-up probe uses this to confirm the codec answers at the address
+ *   the schematic implies and reports the ID the driver expects.  The bus is
+ *   shared with the touch controller and is opened through the reference
+ *   counted bus initializer, so this neither resets the bus nor disturbs the
+ *   device already using it.  Exactly one register at one fixed address is
+ *   accessed; this does not scan the bus.
+ *
+ * Returned Value:
+ *   Zero on success, with the register value stored in val; a negated errno
+ *   on failure.
+ *
+ ****************************************************************************/
+
+int stm32_audio_codec_readreg(uint16_t offset, FAR uint16_t *val);
+
+/****************************************************************************
+ * Name: stm32_audio_sai_state
+ *
+ * Description:
+ *   Copy the SAI2 block A configuration registers that decide whether
+ *   playback can work: CR1 and the global control register.  The probe reads
+ *   them to report master/slave mode, NODIV, the master clock divider and
+ *   whether the master clock output is actually enabled.
+ *
+ ****************************************************************************/
+
+int stm32_audio_tx_check(FAR int *results, int count);
+int stm32_audio_tx_record(FAR uint32_t *regs, int nregs);
+int stm32_audio_sai_state(FAR uint32_t *cr1, FAR uint32_t *gcr);
+#endif
+
 #undef EXTERN
 #if defined(__cplusplus)
 }
