@@ -101,6 +101,22 @@
                            GPIO_PUSHPULL|GPIO_PORTG|GPIO_PIN7)
 #endif
 
+/* Button definitions *******************************************************/
+
+/* B1 USER is PC13 on MB1381 B-01.  ST BSP v3.3.4 configures it as
+ * GPIO_PULLDOWN with GPIO_MODE_IT_RISING (BUTTON_USER_GPIO_PORT GPIOC,
+ * BUTTON_USER_PIN GPIO_PIN_13, BUTTON_USER_EXTI_LINE EXTI_LINE_13), so the
+ * pin reads low when released and high while pressed.  Measured on the board
+ * on 2026-10-21 (BVO-01 M-05), matching that configuration.
+ *
+ * PC13 is also the RTC wake-up pin.  This configuration does not enable RTC
+ * wake-up and does not load the LSE/RTC clock for it, so nothing else drives
+ * the pin; keep it that way if RTC wake-up is ever enabled here.
+ */
+
+#define GPIO_BTN_USER  (GPIO_INPUT | GPIO_PULLDOWN | GPIO_EXTI | \
+                        GPIO_SPEED_100MHz | GPIO_PORTC | GPIO_PIN13)
+
 /* Touchscreen definitions **************************************************/
 
 /* The STM32H743I-DISCO have connectors for the LCD model RK043FN48H-CT672B.

@@ -5,6 +5,21 @@
 
 if ARCH_BOARD_STM32H750B_DK
 
+config STM32H750B_DK_BUTTONS
+	bool "Board button support (USER1 on PC13)"
+	default n
+	select ARCH_HAVE_BUTTONS
+	select ARCH_HAVE_IRQBUTTONS
+	---help---
+		Support the B1 USER pushbutton on PC13.  Builds the board button
+		interface (board_button_initialize, board_buttons and
+		board_button_irq), and permits ARCH_BUTTONS, ARCH_IRQBUTTONS,
+		INPUT_BUTTONS and INPUT_BUTTONS_LOWER, which together register
+		the button driver as /dev/buttons.
+
+		The pin is an input with a pull-down and reads high while the
+		button is depressed (ST BSP v3.3.4 and on-board measurement).
+
 config STM32H750B_DK_QSPI_BOOT
 	bool "Link Cortex-M7 image for external QSPI boot"
 	default n

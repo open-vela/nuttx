@@ -53,6 +53,10 @@
 #  include <nuttx/serial/uart_rpmsg.h>
 #endif
 
+#ifdef CONFIG_INPUT_BUTTONS
+#  include <nuttx/input/buttons.h>
+#endif
+
 #include "stm32_gpio.h"
 
 #include "stm32h750b-dk.h"
@@ -346,6 +350,19 @@ int stm32_bringup(void)
         }
     }
 #endif
+
+#ifdef CONFIG_INPUT_BUTTONS
+  /* Register the button driver as /dev/buttons.  Interrupts stay disarmed
+   * until a client opens the device and polls it, so this adds the pin and
+   * the device node only.
+   */
+
+  ret = btn_lower_initialize("/dev/buttons");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: btn_lower_initialize() failed: %d\n", ret);
+    }
+#endif /* CONFIG_INPUT_BUTTONS */
 
 #ifdef HAVE_USBHOST
   /* Initialize USB host operation.  stm32_usbhost_initialize()

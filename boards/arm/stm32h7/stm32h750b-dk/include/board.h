@@ -523,9 +523,10 @@
 
 /* Button definitions *******************************************************/
 
-/* The NUCLEO board supports one button:  Pushbutton B1, labeled "User", is
- * connected to GPIO PI11.
- * A high value will be sensed when the button is depressed.
+/* This board supports one button:  Pushbutton B1, labeled "User", is
+ * connected to PC13 (ST BSP v3.3.4 BUTTON_USER_GPIO_PORT/BUTTON_USER_PIN;
+ * measured on the board on 2026-10-21; not PI11 as the NUCLEO boards are).
+ * The pin is pulled down and goes high when the button is depressed.
  */
 
 #define BUTTON_USER        0
