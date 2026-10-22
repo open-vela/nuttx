@@ -122,11 +122,14 @@ void stm32_mpuinitialize(void)
    * C byte buffers (for example DER certificates) can contain unaligned
    * halfwords, which fault in Device memory even with UNALIGN_TRP clear.
    * Keep it non-cacheable for LTDC/DMA coherency, and non-executable.
+   * Keep it non-shareable so heap atomics (LDREX/STREX, including file
+   * references) use the CPU-local exclusive monitor.  A shareable mapping
+   * sends exclusive transactions to FMC and faults on this board.
    * Use the board's accessible 8 MB, not the BSP's other SDRAM variant.
    */
 
   mpu_configure_region(STM32_FMC_BANK6, BOARD_SDRAM2_SIZE,
-                       MPU_RASR_TEX_NOR | MPU_RASR_S |
+                       MPU_RASR_TEX_NOR |
                        MPU_RASR_AP_RWNO | MPU_RASR_XN);
 #endif
 
