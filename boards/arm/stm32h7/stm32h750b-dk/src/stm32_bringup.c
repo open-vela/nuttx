@@ -65,6 +65,9 @@
 
 #ifdef CONFIG_STM32H7_SAI1_A
 #  include "stm32_sai.h"
+#  ifdef CONFIG_STM32H7_SAI_CAPTURE
+#    include "stm32_sai_capture.h"
+#  endif
 
 /* Set once by stm32_bringup() and served to the bring-up capture tool through
  * the accessor below.  There is exactly one PDM microphone on the board.
@@ -538,4 +541,68 @@ int stm32_pdm_staterecord(FAR uint32_t *regs, int nregs)
 
   return stm32_sai_staterecord(g_pdm_i2s, regs, nregs);
 }
-#endif
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+/****************************************************************************
+ * Name: stm32_pdm_capture_start / stop / stats
+ *
+ * Description:
+ *   Board-level wrappers over the SAI continuous capture interface.  See
+ *   board.h; they exist so application code never includes the driver's
+ *   private header.
+ *
+ ****************************************************************************/
+
+int stm32_pdm_capture_start(uint32_t samplerate, FAR uint8_t *ring,
+                            size_t bytes, stm32_pdm_capture_cb_t cb,
+                            FAR void *arg)
+{
+  if (g_pdm_i2s == NULL)
+    {
+      return -ENODEV;
+    }
+
+  return stm32_sai_capture_start(g_pdm_i2s, samplerate, ring, bytes,
+                                (stm32_sai_capture_cb_t)cb, arg);
+}
+
+int stm32_pdm_capture_stop(unsigned int wait_ms)
+{
+  if (g_pdm_i2s == NULL)
+    {
+      return -ENODEV;
+    }
+
+  return stm32_sai_capture_stop(g_pdm_i2s, wait_ms);
+}
+
+void stm32_pdm_capture_stats(FAR struct stm32_pdm_capture_stats *out)
+{
+  struct stm32_sai_capture_stats tmp;
+
+  if (out == NULL)
+    {
+      return;
+    }
+
+  if (g_pdm_i2s == NULL)
+    {
+      memset(out, 0, sizeof(*out));
+      return;
+    }
+
+  stm32_sai_capture_stats(g_pdm_i2s, &tmp);
+  out->tailbytes     = tmp.tailbytes;
+  out->halves        = tmp.halves;
+  out->wraps         = tmp.wraps;
+  out->dropped       = tmp.dropped;
+  out->overruns      = tmp.overruns;
+  out->clockerrors   = tmp.clockerrors;
+  out->dmaerrors     = tmp.dmaerrors;
+  out->starts        = tmp.starts;
+  out->stops         = tmp.stops;
+  out->setup_failures = tmp.setup_failures;
+  out->busy          = tmp.busy;
+}
+#endif /* CONFIG_STM32H7_SAI_CAPTURE */
+#endif /* CONFIG_STM32H7_SAI1_A */

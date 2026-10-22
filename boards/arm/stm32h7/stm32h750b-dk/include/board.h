@@ -28,6 +28,7 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
+# include <stddef.h>
 # include <stdint.h>
 #endif
 
@@ -763,6 +764,50 @@ int stm32_audio_codec_readreg(uint16_t offset, FAR uint16_t *val);
 int stm32_audio_tx_check(FAR int *results, int count);
 int stm32_audio_tx_record(FAR uint32_t *regs, int nregs);
 int stm32_audio_sai_state(FAR uint32_t *cr1, FAR uint32_t *gcr);
+#endif
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+/****************************************************************************
+ * Name: stm32_pdm_capture_*
+ *
+ * Description:
+ *   Continuous PDM capture on the board's microphone, exposed without the
+ *   driver's private types so application code can use it.
+ *
+ *   The ring is filled by DMA in circular mode and handed over in halves;
+ *   the callback runs in interrupt context and must not print, allocate or
+ *   wait.  The ring must be reachable by DMA1/DMA2 (not DTCM, not ITCM).
+ *
+ ****************************************************************************/
+
+/* Statistics as plain counters, so the application does not include the
+ * driver's private header.  Field meanings match the driver's struct.
+ */
+
+struct stm32_pdm_capture_stats
+{
+  uint32_t tailbytes;      /* Cumulative partial bytes delivered at stop */
+  uint32_t halves;
+  uint32_t wraps;
+  uint32_t dropped;
+  uint32_t overruns;
+  uint32_t clockerrors;
+  uint32_t dmaerrors;
+  uint32_t starts;
+  uint32_t stops;
+  uint32_t setup_failures;
+  uint32_t busy;
+};
+
+typedef void (*stm32_pdm_capture_cb_t)(FAR void *arg, int half,
+                                       FAR const uint8_t *data,
+                                       size_t bytes);
+
+int stm32_pdm_capture_start(uint32_t samplerate, FAR uint8_t *ring,
+                            size_t bytes, stm32_pdm_capture_cb_t cb,
+                            FAR void *arg);
+int stm32_pdm_capture_stop(unsigned int wait_ms);
+void stm32_pdm_capture_stats(FAR struct stm32_pdm_capture_stats *out);
 #endif
 
 #undef EXTERN

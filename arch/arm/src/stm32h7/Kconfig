@@ -698,6 +698,22 @@ config STM32H7_SAI_PDM_MODE
 		This option only enables the register configuration.  Turning the
 		1-bit PDM stream into PCM samples is the client's job.
 
+config STM32H7_SAI_CAPTURE
+	bool "SAI continuous capture"
+	default n
+	depends on STM32H7_SAI && STM32H7_SAI_DMA
+	---help---
+		Circular-DMA receive that runs until explicitly stopped, instead of
+		the one-shot I2S_RECEIVE path that disables the block after every
+		buffer.  In the one-shot path every buffer costs a stop and restart
+		of the block, so consecutive buffers cannot be treated as one
+		continuous stream; decimating audio across those gaps produces
+		clicks rather than a recording.
+
+		The client supplies a ring buffer reachable by DMA1/DMA2 (not DTCM,
+		not ITCM) and is told from interrupt context when each half of it
+		has been filled.  See arch/arm/src/stm32h7/stm32_sai_capture.h.
+
 config STM32H7_SDMMC
 	bool
 	default n

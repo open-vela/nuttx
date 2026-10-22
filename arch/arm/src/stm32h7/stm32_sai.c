@@ -49,6 +49,7 @@
 #include "stm32_dma.h"
 #include "stm32_gpio.h"
 #include "stm32_sai.h"
+#include "stm32_sai_capture.h"
 #include "stm32_rcc.h"
 
 #ifdef CONFIG_STM32H7_SAI
@@ -290,6 +291,21 @@ struct stm32h7_sai_s
   uint32_t last_dma_spar;      /* DMA peripheral address at start */
   uint32_t last_dma_sm0ar;     /* DMA memory address at start */
   uint32_t last_dmamux_ccr;    /* DMAMUX request number */
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+  /* Continuous capture state.  The ring and callback belong to the client;
+   * this block only needs to know where to write and who to tell.
+   */
+
+  bool capturing;              /* True: circular capture is running */
+  unsigned int capture_next_half;
+  uint8_t *capture_ring;       /* Client ring the DMA fills */
+  size_t capture_bytes;        /* Ring length */
+  stm32_sai_capture_cb_t capture_cb; /* Client notification, or NULL */
+  void *capture_arg;           /* Passed to capture_cb */
+  struct stm32_sai_capture_stats capture_stats;
+#endif
+
   sq_queue_t pend;             /* A queue of pending transfers */
   sq_queue_t act;              /* A queue of active transfers */
   sq_queue_t done;             /* A queue of completed transfers */
@@ -319,6 +335,11 @@ static void     sai_buf_initialize(struct stm32h7_sai_s *priv);
 #ifdef CONFIG_STM32H7_SAI_DMA
 static void     sai_schedule(struct stm32h7_sai_s *priv, int result);
 static void     sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg);
+#endif
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+static void     sai_capture_dma_callback(DMA_HANDLE handle, uint8_t isr,
+                  void *arg);
 #endif
 
 /* I2S methods */
@@ -1182,6 +1203,106 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
 #endif
 
 /****************************************************************************
+ * Name: sai_capture_dma_callback
+ *
+ * Description:
+ *   Half-transfer and transfer-complete callback for circular capture.
+ *
+ *   Runs in the DMA interrupt.  It invalidates the cache for the half the
+ *   DMA just finished, records status, and hands that half to the client.
+ *   It does not print, allocate, wait or take a lock: the client is expected
+ *   to copy the half into its own storage and return promptly.
+ *
+ *   In circular mode the count register reloads on wrap, so which half just
+ *   finished follows from the interrupt flag, not from the count: HTIF means
+ *   the first half is full, TCIF means the second.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+static void sai_capture_dma_callback(DMA_HANDLE handle, uint8_t isr,
+                                     void *arg)
+{
+  struct stm32h7_sai_s *priv = arg;
+  size_t halfbytes;
+  size_t residual;
+  uint8_t *data;
+  uint32_t sr;
+  int half;
+
+  if (priv == NULL || !priv->capturing)
+    {
+      return;
+    }
+
+  sr = sai_getreg(priv, STM32H7_SAI_SR_OFFSET);
+  priv->last_sr = sr;
+  priv->last_isr = isr;
+  if (sr & SAI_INT_OVRUDR)
+    {
+      priv->capture_stats.overruns++;
+      sai_putreg(priv, STM32H7_SAI_CLRFR_OFFSET, SAI_INT_OVRUDR);
+    }
+  if (sr & SAI_INT_WCKCFG)
+    {
+      priv->capture_stats.clockerrors++;
+      sai_putreg(priv, STM32H7_SAI_CLRFR_OFFSET, SAI_INT_WCKCFG);
+    }
+  if (isr & (DMA_STATUS_TEIF | DMA_STATUS_DMEIF))
+    {
+      priv->capture_stats.dmaerrors++;
+    }
+
+  /* Error-only callbacks do not contain a completed half. */
+
+  if (!(isr & (DMA_STATUS_HTIF | DMA_STATUS_TCIF)))
+    {
+      return;
+    }
+
+  halfbytes = priv->capture_bytes / 2;
+  if ((isr & (DMA_STATUS_HTIF | DMA_STATUS_TCIF)) ==
+      (DMA_STATUS_HTIF | DMA_STATUS_TCIF))
+    {
+      priv->capture_stats.dropped++;
+    }
+
+  half = (isr & DMA_STATUS_TCIF) ? 1 : 0;
+  residual = stm32_dmaresidual(handle);
+
+  /* Never pass the half DMA is currently writing to the client, even if
+   * this interrupt was delayed across another half boundary.
+   */
+
+  if ((half == 0 && residual > halfbytes) ||
+      (half == 1 && residual <= halfbytes))
+    {
+      priv->capture_stats.dropped++;
+      return;
+    }
+
+  data = priv->capture_ring + half * halfbytes;
+  up_invalidate_dcache((uintptr_t)data, (uintptr_t)data + halfbytes);
+  priv->capture_stats.halves++;
+  priv->capture_next_half = 1 - half;
+  if (half) priv->capture_stats.wraps++;
+  priv->stream_bytes += halfbytes;
+  priv->stream_end = (uint32_t)clock_systime_ticks();
+  if (priv->capture_cb)
+    {
+      priv->capture_cb(priv->capture_arg, half, data, halfbytes);
+    }
+
+  residual = stm32_dmaresidual(handle);
+  if ((half == 0 && residual > halfbytes) ||
+      (half == 1 && residual <= halfbytes))
+    {
+      priv->capture_stats.dropped++;
+    }
+}
+#endif /* CONFIG_STM32H7_SAI_CAPTURE */
+
+/****************************************************************************
  * Name: sai_samplerate
  *
  * Description:
@@ -1305,6 +1426,14 @@ static int sai_receive(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   /* Get exclusive access to the SAI driver data */
 
   nxmutex_lock(&priv->lock);
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+  if (priv->capturing)
+    {
+      ret = -EBUSY;
+      goto errout_with_lock;
+    }
+#endif
 
   /* Verify not already TX'ing */
 
@@ -1925,7 +2054,8 @@ int stm32_sai_mclk_enable(struct i2s_dev_s *dev, bool enable)
     {
       for (us = 0; us < 250; us++)
         {
-          if ((sai_getreg(priv, STM32H7_SAI_CR1_OFFSET) & SAI_CR1_SAIEN) == 0)
+          if (stm32_dma_stream_status(priv->dma) == 0 &&
+          (sai_getreg(priv, STM32H7_SAI_CR1_OFFSET) & SAI_CR1_SAIEN) == 0)
             {
               break;
             }
@@ -2133,5 +2263,350 @@ int stm32_sai_staterecord(struct i2s_dev_s *dev, uint32_t *regs, int nregs)
 
   return OK;
 }
+
+/****************************************************************************
+ * Continuous capture
+ *
+ * See stm32_sai_capture.h for why the one-shot path cannot serve this.  The
+ * essentials:
+ *
+ *   - the DMA runs in circular mode over the caller's ring and is started
+ *     exactly once per capture;
+ *   - the half-transfer and transfer-complete interrupts mark which half of
+ *     the ring the DMA just finished, so the CPU reads the other half;
+ *   - nothing in the interrupt prints, allocates or waits: it invalidates
+ *     the cache for the finished half, counts, and calls the client;
+ *   - stop is explicit and bounded, and reports the hardware state it found
+ *     rather than assuming the disable took effect.
+ ****************************************************************************/
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+
+/* Ring bookkeeping lives in the block's private state.  Only one capture
+ * can be active per block; a second start is refused rather than queued,
+ * because two consumers of one microphone stream is a caller bug.
+ */
+
+#define SAI_CAPTURE_STOP_WAIT_MS  50
+
+int stm32_sai_capture_start(struct i2s_dev_s *dev, uint32_t samplerate,
+                            uint8_t *ring, size_t bytes,
+                            stm32_sai_capture_cb_t cb, void *arg)
+{
+  struct stm32h7_sai_s *priv;
+  stm32_dmacfg_t cfg;
+  uintptr_t addr;
+  size_t unit;
+  irqstate_t flags;
+
+  if (dev == NULL || dev->ops != &g_i2sops || ring == NULL || cb == NULL ||
+      samplerate == 0)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct stm32h7_sai_s *)dev;
+
+  /* Only the PDM-capable blocks capture here.  A PCM receiver would need
+   * its own frame setup and has no caller yet.
+   */
+
+  if (!priv->pdm)
+    {
+      return -ENODEV;
+    }
+
+  /* The ring must be an even number of transfer units: the two halves are
+   * split by the half-transfer interrupt, and an odd length puts a sample
+   * across the boundary.
+   */
+
+  unit = 1;                                  /* PDM transfers bytes */
+  addr = (uintptr_t)ring;
+
+  if ((addr & 31) != 0 || (bytes & 63) != 0 ||
+      bytes < STM32H7_SAI_CAPTURE_MINBYTES ||
+      bytes > STM32H7_SAI_CAPTURE_MAXBYTES ||
+      (bytes % (2 * unit)) != 0)
+    {
+      return -EINVAL;
+    }
+
+  if (bytes / unit > DMA_SNDTR_NDT_MASK)
+    {
+      return -E2BIG;
+    }
+
+  /* DMA1/DMA2 cannot reach DTCM or ITCM.  Checked here rather than left to
+   * surface as a transfer error, which would look like a peripheral fault.
+   */
+
+  /* DMA1/2 can reach AXI SRAM, D2 SRAM, SRAM4 and external SDRAM.
+   * Require the entire cache-aligned ring to lie in one allowed region.
+   */
+
+  if (!((addr >= 0x24000000 && addr + bytes <= 0x24080000) ||
+        (addr >= 0x30000000 && addr + bytes <= 0x30048000) ||
+        (addr >= 0x38000000 && addr + bytes <= 0x38010000) ||
+        (addr >= 0xc0000000 && addr + bytes <= 0xe0000000)))
+    {
+      return -EFAULT;
+    }
+
+  flags = enter_critical_section();
+  if (priv->capturing || priv->txenab || priv->rxenab)
+    {
+      leave_critical_section(flags);
+      priv->capture_stats.busy++;
+      return -EBUSY;
+    }
+
+  priv->capturing = true;
+  priv->capture_next_half = 0;
+  priv->capture_ring = ring;
+  priv->capture_bytes = bytes;
+  priv->capture_cb = cb;
+  priv->capture_arg = arg;
+  leave_critical_section(flags);
+
+  /* The DMA is set up here instead of through sai_dma_setup() because that
+   * function owns the one-shot queue protocol (act/pend, per-buffer
+   * containers, completion scheduling).  Circular capture has no per-buffer
+   * container and must not stop at the end of a transfer.
+   */
+
+  nxmutex_lock(&priv->lock);
+
+  /* Program the sample rate before anything else.  It is what the master
+   * clock divider is computed from: the PDM bit clock is 64x the target
+   * sample rate, so leaving the driver's default in place produces a stream
+   * at the wrong rate.  This was measured, not inferred: at the default
+   * 48 kHz the delivered byte rate was 383391 B/s instead of 128000 B/s,
+   * i.e. the divider was computed for 48 kHz rather than 16 kHz.
+   *
+   * sai_samplerate() also rewrites the divider and the frame registers, and
+   * sai_pdmconfig() below puts the PDM frame layout back afterwards, so the
+   * order here is rate first, PDM frame last.
+   */
+
+  (void)I2S_RXSAMPLERATE(dev, samplerate);
+
+  /* Receiver is master and drives the microphone clock. */
+
+  sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_MODE_MASK,
+                SAI_CR1_MODE_MASTER_RX);
+  sai_putreg(priv, STM32H7_SAI_CLRFR_OFFSET,
+             SAI_INT_OVRUDR | SAI_INT_WCKCFG);
+
+  /* The DMA has to see current memory before it starts writing: invalidate
+   * so no stale line is written back over the incoming data.
+   */
+
+  /* Do not let residual FIFO data from an older recording enter this one. */
+
+  sai_modifyreg(priv, STM32H7_SAI_CR2_OFFSET, 0, SAI_CR2_FFLUSH);
+
+  up_invalidate_dcache(addr, addr + bytes);
+
+  cfg.paddr = priv->base + STM32H7_SAI_DR_OFFSET;
+  cfg.maddr = (uint32_t)addr;
+  cfg.cfg1  = SAI_RXDMA8_CONFIG | DMA_SCR_CIRC;
+  cfg.cfg2  = 0;
+  cfg.ndata = (uint32_t)(bytes / unit);
+
+  stm32_dmasetup(priv->dma, &cfg);
+
+  priv->dma_ccr   = cfg.cfg1;
+  priv->dma_scr   = cfg.cfg1;
+  priv->dma_sndtr = cfg.ndata;
+  priv->dma_spar  = cfg.paddr;
+  priv->dma_sm0ar = cfg.maddr;
+
+  /* In circular mode the DMA layer enables both interrupts only for the
+   * "half" form: it programs HTIE | TCIE | TEIE.  The other form leaves HTIE
+   * off, which would hide every first half.  Both flags are required here,
+   * so this must pass true.
+   */
+
+  stm32_dmastart(priv->dma, sai_capture_dma_callback, priv, true);
+
+  priv->rxenab = true;
+  sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, 0, SAI_CR1_SAIEN);
+
+  priv->capture_stats.starts++;
+  priv->stream_start = (uint32_t)clock_systime_ticks();
+  priv->stream_end = priv->stream_start;
+  priv->stream_bytes = 0;
+
+  nxmutex_unlock(&priv->lock);
+  return OK;
+}
+
+int stm32_sai_capture_stop(struct i2s_dev_s *dev, unsigned int wait_ms)
+{
+  struct stm32h7_sai_s *priv;
+  irqstate_t flags;
+  unsigned int us;
+  unsigned int limit;
+  stm32_sai_capture_cb_t cb;
+  void *arg;
+  size_t position;
+  size_t halfbytes;
+  size_t offset;
+  size_t tail;
+
+  if (dev == NULL || dev->ops != &g_i2sops)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct stm32h7_sai_s *)dev;
+
+  flags = enter_critical_section();
+  if (!priv->capturing)
+    {
+      leave_critical_section(flags);
+      return OK;
+    }
+
+  /* Drop the client first: from here on the interrupt only counts.  That
+   * way a completion racing with the disable below cannot call back after
+   * the caller believes the capture ended.
+   */
+
+  cb = priv->capture_cb;
+  arg = priv->capture_arg;
+  priv->capture_cb = NULL;
+  priv->capture_arg = NULL;
+  leave_critical_section(flags);
+
+  if (wait_ms == 0)
+    {
+      wait_ms = SAI_CAPTURE_STOP_WAIT_MS;
+    }
+
+  nxmutex_lock(&priv->lock);
+
+  /* Stop the DMA first: with the stream disabled it can no longer write
+   * into the ring, so the caller may reuse the memory once this returns.
+   */
+
+  stm32_dmastop(priv->dma);
+  sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN, 0);
+
+  /* Wait, bounded, for the block to report disabled.  This is the
+   * hardware's own handshake, not a retry loop around a reset; if it does
+   * not complete, the caller is told rather than being given the ring back.
+   */
+
+  limit = wait_ms * 1000;
+  for (us = 0; us < limit; us++)
+    {
+      if (stm32_dma_stream_status(priv->dma) == 0 &&
+          (sai_getreg(priv, STM32H7_SAI_CR1_OFFSET) & SAI_CR1_SAIEN) == 0)
+        {
+          break;
+        }
+
+      up_udelay(1);
+    }
+
+  if (us >= limit)
+    {
+      nxmutex_unlock(&priv->lock);
+      return -ETIMEDOUT;
+    }
+
+  /* DMA is acknowledged disabled.  Hand over a pending completed half,
+   * then the final partial half, without leaving a 64 ms hole at each stop.
+   * The callback may also run here in task context, with the same bounded
+   * no-wait contract as its interrupt invocation.
+   */
+
+  halfbytes = priv->capture_bytes / 2;
+  position = priv->capture_bytes - stm32_dmaresidual(priv->dma);
+  if (position == priv->capture_bytes) position = 0;
+  offset = priv->capture_next_half * halfbytes;
+  if ((offset == 0 && position >= halfbytes) ||
+      (offset == halfbytes && position < halfbytes))
+    {
+      up_invalidate_dcache((uintptr_t)priv->capture_ring + offset,
+                          (uintptr_t)priv->capture_ring + offset + halfbytes);
+      if (cb) cb(arg, priv->capture_next_half,
+                 priv->capture_ring + offset, halfbytes);
+      priv->capture_stats.halves++;
+      if (priv->capture_next_half) priv->capture_stats.wraps++;
+      priv->capture_next_half = 1 - priv->capture_next_half;
+      offset = priv->capture_next_half * halfbytes;
+    }
+
+  tail = position - offset;
+  if (tail > 0 && tail < halfbytes)
+    {
+      /* Read whole PDM bytes; the client preserves decimation phase. */
+
+      up_invalidate_dcache((uintptr_t)priv->capture_ring + offset,
+                          (uintptr_t)priv->capture_ring + offset + tail);
+      if (cb) cb(arg, priv->capture_next_half,
+                 priv->capture_ring + offset, tail);
+      priv->capture_stats.tailbytes += tail;
+    }
+
+  priv->rxenab = false;
+  priv->capturing = false;
+  priv->capture_stats.stops++;
+  nxmutex_unlock(&priv->lock);
+  return OK;
+}
+
+void stm32_sai_capture_stats(struct i2s_dev_s *dev,
+                             struct stm32_sai_capture_stats *out)
+{
+  struct stm32h7_sai_s *priv;
+  irqstate_t flags;
+
+  if (dev == NULL || out == NULL || dev->ops != &g_i2sops)
+    {
+      return;
+    }
+
+  priv = (struct stm32h7_sai_s *)dev;
+
+  flags = enter_critical_section();
+  *out = priv->capture_stats;
+  leave_critical_section(flags);
+}
+
+int stm32_sai_capture_position(struct i2s_dev_s *dev)
+{
+  struct stm32h7_sai_s *priv;
+  size_t residual;
+
+  if (dev == NULL || dev->ops != &g_i2sops)
+    {
+      return -EINVAL;
+    }
+
+  priv = (struct stm32h7_sai_s *)dev;
+  if (!priv->capturing)
+    {
+      return -ENODEV;
+    }
+
+  /* The count register decrements from its programmed value; the difference
+   * is how far into the current pass the DMA has got.  In circular mode it
+   * reloads at the wrap, so this is always within one ring length.
+   */
+
+  residual = stm32_dmaresidual(priv->dma);
+  if (residual > priv->capture_bytes)
+    {
+      return 0;
+    }
+
+  return (int)(priv->capture_bytes - residual);
+}
+
+#endif /* CONFIG_STM32H7_SAI_CAPTURE */
 
 #endif /* CONFIG_STM32H7_SAI */
