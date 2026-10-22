@@ -83,6 +83,13 @@ typedef uint32_t (*stm32_sai_sampleratecb_t)(struct i2s_dev_s *dev,
  *
  ****************************************************************************/
 
+/* Hold master TX clocks for codec setup independently of DMA buffers.  Only
+ * asynchronous, non-PDM master TX with NOMCK=0 is supported.  Queues must be
+ * idle when changing this hold.  Release after gating the codec AIF clock.
+ */
+
+int stm32_sai_mclk_enable(struct i2s_dev_s *dev, bool enable);
+
 struct i2s_dev_s *stm32_sai_initialize(int intf,
                   stm32_sai_sampleratecb_t sampleratecb);
 

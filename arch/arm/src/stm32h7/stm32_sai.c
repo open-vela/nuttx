@@ -247,6 +247,7 @@ struct stm32h7_sai_s
   uint32_t dmamap;             /* DMAMUX request for this sub-block */
   uint32_t dmamux_ccr;         /* DMAMUX request number, for diagnosis */
   bool pdm;                    /* True: PDM microphone mode */
+  bool clockhold;              /* Codec owns master clocks, without DMA */
   uint8_t or;                  /* Oversampling ratio flag */
 #ifdef CONFIG_STM32H7_SAI_DMA
   DMA_HANDLE dma;              /* DMA channel handle */
@@ -887,8 +888,12 @@ static void sai_worker(void *arg)
         }
 
       up_udelay((1000000u + priv->samplerate - 1) / priv->samplerate);
-      sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN, 0);
-      for (us = 0; us < 250; us++)
+      if (!priv->clockhold)
+        {
+          sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN, 0);
+        }
+
+      for (us = 0; !priv->clockhold && us < 250; us++)
         {
           if ((sai_getreg(priv, STM32H7_SAI_CR1_OFFSET) &
                SAI_CR1_SAIEN) == 0)
@@ -1199,6 +1204,15 @@ static uint32_t sai_samplerate(struct i2s_dev_s *dev, uint32_t rate)
       priv->frequency = priv->sampleratecb(dev, rate);
     }
 
+  if (priv->clockhold)
+    {
+      /* MCKDIV is protected while SAI is enabled.  Reconfiguration requires
+       * the codec to gate AIF1CLK and release its hold first.
+       */
+
+      return priv->samplerate == rate ? sai_getbitrate(priv) : 0;
+    }
+
   /* Save the new sample rate and update the divider */
 
   priv->samplerate = rate;
@@ -1222,6 +1236,11 @@ static uint32_t sai_datawidth(struct i2s_dev_s *dev, int bits)
   uint32_t setbits;
 
   DEBUGASSERT(priv && bits >= 8);
+
+  if (priv->clockhold)
+    {
+      return priv->datalen == bits ? sai_getbitrate(priv) : 0;
+    }
 
   switch (bits)
     {
@@ -1453,6 +1472,11 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
   /* Add the buffer container to the end of the pending queue */
 
   flags = enter_critical_section();
+  if (priv->clockhold && sq_empty(&priv->act) && sq_empty(&priv->pend))
+    {
+      sai_putreg(priv, STM32H7_SAI_CLRFR_OFFSET, SAI_INT_OVRUDR);
+    }
+
   sq_addlast((sq_entry_t *)bfcontainer, &priv->pend);
 
   /* Then start the next transfer.  If there is already a transfer in
@@ -1838,6 +1862,67 @@ static void sai_portinitialize(struct stm32h7_sai_s *priv)
  *
  ****************************************************************************/
 
+int stm32_sai_mclk_enable(struct i2s_dev_s *dev, bool enable)
+{
+  struct stm32h7_sai_s *priv = (struct stm32h7_sai_s *)dev;
+  uint32_t cr1;
+  irqstate_t flags;
+  int ret;
+  unsigned int us;
+
+  if (dev == NULL || dev->ops != &g_i2sops)
+    {
+      return -EINVAL;
+    }
+
+  ret = nxmutex_lock(&priv->lock);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  flags = enter_critical_section();
+  cr1 = sai_getreg(priv, STM32H7_SAI_CR1_OFFSET);
+  if (priv->pdm || (cr1 & (SAI_CR1_MODE_MASK | SAI_CR1_SYNCEN_MASK |
+                           SAI_CR1_NODIV)) != 0)
+    {
+      ret = -ENOTSUP;
+    }
+  else if (!sq_empty(&priv->act) || !sq_empty(&priv->pend))
+    {
+      ret = -EBUSY;
+    }
+  else
+    {
+      priv->clockhold = enable;
+      sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN,
+                    enable ? SAI_CR1_SAIEN : 0);
+      ret = OK;
+    }
+
+  leave_critical_section(flags);
+  if (ret == OK && !enable)
+    {
+      for (us = 0; us < 250; us++)
+        {
+          if ((sai_getreg(priv, STM32H7_SAI_CR1_OFFSET) & SAI_CR1_SAIEN) == 0)
+            {
+              break;
+            }
+
+          up_udelay(1);
+        }
+
+      if (us == 250)
+        {
+          ret = -ETIMEDOUT;
+        }
+    }
+
+  nxmutex_unlock(&priv->lock);
+  return ret;
+}
+
 struct i2s_dev_s *stm32_sai_initialize(int intf,
                                        stm32_sai_sampleratecb_t sampleratecb)
 {
@@ -1882,10 +1967,10 @@ struct i2s_dev_s *stm32_sai_initialize(int intf,
           priv = &g_sai2a_priv;
           priv->sampleratecb = sampleratecb;
 
-          stm32_configgpio(GPIO_SAI2_SD_A_2);
-          stm32_configgpio(GPIO_SAI2_FS_A_2);
-          stm32_configgpio(GPIO_SAI2_SCK_A_2);
-          stm32_configgpio(GPIO_SAI2_MCK_A_2);
+          stm32_configgpio(GPIO_SAI2_SD_A_2 | GPIO_SPEED_100MHz);
+          stm32_configgpio(GPIO_SAI2_FS_A_2 | GPIO_SPEED_100MHz);
+          stm32_configgpio(GPIO_SAI2_SCK_A_2 | GPIO_SPEED_100MHz);
+          stm32_configgpio(GPIO_SAI2_MCK_A_2 | GPIO_SPEED_100MHz);
           break;
         }
 #endif

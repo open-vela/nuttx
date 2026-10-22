@@ -108,6 +108,12 @@ static bool wm8994_enable(const struct wm8994_lower_s *lower, bool enable)
 
 static FAR struct i2s_dev_s *g_audio_i2s;
 
+static int wm8994_mclk_enable(const struct wm8994_lower_s *lower,
+                               bool enable)
+{
+  return stm32_sai_mclk_enable(g_audio_i2s, enable);
+}
+
 static struct stm32_audioinfo_s g_wm8994 =
 {
   .lower =
@@ -117,6 +123,7 @@ static struct stm32_audioinfo_s g_wm8994 =
       .mclk      = 4096000,
       .attach    = wm8994_attach,
       .enable    = wm8994_enable,
+      .mclk_enable = wm8994_mclk_enable,
     }
 };
 
@@ -178,6 +185,7 @@ int stm32_audio_initialize(void)
       return -ENODEV;
     }
 
+  g_audio_i2s = i2s;
   wm8994 = wm8994_initialize(i2c, i2s, &g_wm8994.lower);
   if (wm8994 == NULL)
     {
