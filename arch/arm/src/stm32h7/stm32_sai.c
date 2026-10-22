@@ -248,6 +248,7 @@ struct stm32h7_sai_s
   uint32_t dmamux_ccr;         /* DMAMUX request number, for diagnosis */
   bool pdm;                    /* True: PDM microphone mode */
   bool clockhold;              /* Codec owns master clocks, without DMA */
+  bool stream_pending;         /* Reset timing on first DMA of clock lease */
   uint8_t or;                  /* Oversampling ratio flag */
 #ifdef CONFIG_STM32H7_SAI_DMA
   DMA_HANDLE dma;              /* DMA channel handle */
@@ -273,6 +274,9 @@ struct stm32h7_sai_s
   uint32_t errors;
   uint32_t timeouts;
   uint32_t txbytes;
+  uint32_t stream_start;
+  uint32_t stream_end;
+  uint32_t stream_bytes;
   uint32_t underruns;
   uint32_t clockerrors;
   uint8_t last_isr;            /* DMA interrupt status at completion */
@@ -1085,6 +1089,9 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
         {
           priv->txbytes += bfcontainer->apb->nbytes -
                            bfcontainer->apb->curbyte;
+          priv->stream_bytes += bfcontainer->apb->nbytes -
+                                bfcontainer->apb->curbyte;
+          priv->stream_end = (uint32_t)clock_systime_ticks();
         }
     }
 
@@ -1453,6 +1460,14 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
                  SAI_INT_OVRUDR | SAI_INT_WCKCFG);
       sai_modifyreg(priv, STM32H7_SAI_CR2_OFFSET, SAI_CR2_FTH_MASK,
                     SAI_CR2_FTH_FULL);
+    }
+
+  if (priv->stream_pending || (!priv->clockhold && !priv->txenab))
+    {
+      priv->stream_start = (uint32_t)clock_systime_ticks();
+      priv->stream_end = priv->stream_start;
+      priv->stream_bytes = 0;
+      priv->stream_pending = false;
     }
 
   priv->txenab = true;
@@ -1895,6 +1910,11 @@ int stm32_sai_mclk_enable(struct i2s_dev_s *dev, bool enable)
   else
     {
       priv->clockhold = enable;
+      if (enable)
+        {
+          priv->stream_pending = true;
+        }
+
       sai_modifyreg(priv, STM32H7_SAI_CR1_OFFSET, SAI_CR1_SAIEN,
                     enable ? SAI_CR1_SAIEN : 0);
       ret = OK;
@@ -2102,6 +2122,13 @@ int stm32_sai_staterecord(struct i2s_dev_s *dev, uint32_t *regs, int nregs)
     {
       regs[15] = priv->underruns;
       regs[16] = priv->clockerrors;
+    }
+
+  if (nregs >= 20)
+    {
+      regs[17] = TICK2MSEC((uint32_t)(priv->stream_end - priv->stream_start));
+      regs[18] = priv->stream_bytes;
+      regs[19] = CONFIG_USEC_PER_TICK;
     }
 
   return OK;
