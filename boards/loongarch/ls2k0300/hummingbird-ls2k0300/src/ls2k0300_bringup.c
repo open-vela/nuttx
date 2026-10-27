@@ -40,6 +40,7 @@
 #include <nuttx/spi/spi.h>
 #include <nuttx/mtd/mtd.h>
 #include <nuttx/fs/fs.h>
+#include <nuttx/video/fb.h>
 
 #include <arch/board/board.h>
 
@@ -87,6 +88,10 @@ extern int ls2k0300_gpio_initialize(void);
 extern int ls2k0300_pinctrl_initialize(void);
 #endif
 
+#ifdef CONFIG_LS2K0300_DC
+extern void ls2k0300_dc_show_test_pattern(void);
+#endif
+
 #ifdef CONFIG_LS2K0300_ETHERNET
 extern int ls2k0300_ethernet_initialize(void);
 #endif
@@ -97,6 +102,11 @@ void ls2k0300_hardware_init(void)
 
   ls_pinmux_pin_setup(50, LS_PINMUX_MODE_AS_MAIN_FUNC);
   ls_pinmux_pin_setup(51, LS_PINMUX_MODE_AS_MAIN_FUNC);
+
+  /* GPIO48/49 配置为 I2C0 功能 (触摸屏 GT9147: SCL=48, SDA=49) */
+
+  ls_pinmux_pin_setup(48, LS_PINMUX_MODE_AS_MAIN_FUNC);
+  ls_pinmux_pin_setup(49, LS_PINMUX_MODE_AS_MAIN_FUNC);
 
   /* UART2 引脚复用配置
    * GPIO44 (UART2_TX) -> MAIN_FUNC (0x3)
@@ -425,6 +435,28 @@ int ls2k0300_bringup(void)
                 }
             }
         }
+    }
+#endif
+
+#ifdef CONFIG_LS2K0300_DC
+  /* Display controller: must come after the SPIIO2 section above, which
+   * blind-writes the GPIO80-95 pinmux register and would clobber the
+   * GPIO88 (backlight) setting done inside the DC driver.
+   */
+
+  _info("bringup: DC LCD\n");
+  ret = fb_register(0, 0);
+  if (ret < 0)
+    {
+      serr("ERROR: fb_register(0,0) failed: %d\n", ret);
+    }
+  else
+    {
+      /* fb_register() zeroes the framebuffer as a side effect, so the
+       * acceptance test card is drawn afterwards.
+       */
+
+      ls2k0300_dc_show_test_pattern();
     }
 #endif
 

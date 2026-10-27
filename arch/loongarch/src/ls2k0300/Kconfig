@@ -247,6 +247,16 @@ config LS2K0300_PINCTRL
 	---help---
 		Enable LS2K0300 pin controller driver support
 
+config LS2K0300_DC
+	bool "Display Controller (LCD)"
+	default n
+	select DRIVERS_VIDEO
+	select VIDEO_FB
+	---help---
+		Enable the LS2K0300 display controller (DC) driver for RGB TTL
+		LCD panels driven from dvo0.  Registers /dev/fb0 through the
+		NuttX framebuffer character driver.
+
 config LS2K0300_ETHERNET
 	bool "Ethernet"
 	default n

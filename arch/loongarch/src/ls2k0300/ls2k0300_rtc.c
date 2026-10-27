@@ -236,13 +236,42 @@ static struct ls2k0300_rtc_lowerhalf_s g_rtc_lowerhalf =
 static void ls2k0300_rtc_hw_init(FAR struct ls2k0300_rtc_lowerhalf_s *priv)
 {
   uint32_t ctrl;
+  uint32_t read0;
+  uint32_t read1;
 
   rtc_putreg(priv, LS2K0300_RTC_TOY_TRIM_REG, 0x0);
   rtc_putreg(priv, LS2K0300_RTC_TRIM_REG, 0x0);
 
+  /* TOYEN runs the time-of-year counter and RTCEN the seconds counter.
+   * Without RTCEN the TOY never advanced.
+   */
+
   ctrl = rtc_getreg(priv, LS2K0300_RTC_CTRL_REG);
-  ctrl |= RTC_CTRL_TOY_ENABLE_BIT | RTC_CTRL_OSC_ENABLE_BIT;
+  ctrl |= RTC_CTRL_TOY_ENABLE_BIT | RTC_CTRL_OSC_ENABLE_BIT |
+          RTC_CTRL_RTC_ENABLE_BIT;
   rtc_putreg(priv, LS2K0300_RTC_CTRL_REG, ctrl);
+
+  /* Writing TOY_WRITE also loads the counter; until that happens the TOY
+   * holds its reset value and RTC_RD_TIME reads back a clock that never
+   * moves -- which is why the time only started ticking after a manual
+   * RTC_SET_TIME.  Reload whatever the counter already holds so a
+   * battery-backed board keeps its time.
+   */
+
+  read1 = rtc_getreg(priv, LS2K0300_RTC_TOY_READ1_REG);
+  read0 = rtc_getreg(priv, LS2K0300_RTC_TOY_READ0_REG);
+  if (read0 == 0 && read1 == 0)
+    {
+      /* Fresh boot with nothing retained: give the counter a defined
+       * start (2025-01-01 00:00:00) rather than a frozen zero.
+       */
+
+      read0 = (1 << RTC_TOY_DAY_SHIFT) | (1 << RTC_TOY_MON_SHIFT);
+      read1 = 2025 - 1900;
+    }
+
+  rtc_putreg(priv, LS2K0300_RTC_TOY_WRITE0_REG, read0);
+  rtc_putreg(priv, LS2K0300_RTC_TOY_WRITE1_REG, read1);
 }
 
 int ls2k0300_rtc_initialize(void)

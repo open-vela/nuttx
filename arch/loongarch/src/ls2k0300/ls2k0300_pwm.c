@@ -134,14 +134,26 @@ static int ls2k0300_pwm_start(FAR struct pwm_lowerhalf_s *dev,
 
   priv->full_buffer = (uint32_t)val;
 
+  /* The pin is low while the counter sits below LOW_BUFFER and high for
+   * the remainder of the period, so the active (high) fraction is
+   * (FULL - LOW) / FULL.  NuttX reports duty as that active fraction in
+   * 1/65536 units, so LOW has to be derived from the complement.  Writing
+   * duty straight into LOW_BUFFER runs the output backwards -- 0% duty
+   * ends up brightest and 100% darkest.
+   */
+
   val = (uint64_t)priv->full_buffer * (uint64_t)info->duty;
   val = val / 65536UL;
-  if (val < 1)
+  if (val > priv->full_buffer)
     {
-      val = 1;
+      val = priv->full_buffer;
     }
 
-  priv->low_buffer = (uint32_t)val;
+  priv->low_buffer = priv->full_buffer - (uint32_t)val;
+  if (priv->low_buffer < 1)
+    {
+      priv->low_buffer = 1;
+    }
 
   pwm_putreg(priv, LS2K0300_PWM_LOW_BUFFER, priv->low_buffer);
   pwm_putreg(priv, LS2K0300_PWM_FULL_BUFFER, priv->full_buffer);

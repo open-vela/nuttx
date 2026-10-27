@@ -70,6 +70,10 @@ if(CONFIG_LS2K0300_PINCTRL)
   list(APPEND SRCS ls2k0300_pinctrl.c)
 endif()
 
+if(CONFIG_LS2K0300_DC)
+  list(APPEND SRCS ls2k0300_dc.c)
+endif()
+
 if(CONFIG_LS2K0300_ETHERNET)
   list(APPEND SRCS ls2k0300_gmac.c ls2k0300_ethernet.c ls2k0300_dma_cache.S)
 endif()
