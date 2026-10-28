@@ -28,6 +28,7 @@
 #include <nuttx/config.h>
 
 #ifndef __ASSEMBLY__
+# include <stddef.h>
 # include <stdint.h>
 #endif
 
@@ -111,19 +112,47 @@
 #define STM32_PLL1Q_FREQUENCY    (STM32_VCO1_FREQUENCY / 4)
 #define STM32_PLL1R_FREQUENCY    (STM32_VCO1_FREQUENCY / 8)
 
-/* PLL2 */
+/* PLL2 drives the SAI kernel clock, which in turn clocks the on-board PDM
+ * microphone (U34) through SAI4 or SAI1.
+ *
+ *   PLL2_VCO = (25,000,000 / 25) * 344 = 344 MHz
+ *   PLL2P    = PLL2_VCO / 7             = 49.143 MHz
+ *
+ * The reference divider is 25 rather than 5 so that PLL2P lands near the
+ * 49 MHz ST uses for this board's audio path.  The two constraints that fix
+ * the values are the PLL input range, which must be declared in PLL2RGE, and
+ * the SAI master clock divider width: MCKDIV is a 6-bit field, and a 400 MHz
+ * kernel clock at a 16 kHz frame rate needs a divider of 98.
+ *
+ * PLL2RGE therefore moves from 4_8_MHZ to 1_2_MHZ: the reference divider of
+ * 25 puts the PLL input at 1 MHz, below the band the previous setting
+ * declared.  Everything else about PLL2 is unchanged and PLL2Q/PLL2R stay
+ * disabled, exactly as before, because nothing consumes them.
+ *
+ * Consumers of PLL2P: the SAI blocks only.  ADC1/2/3 are the other user of
+ * this PLL on boards that enable them (D3CCIPR.ADCSEL below selects PLL2),
+ * and all three are disabled in the VelaGuard configuration.  FMC and SDMMC
+ * run from PLL1Q, QSPI from HCLK and LTDC from PLL3, so none of them is
+ * affected by this change.
+ */
 
 #define STM32_PLLCFG_PLL2CFG (RCC_PLLCFGR_PLL2VCOSEL_WIDE | \
-                              RCC_PLLCFGR_PLL2RGE_4_8_MHZ | \
+                              RCC_PLLCFGR_PLL2RGE_1_2_MHZ | \
                               RCC_PLLCFGR_DIVP2EN)
-#define STM32_PLLCFG_PLL2M       RCC_PLLCKSELR_DIVM2(5)
-#define STM32_PLLCFG_PLL2N       RCC_PLL2DIVR_N2(160)
-#define STM32_PLLCFG_PLL2P       RCC_PLL2DIVR_P2(2)
+#define STM32_PLLCFG_PLL2M       RCC_PLLCKSELR_DIVM2(25)
+#define STM32_PLLCFG_PLL2N       RCC_PLL2DIVR_N2(344)
+#define STM32_PLLCFG_PLL2P       RCC_PLL2DIVR_P2(7)
+
+/* PLL2Q/PLL2R keep their previous values.  Neither output is enabled,
+ * because DIVQ2EN and DIVR2EN are absent from PLL2CFG above, so these two
+ * only pad the divider register and generate nothing.
+ */
+
 #define STM32_PLLCFG_PLL2Q       4
 #define STM32_PLLCFG_PLL2R       4
 
-#define STM32_VCO2_FREQUENCY     ((STM32_HSE_FREQUENCY / 5) * 160)
-#define STM32_PLL2P_FREQUENCY    (STM32_VCO2_FREQUENCY / 2)
+#define STM32_VCO2_FREQUENCY     ((STM32_HSE_FREQUENCY / 25) * 344)
+#define STM32_PLL2P_FREQUENCY    (STM32_VCO2_FREQUENCY / 7)
 #define STM32_PLL2Q_FREQUENCY
 #define STM32_PLL2R_FREQUENCY
 
@@ -271,9 +300,39 @@
 #define STM32_SDMMC_MMCXFR_CLKDIV   (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 #define STM32_SDMMC_SDXFR_CLKDIV    (4 << STM32_SDMMC_CLKCR_CLKDIV_SHIFT)
 
-#define STM32_SDMMC_CLKCR_EDGE      STM32_SDMMC_CLKCR_NEGEDGE
+/* Rising clock edge, as in ST BSP stm32h750b_discovery_mmc.c (eMMC) */
+
+#define STM32_SDMMC_CLKCR_EDGE      (0) /* rising */
+
+/* SDMMC1 — on-board eMMC (U11), 8-bit wiring (MB1381 / ST BSP MSP):
+ *   CK=PC12, CMD=PD2, D0–D3=PC8–11, D4–D5=PB8–9, D6–D7=PC6–7
+ * NuttX stm32_sdmmc.c configures D0–D3 (+CK/CMD) in sdio_initialize();
+ * board stm32_sdmmc.c also arms D4–D7 for a future 8-bit path.
+ */
+
+#define GPIO_SDMMC1_CK   (GPIO_SDMMC1_CK_0|GPIO_SPEED_100MHz)   /* PC12 */
+#define GPIO_SDMMC1_CMD  (GPIO_SDMMC1_CMD_0|GPIO_SPEED_100MHz)  /* PD2 */
+#define GPIO_SDMMC1_D0   (GPIO_SDMMC1_D0_0|GPIO_SPEED_100MHz)   /* PC8 */
+#define GPIO_SDMMC1_D1   (GPIO_SDMMC1_D1_0|GPIO_SPEED_100MHz)   /* PC9 */
+#define GPIO_SDMMC1_D2   (GPIO_SDMMC1_D2_0|GPIO_SPEED_100MHz)   /* PC10 */
+#define GPIO_SDMMC1_D3   (GPIO_SDMMC1_D3_0|GPIO_SPEED_100MHz)   /* PC11 */
+#define GPIO_SDMMC1_D4   (GPIO_SDMMC1_D4_0|GPIO_SPEED_100MHz)   /* PB8 */
+#define GPIO_SDMMC1_D5   (GPIO_SDMMC1_D5_0|GPIO_SPEED_100MHz)   /* PB9 */
+#define GPIO_SDMMC1_D6   (GPIO_SDMMC1_D6_0|GPIO_SPEED_100MHz)   /* PC6 */
+#define GPIO_SDMMC1_D7   (GPIO_SDMMC1_D7_0|GPIO_SPEED_100MHz)   /* PC7 */
 
 /* Ethernet definitions *****************************************************/
+
+/* MB1381 H750XB-B01 routes the LAN8740A through full MII.  PH2/MII_CRS and
+ * PH3/MII_COL share pins with QSPI bank 2 IO0/IO1.  QSPI-XIP builds must
+ * leave those pins in their QSPI alternate function; negotiated full-duplex
+ * Ethernet does not use CRS/COL.
+ */
+
+#ifdef CONFIG_STM32H750B_DK_QSPI_BOOT
+#  define BOARD_ETH_MII_NO_CRS_COL 1
+#  define BOARD_ETH_PHY_POLL 1
+#endif
 
 /* The STM32H7 connects to a LAN8740A PHY using these pins:
  *
@@ -350,6 +409,14 @@
 #endif
 
 #define BOARD_SDRAM2_SIZE               (8*1024*1024)
+
+/* Keep the conservative 2 MB display reserve. The former corruption near
+ * SDRAM+1MB was caused by RGB565 setup driving PG0/PG1 (SDRAM A10/A11)
+ * instead of LCD G0/G1 on PJ7/PJ8; see stm32h750b-dk.h. A reserve alone
+ * cannot protect against SDRAM address aliasing from a wrong pinmux.
+ */
+
+#define BOARD_SDRAM2_HEAP_OFFSET        (2*1024*1024)
 
 /* BOARD_FMC_SDCR[1..2] - Initial value for SDRAM control registers for SDRAM
  *      bank 1-2. Note that some bits in SDCR1 influence both SDRAM banks and
@@ -485,9 +552,10 @@
 
 /* Button definitions *******************************************************/
 
-/* The NUCLEO board supports one button:  Pushbutton B1, labeled "User", is
- * connected to GPIO PI11.
- * A high value will be sensed when the button is depressed.
+/* This board supports one button:  Pushbutton B1, labeled "User", is
+ * connected to PC13 (ST BSP v3.3.4 BUTTON_USER_GPIO_PORT/BUTTON_USER_PIN;
+ * measured on the board on 2026-10-21; not PI11 as the NUCLEO boards are).
+ * The pin is pulled down and goes high when the button is depressed.
  */
 
 #define BUTTON_USER        0
@@ -495,6 +563,10 @@
 #define BUTTON_USER_BIT    (1 << BUTTON_USER)
 
 /* Alternate function pin selections ****************************************/
+
+/* USART2 - ESP-01 (VelaGuard expansion board, STMod P1-2/3) */
+#define GPIO_USART2_RX   (GPIO_USART2_RX_2 | GPIO_SPEED_100MHz)  /* PD6 */
+#define GPIO_USART2_TX   (GPIO_USART2_TX_2 | GPIO_SPEED_100MHz)  /* PD5 */
 
 /* USART3 (Nucleo Virtual Console) */
 
@@ -505,6 +577,9 @@
 
 #define GPIO_UART7_RX   (GPIO_UART7_RX_1 | GPIO_SPEED_100MHz)  /* PA8 */
 #define GPIO_UART7_TX   (GPIO_UART7_TX_2 | GPIO_SPEED_100MHz)  /* PB4 */
+
+/* TIM15 - PWM (VelaGuard D01 / passive buzzer) */
+#define GPIO_TIM15_CH2OUT (GPIO_TIM15_CH2OUT_2 | GPIO_SPEED_50MHz)  /* PE6 */
 
 /* I2C4 - Used by Touchscreen and Audio Codec */
 
@@ -544,6 +619,19 @@
 #define GPIO_LTDC_HSYNC  (GPIO_LTDC_HSYNC_3 | GPIO_SPEED_100MHz)
 #define GPIO_LTDC_DE     (GPIO_LTDC_DE_3 | GPIO_SPEED_100MHz)
 #define GPIO_LTDC_CLK    (GPIO_LTDC_CLK_3 | GPIO_SPEED_100MHz)
+
+/* RS485 direction (VelaGuard expansion, Arduino D4 / PK1) */
+#define GPIO_UART7_RS485_DIR (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_CLEAR|\
+                              GPIO_PORTK|GPIO_PIN1) /* PK1 */
+
+/* ESP-01S control (STMod P1-14 / P1-12) */
+#define GPIO_ESP_EN (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_SET|\
+                              GPIO_PORTA|GPIO_PIN3) /* PA3 */
+#define GPIO_ESP_RST (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_SET|\
+                              GPIO_PORTH|GPIO_PIN10) /* PH10 */
 
 /* DMA **********************************************************************/
 
@@ -604,6 +692,124 @@ extern "C"
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
+
+#ifdef CONFIG_STM32H7_SAI1_A
+/****************************************************************************
+ * Name: stm32_sai_pdm_device
+ *
+ * Description:
+ *   Return the I2S device that stm32_bringup() created for the on-board PDM
+ *   microphone (U34), or NULL when that path was not initialized.
+ *
+ *   The bring-up capture tool needs the device itself rather than a
+ *   character device: the i2schar shim releases its buffer inside its
+ *   own callback, so the data never reaches the caller.  Product audio
+ *   code uses the registered audio device instead and does not call this.
+ *
+ * Returned Value:
+ *   The SAI1 block A device, or NULL.
+ *
+ ****************************************************************************/
+
+struct i2s_dev_s;
+FAR struct i2s_dev_s *stm32_sai_pdm_device(void);
+
+/****************************************************************************
+ * Name: stm32_pdm_staterecord
+ *
+ * Description:
+ *   Copy the driver's end-of-transfer register snapshot into regs, which
+ *   must hold six words: DMA interrupt status, then SAI SR, CR1, FRCR,
+ *   SLOTR and PDMCR.  Returns a negated errno when the PDM path was not
+ *   initialized.
+ *
+ ****************************************************************************/
+
+#define STM32_PDM_DIAG_NREGS  11
+int stm32_pdm_staterecord(FAR uint32_t *regs, int nregs);
+#endif
+
+#ifdef CONFIG_AUDIO_WM8994
+/****************************************************************************
+ * Name: stm32_audio_codec_readreg
+ *
+ * Description:
+ *   Read one 16-bit register from the WM8994 over the board's I2C4 bus.
+ *
+ *   The bring-up probe uses this to confirm the codec answers at the address
+ *   the schematic implies and reports the ID the driver expects.  The bus is
+ *   shared with the touch controller and is opened through the reference
+ *   counted bus initializer, so this neither resets the bus nor disturbs the
+ *   device already using it.  Exactly one register at one fixed address is
+ *   accessed; this does not scan the bus.
+ *
+ * Returned Value:
+ *   Zero on success, with the register value stored in val; a negated errno
+ *   on failure.
+ *
+ ****************************************************************************/
+
+int stm32_audio_codec_readreg(uint16_t offset, FAR uint16_t *val);
+
+/****************************************************************************
+ * Name: stm32_audio_sai_state
+ *
+ * Description:
+ *   Copy the SAI2 block A configuration registers that decide whether
+ *   playback can work: CR1 and the global control register.  The probe reads
+ *   them to report master/slave mode, NODIV, the master clock divider and
+ *   whether the master clock output is actually enabled.
+ *
+ ****************************************************************************/
+
+int stm32_audio_tx_check(FAR int *results, int count);
+int stm32_audio_tx_record(FAR uint32_t *regs, int nregs);
+int stm32_audio_sai_state(FAR uint32_t *cr1, FAR uint32_t *gcr);
+#endif
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+/****************************************************************************
+ * Name: stm32_pdm_capture_*
+ *
+ * Description:
+ *   Continuous PDM capture on the board's microphone, exposed without the
+ *   driver's private types so application code can use it.
+ *
+ *   The ring is filled by DMA in circular mode and handed over in halves;
+ *   the callback runs in interrupt context and must not print, allocate or
+ *   wait.  The ring must be reachable by DMA1/DMA2 (not DTCM, not ITCM).
+ *
+ ****************************************************************************/
+
+/* Statistics as plain counters, so the application does not include the
+ * driver's private header.  Field meanings match the driver's struct.
+ */
+
+struct stm32_pdm_capture_stats
+{
+  uint32_t tailbytes;      /* Cumulative partial bytes delivered at stop */
+  uint32_t halves;
+  uint32_t wraps;
+  uint32_t dropped;
+  uint32_t overruns;
+  uint32_t clockerrors;
+  uint32_t dmaerrors;
+  uint32_t starts;
+  uint32_t stops;
+  uint32_t setup_failures;
+  uint32_t busy;
+};
+
+typedef void (*stm32_pdm_capture_cb_t)(FAR void *arg, int half,
+                                       FAR const uint8_t *data,
+                                       size_t bytes);
+
+int stm32_pdm_capture_start(uint32_t samplerate, FAR uint8_t *ring,
+                            size_t bytes, stm32_pdm_capture_cb_t cb,
+                            FAR void *arg);
+int stm32_pdm_capture_stop(unsigned int wait_ms);
+void stm32_pdm_capture_stats(FAR struct stm32_pdm_capture_stats *out);
+#endif
 
 #undef EXTERN
 #if defined(__cplusplus)

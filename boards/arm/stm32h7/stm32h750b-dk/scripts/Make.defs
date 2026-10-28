@@ -23,7 +23,11 @@ include $(TOPDIR)/tools/Config.mk
 include $(TOPDIR)/arch/arm/src/armv7-m/Toolchain.defs
 
 ifeq ($(CONFIG_ARCH_CHIP_STM32H7_CORTEXM7),y)
-  LDSCRIPT = flash.ld
+  ifeq ($(CONFIG_STM32H750B_DK_QSPI_BOOT),y)
+    LDSCRIPT = qspi_flash.ld
+  else
+    LDSCRIPT = flash.ld
+  endif
 else
   LDSCRIPT = flash_m4.ld
 endif
@@ -31,6 +35,16 @@ endif
 ARCHSCRIPT += $(BOARD_DIR)$(DELIM)scripts$(DELIM)$(LDSCRIPT)
 
 ARCHPICFLAGS = -fpic -msingle-pic-base -mpic-register=r10
+
+# ES0392 section 2.6.4: FMC does not support unaligned reads.  Heap
+# allocations can reside in SDRAM, so this applies to all C/C++ code,
+# including compiler-inlined memcpy and packed protocol field accesses.
+
+ifeq ($(CONFIG_STM32H7_FMC),y)
+  ifneq ($(filter y,$(CONFIG_ARCH_TOOLCHAIN_GCC) $(CONFIG_ARCH_TOOLCHAIN_CLANG)),)
+    ARCHCPUFLAGS += -mno-unaligned-access
+  endif
+endif
 
 CFLAGS := $(ARCHCFLAGS) $(ARCHOPTIMIZATION) $(ARCHCPUFLAGS) $(ARCHINCLUDES) $(ARCHDEFINES) $(EXTRAFLAGS)
 CPICFLAGS = $(ARCHPICFLAGS) $(CFLAGS)

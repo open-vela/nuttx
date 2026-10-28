@@ -124,6 +124,10 @@ if(CONFIG_STM32H7_RTC)
   endif()
 endif()
 
+if(CONFIG_STM32H7_SAI)
+  list(APPEND SRCS stm32_sai.c)
+endif()
+
 if(CONFIG_STM32H7_SPI)
   list(APPEND SRCS stm32_spi.c)
 endif()

@@ -27,6 +27,10 @@
 #include <assert.h>
 #include <sys/param.h>
 
+#if defined(CONFIG_ARCH_BOARD_STM32H750B_DK) && defined(CONFIG_STM32H7_FMC)
+#  include <arch/board/board.h>
+#endif
+
 #ifdef CONFIG_BUILD_PROTECTED
 #  include <nuttx/userspace.h>
 #endif
@@ -48,6 +52,11 @@
 #  else
 #    error missing shmem MPU configuration
 #  endif
+#endif
+
+#ifdef CONFIG_STM32H750B_DK_QSPI_BOOT
+#  define STM32_QSPI_BOOT_BASE 0x90000000
+#  define STM32_QSPI_BOOT_SIZE (128 * 1024 * 1024)
 #endif
 
 /****************************************************************************
@@ -99,6 +108,29 @@ void stm32_mpuinitialize(void)
   /* Configure shared memory as non-cacheable */
 
   mpu_priv_shmem((uintptr_t)STM32_SHMEM_BASE, STM32_SHMEM_SIZE);
+#endif
+
+#ifdef CONFIG_STM32H750B_DK_QSPI_BOOT
+  /* Keep the external QSPI XIP window executable after the MPU is enabled. */
+
+  mpu_priv_flash((uintptr_t)STM32_QSPI_BOOT_BASE, STM32_QSPI_BOOT_SIZE);
+#endif
+
+#if defined(CONFIG_ARCH_BOARD_STM32H750B_DK) && defined(CONFIG_STM32H7_FMC)
+  /* FMC bank 6 defaults to Device memory in the Cortex-M7 address map.
+   * The board puts both its framebuffer and a heap in this SDRAM.  Normal
+   * C byte buffers (for example DER certificates) can contain unaligned
+   * halfwords, which fault in Device memory even with UNALIGN_TRP clear.
+   * Keep it non-cacheable for LTDC/DMA coherency, and non-executable.
+   * Keep it non-shareable so heap atomics (LDREX/STREX, including file
+   * references) use the CPU-local exclusive monitor.  A shareable mapping
+   * sends exclusive transactions to FMC and faults on this board.
+   * Use the board's accessible 8 MB, not the BSP's other SDRAM variant.
+   */
+
+  mpu_configure_region(STM32_FMC_BANK6, BOARD_SDRAM2_SIZE,
+                       MPU_RASR_TEX_NOR |
+                       MPU_RASR_AP_RWNO | MPU_RASR_XN);
 #endif
 
   /* Then enable the MPU */

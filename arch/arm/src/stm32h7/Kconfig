@@ -686,6 +686,34 @@ config STM32H7_SAI
 	bool
 	default n
 
+config STM32H7_SAI_PDM_MODE
+	bool "SAI PDM microphone mode"
+	default n
+	depends on STM32H7_SAI
+	---help---
+		Support the pulse density modulation (PDM) interface of the SAI
+		peripheral, used to connect a digital MEMS microphone directly to
+		the chip.  Only SAI1 block A and SAI4 block A implement it.
+
+		This option only enables the register configuration.  Turning the
+		1-bit PDM stream into PCM samples is the client's job.
+
+config STM32H7_SAI_CAPTURE
+	bool "SAI continuous capture"
+	default n
+	depends on STM32H7_SAI && STM32H7_SAI_DMA
+	---help---
+		Circular-DMA receive that runs until explicitly stopped, instead of
+		the one-shot I2S_RECEIVE path that disables the block after every
+		buffer.  In the one-shot path every buffer costs a stop and restart
+		of the block, so consecutive buffers cannot be treated as one
+		continuous stream; decimating audio across those gaps produces
+		clicks rather than a recording.
+
+		The client supplies a ring buffer reachable by DMA1/DMA2 (not DTCM,
+		not ITCM) and is told from interrupt context when each half of it
+		has been filled.  See arch/arm/src/stm32h7/stm32_sai_capture.h.
+
 config STM32H7_SDMMC
 	bool
 	default n
@@ -859,6 +887,66 @@ config STM32H7_SDMMC2
 	select ARCH_HAVE_SDIOWAIT_WRCOMPLETE
 	select ARCH_HAVE_SDIO_PREFLIGHT
 	select SDIO_BLOCKSETUP
+
+config STM32H7_SAI1
+	bool "SAI1"
+	default n
+	select STM32H7_SAI
+	select AUDIO
+	select I2S
+	select SCHED_HPWORK
+
+config STM32H7_SAI1_A
+	bool "SAI1 Block A"
+	default n
+	depends on STM32H7_SAI1
+
+config STM32H7_SAI1_B
+	bool "SAI1 Block B"
+	default n
+	depends on STM32H7_SAI1
+
+config STM32H7_SAI2
+	bool "SAI2"
+	default n
+	select STM32H7_SAI
+	select AUDIO
+	select I2S
+	select SCHED_HPWORK
+
+config STM32H7_SAI2_A
+	bool "SAI2 Block A"
+	default n
+	depends on STM32H7_SAI2
+
+config STM32H7_SAI2_B
+	bool "SAI2 Block B"
+	default n
+	depends on STM32H7_SAI2
+
+config STM32H7_SAI4
+	bool "SAI4"
+	default n
+	select STM32H7_SAI
+	select AUDIO
+	select I2S
+	select SCHED_HPWORK
+	---help---
+		SAI4 sits in the D3 domain together with BDMA.  Its data register
+		can therefore only be served by a BDMA channel, so the two block
+		options below additionally require STM32H7_BDMA.  BDMA is marked
+		experimental, so this dependency is left explicit instead of being
+		selected implicitly.
+
+config STM32H7_SAI4_A
+	bool "SAI4 Block A"
+	default n
+	depends on STM32H7_SAI4 && STM32H7_BDMA
+
+config STM32H7_SAI4_B
+	bool "SAI4 Block B"
+	default n
+	depends on STM32H7_SAI4 && STM32H7_BDMA
 
 config STM32H7_IWDG
 	bool "IWDG"
@@ -1428,6 +1516,55 @@ config STM32H7_SPI6_COMMTYPE
 		Select full-duplex (0), simplex tx (1), simplex rx (2) or half-duplex (3)
 
 endmenu # "SPI Configuration"
+
+menu "SAI Configuration"
+	depends on STM32H7_SAI
+
+choice
+	prompt "Operation mode"
+	default STM32H7_SAI_DMA
+	---help---
+		Select the operation mode the SAI driver should use.
+
+config STM32H7_SAI_POLLING
+	bool "Polling"
+	---help---
+		The SAI registers are polled for events.
+
+config STM32H7_SAI_INTERRUPTS
+	bool "Interrupt"
+	---help---
+		Select to enable interrupt driven SAI support.
+
+config STM32H7_SAI_DMA
+	bool "DMA"
+	---help---
+		Use DMA to improve SAI transfer performance.
+
+endchoice # Operation mode
+
+config STM32H7_SAI_MAXINFLIGHT
+	int "Max in-flight transfers"
+	default 16
+	---help---
+		Maximum number of audio buffers that can be queued on one SAI
+		sub-block at a time.  Each one costs a small container structure.
+
+config STM32H7_SAI_DEFAULT_SAMPLERATE
+	int "Default sample rate"
+	default 48000
+	---help---
+		Sample rate programmed before the client asks for a specific one.
+
+config STM32H7_SAI_DEFAULT_DATALEN
+	int "Default data width"
+	default 16
+	range 8 32
+	---help---
+		Data width in bits programmed before the client asks for a specific
+		one.  The SAI data register is always accessed as 32 bits.
+
+endmenu # "SAI Configuration"
 
 menu "U[S]ART Configuration"
 	depends on STM32H7_USART

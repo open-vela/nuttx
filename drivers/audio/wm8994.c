@@ -177,7 +177,7 @@ static void    *wm8994_workerthread(pthread_addr_t pvarg);
 
 /* Initialization */
 
-static void     wm8994_audio_output(FAR struct wm8994_dev_s *priv);
+static int      wm8994_audio_output(FAR struct wm8994_dev_s *priv);
 #if 0 /* Not used */
 static void     wm8994_audio_input(FAR struct wm8994_dev_s *priv);
 #endif
@@ -186,7 +186,7 @@ static void     wm8994_configure_ints(FAR struct wm8994_dev_s *priv);
 #else
 #  define       wm8994_configure_ints(p)
 #endif
-static void     wm8994_hw_reset(FAR struct wm8994_dev_s *priv);
+static int      wm8994_hw_reset(FAR struct wm8994_dev_s *priv);
 
 /* Private Data */
 
@@ -995,6 +995,28 @@ static int wm8994_configure(FAR struct audio_lowerhalf_s *dev,
  *
  */
 
+static int wm8994_idle(FAR struct wm8994_dev_s *priv)
+{
+  if (priv->lower->mclk_enable == NULL)
+    {
+      return wm8994_hw_reset(priv);
+    }
+
+  /* All accepted DMA buffers must have returned before taking clocks away.
+   * Keep the analogue setup muted for the next file instead of repeating
+   * cold startup on every COMPLETE and close.
+   */
+
+  if (priv->inflight > 0)
+    {
+      return -EBUSY;
+    }
+
+  wm8994_setvolume(priv, priv->volume, true);
+  wm8994_writereg(priv, WM8994_AIF1_CLK1, 0);
+  return priv->lower->mclk_enable(priv->lower, false);
+}
+
 static int wm8994_shutdown(FAR struct audio_lowerhalf_s *dev)
 {
   FAR struct wm8994_dev_s *priv = (FAR struct wm8994_dev_s *)dev;
@@ -1005,12 +1027,9 @@ static int wm8994_shutdown(FAR struct audio_lowerhalf_s *dev)
 
   WM8994_DISABLE(priv->lower);
 
-  /* Now issue a software reset.  This puts all WM8994 registers back in
-   * their default state.
-   */
+  /* Shut down streaming clocks after muting the prepared output. */
 
-  wm8994_hw_reset(priv);
-  return OK;
+  return wm8994_idle(priv);
 }
 
 /* Name: wm8994_senddone
@@ -1031,7 +1050,6 @@ static void  wm8994_senddone(FAR struct i2s_dev_s *i2s,
   int ret;
 
   DEBUGASSERT(i2s && priv && priv->running && apb);
-  audinfo("apb=%p inflight=%d result=%d\n", apb, priv->inflight, result);
 
   /* We do not place any restriction on the context in which this function
    * is called.  It may be called from an interrupt handler.  Therefore, the
@@ -1065,11 +1083,11 @@ static void  wm8994_senddone(FAR struct i2s_dev_s *i2s,
    */
 
   msg.msg_id = AUDIO_MSG_COMPLETE;
-  ret = file_mq_send(&priv->mq, (FAR const char *)&msg, sizeof(msg),
-                     CONFIG_WM8994_MSG_PRIO);
+  ret = file_mq_ticksend(&priv->mq, (FAR const char *)&msg, sizeof(msg),
+                     CONFIG_WM8994_MSG_PRIO, 0);
   if (ret < 0)
     {
-      auderr("ERROR: file_mq_send failed: %d\n", ret);
+      /* A full queue already wakes the worker; ownership stays in doneq. */
     }
 }
 
@@ -1176,7 +1194,8 @@ static int wm8994_sendbuffer(FAR struct wm8994_dev_s *priv)
     }
 
   while (priv->inflight < CONFIG_WM8994_INFLIGHT &&
-         dq_peek(&priv->pendq) != NULL && !priv->paused)
+         dq_peek(&priv->pendq) != NULL && !priv->paused &&
+         !priv->terminating)
     {
       /* Take next buffer from the queue of pending transfers */
 
@@ -1224,6 +1243,8 @@ static int wm8994_sendbuffer(FAR struct wm8994_dev_s *priv)
       if (ret < 0)
         {
           auderr("ERROR: I2S_SEND failed: %d\n", ret);
+          wm8994_senddone(priv->i2s, apb, priv, ret);
+          priv->terminating = true;
           break;
         }
     }
@@ -1325,18 +1346,35 @@ static int wm8994_stop(FAR struct audio_lowerhalf_s *dev)
   struct audio_msg_s term_msg;
   FAR void *value;
 
-  /* Send a message to stop all audio streaming */
+  int ret = OK;
 
-  term_msg.msg_id = AUDIO_MSG_STOP;
-  term_msg.u.data = 0;
-  file_mq_send(&priv->mq, (FAR const char *)&term_msg,
-               sizeof(term_msg),
-               CONFIG_WM8994_MSG_PRIO);
+  /* Completion may already have closed the worker queue.  Serialize this
+   * decision with worker teardown, and never send to a closed file.
+   */
+
+  nxmutex_lock(&priv->pendlock);
+  if (priv->running)
+    {
+      term_msg.msg_id = AUDIO_MSG_STOP;
+      term_msg.u.data = 0;
+      priv->terminating = true;
+      ret = file_mq_ticksend(&priv->mq, (FAR const char *)&term_msg,
+                            sizeof(term_msg), CONFIG_WM8994_MSG_PRIO, 0);
+    }
+
+  nxmutex_unlock(&priv->pendlock);
+  if (ret < 0 && ret != -ETIMEDOUT && ret != -EAGAIN)
+    {
+      return ret;
+    }
 
   /* Join the worker thread */
 
-  pthread_join(priv->threadid, &value);
-  priv->threadid = 0;
+  if (priv->threadid != 0)
+    {
+      pthread_join(priv->threadid, &value);
+      priv->threadid = 0;
+    }
 
   /* Enter into a reduced power usage mode */
 
@@ -1713,6 +1751,8 @@ static void *wm8994_workerthread(pthread_addr_t pvarg)
   struct audio_msg_s msg;
   FAR struct ap_buffer_s *apb;
   int msglen;
+  int result = OK;
+  int resetret;
   unsigned int prio;
 
   audinfo("Entry\n");
@@ -1729,7 +1769,23 @@ static void *wm8994_workerthread(pthread_addr_t pvarg)
 #ifdef WM8994_USE_FFLOCK_INT
   WM8994_ENABLE(priv->lower);
 #endif
-  wm8994_setvolume(priv, priv->volume, false);
+  if (priv->lower->mclk_enable != NULL)
+    {
+      result = priv->lower->mclk_enable(priv->lower, true);
+      if (result == OK)
+        {
+          wm8994_writereg(priv, WM8994_AIF1_CLK1, WM8994_AIF1CLK_ENA);
+        }
+    }
+
+  if (result < 0)
+    {
+      priv->running = false;
+    }
+  else
+    {
+      wm8994_setvolume(priv, priv->volume, false);
+    }
 
   /* Loop as long as we are supposed to be running and as long as we have
    * buffers in-flight.
@@ -1813,9 +1869,14 @@ static void *wm8994_workerthread(pthread_addr_t pvarg)
         }
     }
 
-  /* Reset the WM8994 hardware */
+  /* Mute before releasing the codec's clock hold. */
 
-  wm8994_hw_reset(priv);
+  wm8994_setvolume(priv, priv->volume, true);
+  resetret = wm8994_idle(priv);
+  if (result == OK)
+    {
+      result = resetret;
+    }
 
   /* Return any pending buffers in our pending queue */
 
@@ -1841,17 +1902,21 @@ static void *wm8994_workerthread(pthread_addr_t pvarg)
 
   wm8994_returnbuffers(priv);
 
-  /* Close the message queue */
+  /* Stop may be called after COMPLETE.  Mark closed before notification. */
 
+  nxmutex_lock(&priv->pendlock);
+  priv->running = false;
   file_mq_close(&priv->mq);
   file_mq_unlink(priv->mqname);
+  nxmutex_unlock(&priv->pendlock);
 
   /* Send an AUDIO_MSG_COMPLETE message to the client */
 
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-  priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_COMPLETE, NULL, OK, NULL);
+  priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_COMPLETE, NULL, result,
+                  NULL);
 #else
-  priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_COMPLETE, NULL, OK);
+  priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_COMPLETE, NULL, result);
 #endif
 
   audinfo("Exit\n");
@@ -1871,10 +1936,32 @@ static void *wm8994_workerthread(pthread_addr_t pvarg)
  *
  */
 
-static void wm8994_audio_output(FAR struct wm8994_dev_s *priv)
+static void wm8994_delay_ms(unsigned int ms)
+{
+  struct timespec delay;
+  int ret;
+
+  delay.tv_sec = ms / 1000;
+  delay.tv_nsec = (ms % 1000) * 1000000;
+  do
+    {
+      ret = nxsig_nanosleep(&delay, &delay);
+    }
+  while (ret == -EINTR);
+
+  if (ret < 0)
+    {
+      /* Preserve the minimum hardware delay if sleeping is unavailable. */
+
+      up_mdelay(ms);
+    }
+}
+
+static int wm8994_audio_output(FAR struct wm8994_dev_s *priv)
 {
   uint16_t regval;
   uint16_t cold_startup = 1;
+  unsigned int retries;
 
   /* Do not change! Currently only headphones are supported! */
 
@@ -1895,7 +1982,7 @@ static void wm8994_audio_output(FAR struct wm8994_dev_s *priv)
     WM8994_VMID_SEL_2X40K;
   wm8994_writereg(priv, WM8994_PM1, regval);
 
-  up_mdelay(40);
+  wm8994_delay_ms(40);
 
   /* Path configuration for output
    *
@@ -1988,15 +2075,21 @@ static void wm8994_audio_output(FAR struct wm8994_dev_s *priv)
                WM8994_WSEQ_START |
                (0x0 << WM8994_WSEQ_START_INDEX_SHIFT);  /* Start Index = 0 */
       wm8994_writereg(priv, WM8994_WR_CTL_SEQ1, regval);
-      up_mdelay(20);
+      wm8994_delay_ms(20);
 
       /* Wait until sequencer indicates that sequence is completed */
 
       regval = wm8994_readreg(priv, WM8994_WR_CTL_SEQ2);
-      while (regval & WM8994_WSEQ_BUSY)
+      for (retries = 0; (regval & WM8994_WSEQ_BUSY) && retries < 50;
+           retries++)
         {
+          wm8994_delay_ms(20);
           regval = wm8994_readreg(priv, WM8994_WR_CTL_SEQ2);
-          up_mdelay(20);
+        }
+
+      if (regval & WM8994_WSEQ_BUSY)
+        {
+          return -ETIMEDOUT;
         }
 
       /* TODO: Manage cold/warm start correctly */
@@ -2009,15 +2102,21 @@ static void wm8994_audio_output(FAR struct wm8994_dev_s *priv)
                WM8994_WSEQ_START |
                (0x8 << WM8994_WSEQ_START_INDEX_SHIFT);  /* Start Index = 8 */
       wm8994_writereg(priv, WM8994_WR_CTL_SEQ1, regval);
-      up_mdelay(20);
+      wm8994_delay_ms(20);
 
       /* Wait until sequencer indicates that sequence is completed */
 
       regval = wm8994_readreg(priv, WM8994_WR_CTL_SEQ2);
-      while (regval & WM8994_WSEQ_BUSY)
+      for (retries = 0; (regval & WM8994_WSEQ_BUSY) && retries < 50;
+           retries++)
         {
+          wm8994_delay_ms(20);
           regval = wm8994_readreg(priv, WM8994_WR_CTL_SEQ2);
-          up_mdelay(20);
+        }
+
+      if (regval & WM8994_WSEQ_BUSY)
+        {
+          return -ETIMEDOUT;
         }
     }
 
@@ -2112,7 +2211,7 @@ static void wm8994_audio_output(FAR struct wm8994_dev_s *priv)
 
   /* Add Delay */
 
-  up_mdelay(15);
+  wm8994_delay_ms(15);
 
   /* Select DAC1 (Left) to Left Headphone Output PGA (HPOUT1LVOL) path */
 
@@ -2149,7 +2248,7 @@ static void wm8994_audio_output(FAR struct wm8994_dev_s *priv)
 
   /* Add Delay */
 
-  up_mdelay(257);
+  wm8994_delay_ms(257);
 
   /* Enable HPOUT1 (Left) and HPOUT1 (Right) intermediate and output stages.
    * Remove clamps
@@ -2202,6 +2301,7 @@ static void wm8994_audio_output(FAR struct wm8994_dev_s *priv)
   /* Volume Control */
 
   wm8994_setvolume(priv, CONFIG_WM8994_INITVOLUME, true);
+  return OK;
 }
 
 /* Name: wm8994_audio_input
@@ -2286,8 +2386,26 @@ static void  wm8994_configure_ints(FAR struct wm8994_dev_s *priv)
  *
  */
 
-static void wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
+static int wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
 {
+  int ret;
+  int clockret;
+
+  /* The WM8994 control interface switches to SYSCLK when AIF1CLK_ENA is
+   * set (datasheet section Control Interface Clocking).  Keep MCLK present
+   * through configuration and analogue startup, not just during DMA.
+   */
+
+  if (priv->lower->mclk_enable != NULL)
+    {
+      wm8994_writereg(priv, WM8994_AIF1_CLK1, 0);
+      ret = priv->lower->mclk_enable(priv->lower, false);
+      if (ret < 0)
+        {
+          return ret;
+        }
+    }
+
   /* Put audio output back to its initial configuration */
 
   priv->samprate   = WM8994_DEFAULT_SAMPRATE;
@@ -2296,6 +2414,17 @@ static void wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
 #if !defined(CONFIG_AUDIO_EXCLUDE_VOLUME) && !defined(CONFIG_AUDIO_EXCLUDE_BALANCE)
   priv->balance    = b16HALF - 1;            /* Center balance */
 #endif
+
+  if (priv->lower->mclk_enable != NULL)
+    {
+      I2S_TXSAMPLERATE(priv->i2s, priv->samprate);
+      I2S_TXDATAWIDTH(priv->i2s, priv->bpsamp);
+      ret = priv->lower->mclk_enable(priv->lower, true);
+      if (ret < 0)
+        {
+          return ret;
+        }
+    }
 
   /* Software reset.  This puts all WM8994 registers back in their
    * default state.
@@ -2340,7 +2469,7 @@ static void wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
   /* 0x01 = 0x0013 */
 
   wm8994_writereg(priv, WM8994_PM1, regval);
-  up_mdelay(50);
+  wm8994_delay_ms(50);
 
   /* Configure the WM8994 hardware as an audio output device */
 
@@ -2606,13 +2735,13 @@ static void wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
 
         /* 0x110 = regval */
 
-        up_mdelay(300);
+        wm8994_delay_ms(300);
       }
       else
       {
         regval = 0x8108;
         wm8994_writereg(priv, WM8994_WR_CTL_SEQ1, regval); /* 0x110 = regval */
-        up_mdelay(50);
+        wm8994_delay_ms(50);
       }
 
       regval = 0;
@@ -2650,7 +2779,7 @@ static void wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
     regval = 0;
     wm8994_writereg(priv, WM8994_CHARGE_PUMP1, regval); /* 0x4c = 0x9F25 */
 
-    up_mdelay(15);
+    wm8994_delay_ms(15);
 
     regval = 0;
     wm8994_writereg(priv, WM8994_OUTPUT_MIXER1, regval); /* 0x2d = 0x0001 */
@@ -2664,7 +2793,7 @@ static void wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
     regval = 0x0033;
     wm8994_writereg(priv, 0x54, regval); /* 0x54 = 0x0033 */
 
-    up_mdelay(257);
+    wm8994_delay_ms(257);
 
     regval = 0x00ee;
     wm8994_writereg(priv, 0x60, 0x00ee); /* 0x60 = 0x00ee */
@@ -2735,7 +2864,32 @@ static void wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
 #endif
   /* Configure the WM8994 hardware as an audio output device */
 
-  wm8994_audio_output(priv);
+  ret = wm8994_audio_output(priv);
+  if (priv->lower->mclk_enable != NULL)
+    {
+      if (ret == OK &&
+          (wm8994_readreg(priv, WM8994_PM1) != 0x0303 ||
+           wm8994_readreg(priv, WM8994_PM3) != 0x0030 ||
+           wm8994_readreg(priv, WM8994_ANA_HP1) != 0x00ee ||
+           wm8994_readreg(priv, WM8994_OUTPUT_MIXER1) != 0x0001 ||
+           wm8994_readreg(priv, WM8994_OUTPUT_MIXER2) != 0x0001))
+        {
+          auderr("ERROR: WM8994 headphone configuration readback failed\n");
+          ret = -EIO;
+        }
+
+      wm8994_writereg(priv, WM8994_AIF1_CLK1, 0);
+      clockret = priv->lower->mclk_enable(priv->lower, false);
+      if (ret == OK)
+        {
+          ret = clockret;
+        }
+    }
+
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   /* Configure interrupts */
 
@@ -2749,6 +2903,7 @@ static void wm8994_hw_reset(FAR struct wm8994_dev_s *priv)
 
   wm8994_dump_registers(&priv->dev, "After configuration");
   wm8994_clock_analysis(&priv->dev, "After configuration");
+  return OK;
 }
 
 /****************************************************************************
@@ -2824,7 +2979,11 @@ FAR struct audio_lowerhalf_s *
 
       /* Reset and reconfigure the WM8994 hardwaqre */
 
-      wm8994_hw_reset(priv);
+      if (wm8994_hw_reset(priv) < 0)
+        {
+          goto errout_with_dev;
+        }
+
       return &priv->dev;
     }
 
