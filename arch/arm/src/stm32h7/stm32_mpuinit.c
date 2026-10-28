@@ -56,7 +56,7 @@
 
 #ifdef CONFIG_STM32H750B_DK_QSPI_BOOT
 #  define STM32_QSPI_BOOT_BASE 0x90000000
-#  define STM32_QSPI_BOOT_SIZE (128 * 1024 * 1024)
+#  define STM32_QSPI_BOOT_SIZE (64 * 1024 * 1024)
 #endif
 
 /****************************************************************************
