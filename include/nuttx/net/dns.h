@@ -183,6 +183,23 @@ typedef CODE int (*dns_callback_t)(FAR void *arg,
                                    FAR struct sockaddr *addr,
                                    FAR socklen_t addrlen);
 
+/* Optional synchronous query control. budget_ms returns the remaining
+ * monotonic budget (>0), zero on expiry, or a negated errno on
+ * cancellation. It must not block. The resolver polls it at most every
+ * 100 ms while waiting for network I/O; no helper thread or abandoned
+ * request is created. A non-NULL server overrides the nameserver for this
+ * query only, bypassing the shared cache. The caller owns all pointers
+ * until the query returns.
+ */
+
+struct dns_query_control_s
+{
+  CODE int (*budget_ms)(FAR void *arg);
+  FAR void *arg;
+  FAR const struct sockaddr *server;
+  socklen_t serverlen;
+};
+
 /****************************************************************************
  * Public Function Prototypes
  ****************************************************************************/
@@ -232,6 +249,16 @@ int dns_default_nameserver(void);
  */
 
 int dns_foreach_nameserver(dns_callback_t callback, FAR void *arg);
+
+/* Resolve into caller-owned sockaddr_storage entries. *naddr is the entry
+ * capacity on input and number copied on success. Returns a negated errno;
+ * on failure *naddr is zero. Existing dns_query/getaddrinfo are unchanged.
+ */
+
+int dns_query_controlled(FAR const char *hostname,
+                         FAR struct sockaddr_storage *addr,
+                         FAR int *naddr,
+                         FAR const struct dns_query_control_s *control);
 
 /**
  * @brief

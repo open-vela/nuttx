@@ -149,11 +149,21 @@ static uint32_t tcp_poll_eventhandler(FAR struct net_driver_s *dev,
        * this callback to be inserted after psock_send_eventhandler.
        */
 
-      else if (psock_tcp_cansend(info->conn) >= 0
+      /* A socket that has not completed (or lost) its connection must not
+       * report POLLOUT: psock_tcp_cansend() knows only about send buffer
+       * space, and in the unbuffered configuration always returns OK.
+       * Reporting writable for a SYN_SENT socket makes a poll(POLLOUT)
+       * caller proceed to send(), which fails with ENOTCONN while the
+       * handshake is still pending.  Mirrors the immediate POLLWRNORM check
+       * in tcp_pollsetup() and the _SS_ISCONNECTED guard in the send path.
+       */
+
+      else if (_SS_ISCONNECTED(info->conn->sconn.s_flags)
+               && (psock_tcp_cansend(info->conn) >= 0
 #if defined(CONFIG_NET_TCP_WRITE_BUFFERS)
-               || (flags & TCP_ACKDATA) != 0
+                   || (flags & TCP_ACKDATA) != 0
 #endif
-              )
+                  ))
         {
           eventset |= POLLOUT;
         }

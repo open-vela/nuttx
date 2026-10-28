@@ -46,6 +46,9 @@
 #include <errno.h>
 #include <debug.h>
 #include <assert.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdint.h>
 
 #include <arpa/inet.h>
 
@@ -86,6 +89,7 @@ struct dns_query_s
   FAR union dns_addr_u *addr;     /* Location to return host address */
   FAR int *naddr;                 /* Number of returned addresses */
   uint32_t ttl;                   /* Time to Live, unit:s */
+  FAR const struct dns_query_control_s *control;
 };
 
 /* Query info to check response against. */
@@ -110,6 +114,113 @@ struct dns_query_data_s
  * Private Functions
  ****************************************************************************/
 
+static int dns_control_budget(
+  FAR const struct dns_query_control_s *control)
+{
+  int remaining;
+
+  if (control == NULL)
+    {
+      return INT32_MAX;
+    }
+
+  remaining = control->budget_ms(control->arg);
+  return remaining == 0 ? -ETIMEDOUT : remaining;
+}
+
+static int dns_wait_io(int sd, short events,
+                       FAR const struct dns_query_control_s *control)
+{
+  struct pollfd pfd =
+  {
+    .fd      = sd,
+    .events  = events,
+    .revents = 0
+  };
+
+  int remaining;
+  int ret;
+
+  if (control == NULL)
+    {
+      return OK;
+    }
+
+  for (; ; )
+    {
+      remaining = dns_control_budget(control);
+      if (remaining < 0)
+        {
+          set_errno(-remaining);
+          return ERROR;
+        }
+
+      ret = poll(&pfd, 1, MIN(remaining, 100));
+      if (ret > 0)
+        {
+          if ((pfd.revents & POLLNVAL) != 0)
+            {
+              set_errno(EBADF);
+              return ERROR;
+            }
+
+          return OK;
+        }
+
+      if (ret < 0 && get_errno() != EINTR)
+        {
+          return ERROR;
+        }
+    }
+}
+
+static int dns_bind_controlled(sa_family_t family, bool stream,
+                              FAR const struct dns_query_control_s *control)
+{
+  int sd = dns_bind(family, stream);
+  int flags;
+  int error;
+
+  if (sd >= 0 && control != NULL)
+    {
+      flags = fcntl(sd, F_GETFL, 0);
+      if (flags < 0 || fcntl(sd, F_SETFL, flags | O_NONBLOCK) < 0)
+        {
+          error = get_errno();
+          close(sd);
+          return -error;
+        }
+    }
+
+  return sd;
+}
+
+static void dns_close_controlled(int sd, bool stream, int result,
+                    FAR const struct dns_query_control_s *control)
+{
+#ifdef CONFIG_NET_SOLINGER
+  if (control != NULL && stream && result < 0)
+    {
+      struct linger abort =
+      {
+        .l_onoff  = 1,
+        .l_linger = 0
+      };
+
+      /* A partial controlled reply is discarded. Abort this socket only;
+       * retaining FIN-wait connections can exhaust a fixed TCP pool.
+       */
+
+      setsockopt(sd, SOL_SOCKET, SO_LINGER, &abort, sizeof(abort));
+    }
+#else
+  (void)stream;
+  (void)result;
+  (void)control;
+#endif
+  close(sd);
+}
+
 /****************************************************************************
  * Name: stream_send
  *
@@ -124,13 +235,32 @@ struct dns_query_data_s
  *
  ****************************************************************************/
 
-static ssize_t stream_send(int fd, FAR const void *buf, size_t len)
+static ssize_t stream_send(int fd, FAR const void *buf, size_t len,
+                           FAR const struct dns_query_control_s *control)
 {
   ssize_t total = 0;
 
   while (len > 0)
     {
-      ssize_t ret = send(fd, buf, len, 0);
+      ssize_t ret;
+      if (dns_wait_io(fd, POLLOUT, control) < 0)
+        {
+          return -1;
+        }
+
+      ret = send(fd, buf, len, 0);
+      if (ret == 0)
+        {
+          set_errno(EPIPE);
+          return -1;
+        }
+
+      if (ret < 0 && control != NULL &&
+          (get_errno() == EAGAIN || get_errno() == EINTR))
+        {
+          continue;
+        }
+
       if (ret == -1)
         {
           if (total == 0)
@@ -140,7 +270,7 @@ static ssize_t stream_send(int fd, FAR const void *buf, size_t len)
           break;
         }
 
-      buf = (FAR const uint8_t *)buf + len;
+      buf = (FAR const uint8_t *)buf + ret;
       len -= ret;
       total += ret;
     }
@@ -162,13 +292,26 @@ static ssize_t stream_send(int fd, FAR const void *buf, size_t len)
  *
  ****************************************************************************/
 
-static ssize_t stream_recv(int fd, FAR void *buf, size_t len)
+static ssize_t stream_recv(int fd, FAR void *buf, size_t len,
+                           FAR const struct dns_query_control_s *control)
 {
   ssize_t total = 0;
 
   while (len > 0)
     {
-      ssize_t ret = recv(fd, buf, len, 0);
+      ssize_t ret;
+      if (dns_wait_io(fd, POLLIN, control) < 0)
+        {
+          return -1;
+        }
+
+      ret = recv(fd, buf, len, 0);
+      if (ret < 0 && control != NULL &&
+          (get_errno() == EAGAIN || get_errno() == EINTR))
+        {
+          continue;
+        }
+
       if (ret == 0)
         {
           /* the peer closed the connection */
@@ -186,7 +329,7 @@ static ssize_t stream_recv(int fd, FAR void *buf, size_t len)
           break;
         }
 
-      buf = (FAR uint8_t *)buf + len;
+      buf = (FAR uint8_t *)buf + ret;
       len -= ret;
       total += ret;
     }
@@ -208,7 +351,8 @@ static ssize_t stream_recv(int fd, FAR void *buf, size_t len)
  *
  ****************************************************************************/
 
-static ssize_t stream_send_record(int fd, FAR const void *buf, size_t len)
+static ssize_t stream_send_record(int fd, FAR const void *buf, size_t len,
+                         FAR const struct dns_query_control_s *control)
 {
   ssize_t ret;
   uint8_t reclen[2];
@@ -222,13 +366,13 @@ static ssize_t stream_send_record(int fd, FAR const void *buf, size_t len)
 
   reclen[0] = (uint8_t)(len >> 8);
   reclen[1] = (uint8_t)len;
-  ret = stream_send(fd, reclen, sizeof(reclen));
-  if (ret < sizeof(reclen))
+  ret = stream_send(fd, reclen, sizeof(reclen), control);
+  if (ret < (ssize_t)sizeof(reclen))
     {
       return -1;
     }
 
-  return stream_send(fd, buf, len);
+  return stream_send(fd, buf, len, control);
 }
 
 /****************************************************************************
@@ -245,7 +389,8 @@ static ssize_t stream_send_record(int fd, FAR const void *buf, size_t len)
  *
  ****************************************************************************/
 
-static ssize_t stream_recv_record(int fd, FAR void *buf, size_t len)
+static ssize_t stream_recv_record(int fd, FAR void *buf, size_t len,
+                         FAR const struct dns_query_control_s *control)
 {
   size_t rlen;
   ssize_t ret;
@@ -258,8 +403,8 @@ static ssize_t stream_recv_record(int fd, FAR void *buf, size_t len)
    * > gives the message length, excluding the two byte length field.
    */
 
-  ret = stream_recv(fd, reclen, sizeof(reclen));
-  if (ret < sizeof(reclen))
+  ret = stream_recv(fd, reclen, sizeof(reclen), control);
+  if (ret < (ssize_t)sizeof(reclen))
     {
       if (ret >= 0)
         {
@@ -279,7 +424,7 @@ static ssize_t stream_recv_record(int fd, FAR void *buf, size_t len)
       return -1;
     }
 
-  ret = stream_recv(fd, buf, rlen);
+  ret = stream_recv(fd, buf, rlen, control);
   if (ret != rlen)
     {
       if (ret >= 0)
@@ -384,7 +529,8 @@ static int dns_send_query(int sd, FAR const char *name,
                           FAR union dns_addr_u *uaddr, uint16_t rectype,
                           FAR struct dns_query_info_s *qinfo,
                           FAR uint8_t *buffer,
-                          bool stream)
+                          bool stream,
+                          FAR const struct dns_query_control_s *control)
 {
   FAR struct dns_header_s *hdr;
   FAR uint8_t *dest;
@@ -481,6 +627,22 @@ static int dns_send_query(int sd, FAR const char *name,
     }
 
   ret = connect(sd, &uaddr->addr, addrlen);
+  if (ret < 0 && control != NULL && get_errno() == EINPROGRESS)
+    {
+      int error;
+      socklen_t errorlen = sizeof(error);
+      ret = dns_wait_io(sd, POLLOUT, control);
+      if (ret >= 0)
+        {
+          ret = getsockopt(sd, SOL_SOCKET, SO_ERROR, &error, &errorlen);
+          if (ret == 0 && error != 0)
+            {
+              set_errno(error);
+              ret = -1;
+            }
+        }
+    }
+
   if (ret < 0)
     {
       ret = -get_errno();
@@ -490,11 +652,18 @@ static int dns_send_query(int sd, FAR const char *name,
 
   if (stream)
     {
-      ret = stream_send_record(sd, buffer, dest - buffer);
+      ret = stream_send_record(sd, buffer, dest - buffer, control);
     }
   else
     {
-      ret = send(sd, buffer, dest - buffer, 0);
+      do
+        {
+          ret = dns_wait_io(sd, POLLOUT, control);
+          if (ret < 0) break;
+          ret = send(sd, buffer, dest - buffer, 0);
+        }
+      while (control != NULL && ret < 0 &&
+             (get_errno() == EAGAIN || get_errno() == EINTR));
     }
 
   if (ret < 0)
@@ -522,7 +691,8 @@ static int dns_send_query(int sd, FAR const char *name,
 static int dns_recv_response(int sd, FAR union dns_addr_u *addr, int naddr,
                              FAR struct dns_query_info_s *qinfo,
                              FAR uint32_t *ttl, FAR uint8_t *buffer,
-                             bool stream, bool *should_try_stream)
+                             bool stream, bool *should_try_stream,
+                             FAR const struct dns_query_control_s *control)
 {
   FAR uint8_t *nameptr;
   FAR uint8_t *namestart;
@@ -545,11 +715,18 @@ static int dns_recv_response(int sd, FAR union dns_addr_u *addr, int naddr,
 
   if (stream)
     {
-      ret = stream_recv_record(sd, buffer, RECV_BUFFER_SIZE);
+      ret = stream_recv_record(sd, buffer, RECV_BUFFER_SIZE, control);
     }
   else
     {
-      ret = recv(sd, buffer, RECV_BUFFER_SIZE, 0);
+      do
+        {
+          ret = dns_wait_io(sd, POLLIN, control);
+          if (ret < 0) break;
+          ret = recv(sd, buffer, RECV_BUFFER_SIZE, 0);
+        }
+      while (control != NULL && ret < 0 &&
+             (get_errno() == EAGAIN || get_errno() == EINTR));
     }
 
   if (ret < 0)
@@ -862,12 +1039,19 @@ static int dns_query_callback(FAR void *arg, FAR struct sockaddr *addr,
       bool should_try_stream;
 
 try_stream:
+      ret = dns_control_budget(query->control);
+      if (ret < 0)
+        {
+          query->result = ret;
+          return ret;
+        }
+
 #ifdef CONFIG_NET_IPv6
       if (dns_is_queryfamily(AF_INET6))
         {
           /* Send the IPv6 query */
 
-          sd = dns_bind(addr->sa_family, stream);
+          sd = dns_bind_controlled(addr->sa_family, stream, query->control);
           if (sd < 0)
             {
               query->result = sd;
@@ -877,7 +1061,7 @@ try_stream:
           ret = dns_send_query(sd, query->hostname,
                                (FAR union dns_addr_u *)addr,
                                DNS_RECTYPE_AAAA, &qdata->qinfo,
-                               qdata->buffer, stream);
+                               qdata->buffer, stream, query->control);
           if (ret < 0)
             {
               dns_query_error("ERROR: IPv6 dns_send_query failed",
@@ -891,9 +1075,9 @@ try_stream:
               should_try_stream = false;
               ret = dns_recv_response(sd, &query->addr[next],
                                       CONFIG_NETDB_MAX_IPv6ADDR,
-                                      &qdata->qinfo,
-                                      &query->ttl, qdata->buffer,
-                                      stream, &should_try_stream);
+                                      &qdata->qinfo, &query->ttl,
+                                      qdata->buffer, stream,
+                                      &should_try_stream, query->control);
               if (ret >= 0)
                 {
                   next += ret;
@@ -902,6 +1086,7 @@ try_stream:
                 {
                   if (!stream && should_try_stream)
                     {
+                      dns_close_controlled(sd, stream, ret, query->control);
                       stream = true;
                       goto try_stream; /* Don't consume retry count */
                     }
@@ -912,7 +1097,7 @@ try_stream:
                 }
             }
 
-          close(sd);
+          dns_close_controlled(sd, stream, ret, query->control);
         }
 #endif
 
@@ -921,7 +1106,7 @@ try_stream:
         {
           /* Send the IPv4 query */
 
-          sd = dns_bind(addr->sa_family, stream);
+          sd = dns_bind_controlled(addr->sa_family, stream, query->control);
           if (sd < 0)
             {
               query->result = sd;
@@ -931,7 +1116,7 @@ try_stream:
           ret = dns_send_query(sd, query->hostname,
                                (FAR union dns_addr_u *)addr,
                                DNS_RECTYPE_A, &qdata->qinfo, qdata->buffer,
-                               stream);
+                               stream, query->control);
           if (ret < 0)
             {
               dns_query_error("ERROR: IPv4 dns_send_query failed",
@@ -950,9 +1135,9 @@ try_stream:
               should_try_stream = false;
               ret = dns_recv_response(sd, &query->addr[next],
                                       CONFIG_NETDB_MAX_IPv4ADDR,
-                                      &qdata->qinfo,
-                                      &query->ttl, qdata->buffer,
-                                      stream, &should_try_stream);
+                                      &qdata->qinfo, &query->ttl,
+                                      qdata->buffer, stream,
+                                      &should_try_stream, query->control);
               if (ret >= 0)
                 {
                   next += ret;
@@ -961,6 +1146,7 @@ try_stream:
                 {
                   if (!stream && should_try_stream)
                     {
+                      dns_close_controlled(sd, stream, ret, query->control);
                       stream = true;
                       goto try_stream; /* Don't consume retry count */
                     }
@@ -971,7 +1157,7 @@ try_stream:
                 }
             }
 
-          close(sd);
+          dns_close_controlled(sd, stream, ret, query->control);
         }
 #endif /* CONFIG_NET_IPv4 */
 
@@ -980,7 +1166,12 @@ try_stream:
 #if CONFIG_NETDB_DNSCLIENT_ENTRIES > 0
           /* Save the answer in the DNS cache */
 
-          dns_save_answer(query->hostname, query->addr, next, query->ttl);
+          if (query->control == NULL || query->control->server == NULL)
+            {
+              dns_save_answer(query->hostname, query->addr, next,
+                              query->ttl);
+            }
+
 #endif
           /* Return 1 to indicate to (1) stop the traversal, and (2)
            * indicate that the address was found.
@@ -1022,8 +1213,10 @@ try_stream:
  *
  ****************************************************************************/
 
-int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
-              FAR int *naddr)
+static int dns_query_with_control(FAR const char *hostname,
+                                  FAR union dns_addr_u *addr,
+                                  FAR int *naddr,
+                    FAR const struct dns_query_control_s *control)
 {
   FAR struct dns_query_data_s *qdata = lib_malloc(sizeof(*qdata));
   int ret;
@@ -1035,6 +1228,7 @@ int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
 
   /* Set up the query info structure */
 
+  qdata->query.control = control;
   qdata->query.result   = -EADDRNOTAVAIL;
   qdata->query.hostname = hostname;
   qdata->query.addr     = addr;
@@ -1047,7 +1241,16 @@ int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
    * <0 - Some other failure (?, shouldn't happen)
    */
 
-  ret = dns_foreach_nameserver(dns_query_callback, qdata);
+  if (control != NULL && control->server != NULL)
+    {
+      ret = dns_query_callback(qdata, (FAR struct sockaddr *)control->server,
+                                control->serverlen);
+    }
+  else
+    {
+      ret = dns_foreach_nameserver(dns_query_callback, qdata);
+    }
+
   if (ret > 0)
     {
       /* The lookup was successful */
@@ -1063,5 +1266,77 @@ int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
 
   lib_free(qdata);
 
+  return ret;
+}
+
+int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
+              FAR int *naddr)
+{
+  return dns_query_with_control(hostname, addr, naddr, NULL);
+}
+
+int dns_query_controlled(FAR const char *hostname,
+                         FAR struct sockaddr_storage *addr,
+                         FAR int *naddr,
+                         FAR const struct dns_query_control_s *control)
+{
+  FAR union dns_addr_u *resolved;
+  int capacity = 0;
+  int count;
+  int ret;
+  int i;
+
+  count = naddr != NULL ? *naddr : 0;
+  if (naddr != NULL) *naddr = 0;
+  if (hostname == NULL || addr == NULL || naddr == NULL || count <= 0 ||
+      hostname[0] == '\0' ||
+      strlen(hostname) > CONFIG_NETDB_DNSCLIENT_NAMESIZE ||
+      control == NULL || control->budget_ms == NULL)
+    {
+      return -EINVAL;
+    }
+
+  if (control->server != NULL &&
+      !((control->server->sa_family == AF_INET &&
+         control->serverlen >= sizeof(struct sockaddr_in)) ||
+        (control->server->sa_family == AF_INET6 &&
+         control->serverlen >= sizeof(struct sockaddr_in6))))
+    {
+      return -EINVAL;
+    }
+
+  ret = dns_control_budget(control);
+  if (ret < 0) return ret;
+#ifdef CONFIG_NET_IPv4
+  capacity += CONFIG_NETDB_MAX_IPv4ADDR;
+#endif
+#ifdef CONFIG_NET_IPv6
+  capacity += CONFIG_NETDB_MAX_IPv6ADDR;
+#endif
+  resolved = lib_zalloc(capacity * sizeof(*resolved));
+  if (resolved == NULL) return -ENOMEM;
+#if CONFIG_NETDB_DNSCLIENT_ENTRIES > 0
+  ret = control->server == NULL
+          ? dns_find_answer(hostname, resolved, &capacity) : -ENOENT;
+  if (ret < 0)
+#endif
+    {
+      ret = dns_query_with_control(hostname, resolved, &capacity, control);
+    }
+
+  if (ret == OK && (ret = dns_control_budget(control)) > 0)
+    {
+      count = MIN(count, capacity);
+      for (i = 0; i < count; i++)
+        {
+          memset(&addr[i], 0, sizeof(addr[i]));
+          memcpy(&addr[i], &resolved[i], sizeof(resolved[i]));
+        }
+
+      *naddr = count;
+      ret = OK;
+    }
+
+  lib_free(resolved);
   return ret;
 }

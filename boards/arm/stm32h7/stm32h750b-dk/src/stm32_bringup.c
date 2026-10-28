@@ -53,7 +53,29 @@
 #  include <nuttx/serial/uart_rpmsg.h>
 #endif
 
+#ifdef CONFIG_INPUT_BUTTONS
+#  include <nuttx/input/buttons.h>
+#endif
+
+#ifdef CONFIG_I2S
+#  include <nuttx/audio/i2s.h>
+#endif
+
 #include "stm32_gpio.h"
+
+#ifdef CONFIG_STM32H7_SAI1_A
+#  include "stm32_sai.h"
+#  ifdef CONFIG_STM32H7_SAI_CAPTURE
+#    include "stm32_sai_capture.h"
+#  endif
+
+/* Set once by stm32_bringup() and served to the bring-up capture tool
+ * through the accessor below.  There is exactly one PDM microphone on the
+ * board.
+ */
+
+static FAR struct i2s_dev_s *g_pdm_i2s;
+#endif
 
 #include "stm32h750b-dk.h"
 
@@ -272,6 +294,22 @@ int stm32_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_AUDIO_WM8994
+  /* Register the audio output path: WM8994 -> SAI2 block A -> HPOUT1.
+   *
+   * This runs after the touch controller because both share I2C4; taking a
+   * second reference to a bus that is already up leaves the touch device
+   * untouched.  Failure is reported and does not abort bring-up: playback is
+   * not required for the acquisition and alarm paths to work.
+   */
+
+  ret = stm32_audio_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_audio_initialize failed: %d\n", ret);
+    }
+#endif
+
 #ifdef CONFIG_VIDEO_FB
   /* Initialize and register the framebuffer driver */
 
@@ -347,6 +385,19 @@ int stm32_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_INPUT_BUTTONS
+  /* Register the button driver as /dev/buttons.  Interrupts stay disarmed
+   * until a client opens the device and polls it, so this adds the pin and
+   * the device node only.
+   */
+
+  ret = btn_lower_initialize("/dev/buttons");
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: btn_lower_initialize() failed: %d\n", ret);
+    }
+#endif /* CONFIG_INPUT_BUTTONS */
+
 #ifdef HAVE_USBHOST
   /* Initialize USB host operation.  stm32_usbhost_initialize()
    * starts a thread will monitor for USB connection and
@@ -394,6 +445,36 @@ int stm32_bringup(void)
   stm32_configgpio(GPIO_ESP_RST);
 #endif
 
+#ifdef CONFIG_STM32H7_SAI1_A
+  /* Bring up the on-board PDM microphone path as a raw I2S capture
+   * device.
+   *
+   * SAI1 block A drives the microphone clock on PE5 (SAI1_CK2, AF2) and
+   * reads its bitstream on PE4 (SAI1_D2, AF2).  Those are the same two pins
+   * SAI4 uses for the same purpose at AF10, so this is a straight route
+   * choice rather than a wiring difference.
+   *
+   * SAI1 was chosen over SAI4 for this first bring-up because its data
+   * register sits in the D2 domain and is served by DMA1/DMA2, which can
+   * reach the ordinary heap.  SAI4 lives in D3 and can only be served by
+   * BDMA, whose buffers must come from SRAM4 and which depends on the
+   * experimental BDMA option.
+   *
+   * No sample rate callback is passed: PLL2 is programmed statically in
+   * board.h and the driver does not reprogram it at runtime.
+   */
+
+  g_pdm_i2s = stm32_sai_initialize(SAI1_BLOCK_A, NULL);
+  if (g_pdm_i2s == NULL)
+    {
+      syslog(LOG_ERR, "ERROR: stm32_sai_initialize(SAI1_A) failed\n");
+    }
+  else
+    {
+      syslog(LOG_INFO, "PDM capture device ready on SAI1 block A\n");
+    }
+#endif
+
 #ifdef HAVE_SDIO
   /* Initialize on-board eMMC (SDMMC1) and try FAT at /mnt/emmc.
    * First boot may lack a filesystem — mount failure is logged only;
@@ -429,3 +510,101 @@ int stm32_bringup(void)
 
   return OK;
 }
+
+#ifdef CONFIG_STM32H7_SAI1_A
+/****************************************************************************
+ * Name: stm32_sai_pdm_device
+ *
+ * Description:
+ *   Return the PDM capture device created above.  See the prototype in
+ *   board.h for why this accessor exists.
+ *
+ ****************************************************************************/
+
+FAR struct i2s_dev_s *stm32_sai_pdm_device(void)
+{
+  return g_pdm_i2s;
+}
+
+/****************************************************************************
+ * Name: stm32_pdm_staterecord
+ *
+ * Description:
+ *   Return the driver's end-of-transfer register snapshot.  See board.h.
+ *
+ ****************************************************************************/
+
+int stm32_pdm_staterecord(FAR uint32_t *regs, int nregs)
+{
+  if (g_pdm_i2s == NULL)
+    {
+      return -ENODEV;
+    }
+
+  return stm32_sai_staterecord(g_pdm_i2s, regs, nregs);
+}
+
+#ifdef CONFIG_STM32H7_SAI_CAPTURE
+/****************************************************************************
+ * Name: stm32_pdm_capture_start / stop / stats
+ *
+ * Description:
+ *   Board-level wrappers over the SAI continuous capture interface.  See
+ *   board.h; they exist so application code never includes the driver's
+ *   private header.
+ *
+ ****************************************************************************/
+
+int stm32_pdm_capture_start(uint32_t samplerate, FAR uint8_t *ring,
+                            size_t bytes, stm32_pdm_capture_cb_t cb,
+                            FAR void *arg)
+{
+  if (g_pdm_i2s == NULL)
+    {
+      return -ENODEV;
+    }
+
+  return stm32_sai_capture_start(g_pdm_i2s, samplerate, ring, bytes,
+                                (stm32_sai_capture_cb_t)cb, arg);
+}
+
+int stm32_pdm_capture_stop(unsigned int wait_ms)
+{
+  if (g_pdm_i2s == NULL)
+    {
+      return -ENODEV;
+    }
+
+  return stm32_sai_capture_stop(g_pdm_i2s, wait_ms);
+}
+
+void stm32_pdm_capture_stats(FAR struct stm32_pdm_capture_stats *out)
+{
+  struct stm32_sai_capture_stats tmp;
+
+  if (out == NULL)
+    {
+      return;
+    }
+
+  if (g_pdm_i2s == NULL)
+    {
+      memset(out, 0, sizeof(*out));
+      return;
+    }
+
+  stm32_sai_capture_stats(g_pdm_i2s, &tmp);
+  out->tailbytes     = tmp.tailbytes;
+  out->halves        = tmp.halves;
+  out->wraps         = tmp.wraps;
+  out->dropped       = tmp.dropped;
+  out->overruns      = tmp.overruns;
+  out->clockerrors   = tmp.clockerrors;
+  out->dmaerrors     = tmp.dmaerrors;
+  out->starts        = tmp.starts;
+  out->stops         = tmp.stops;
+  out->setup_failures = tmp.setup_failures;
+  out->busy          = tmp.busy;
+}
+#endif /* CONFIG_STM32H7_SAI_CAPTURE */
+#endif /* CONFIG_STM32H7_SAI1_A */

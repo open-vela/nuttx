@@ -2566,6 +2566,18 @@ void stm32_dmastop(DMA_HANDLE handle)
   g_dma_ops[controller].dma_disable(dmachan);
 }
 
+int stm32_dma_stream_status(DMA_HANDLE handle)
+{
+  DMA_CHANNEL dmachan = (DMA_CHANNEL)handle;
+
+  if (dmachan == NULL || (dmachan->ctrl != DMA1 && dmachan->ctrl != DMA2))
+    {
+      return -ENOSYS;
+    }
+
+  return (dmachan_getreg(dmachan, STM32_DMA_SCR_OFFSET) & DMA_SCR_EN) != 0;
+}
+
 /****************************************************************************
  * Name: stm32_dmaresidual
  *

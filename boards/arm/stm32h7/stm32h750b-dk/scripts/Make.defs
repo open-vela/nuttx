@@ -36,6 +36,16 @@ ARCHSCRIPT += $(BOARD_DIR)$(DELIM)scripts$(DELIM)$(LDSCRIPT)
 
 ARCHPICFLAGS = -fpic -msingle-pic-base -mpic-register=r10
 
+# ES0392 section 2.6.4: FMC does not support unaligned reads.  Heap
+# allocations can reside in SDRAM, so this applies to all C/C++ code,
+# including compiler-inlined memcpy and packed protocol field accesses.
+
+ifeq ($(CONFIG_STM32H7_FMC),y)
+  ifneq ($(filter y,$(CONFIG_ARCH_TOOLCHAIN_GCC) $(CONFIG_ARCH_TOOLCHAIN_CLANG)),)
+    ARCHCPUFLAGS += -mno-unaligned-access
+  endif
+endif
+
 CFLAGS := $(ARCHCFLAGS) $(ARCHOPTIMIZATION) $(ARCHCPUFLAGS) $(ARCHINCLUDES) $(ARCHDEFINES) $(EXTRAFLAGS)
 CPICFLAGS = $(ARCHPICFLAGS) $(CFLAGS)
 CXXFLAGS := $(ARCHCXXFLAGS) $(ARCHOPTIMIZATION) $(ARCHCPUFLAGS) $(ARCHXXINCLUDES) $(ARCHDEFINES) $(EXTRAFLAGS)
