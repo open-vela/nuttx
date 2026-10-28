@@ -85,8 +85,8 @@
  * polling rates.
  */
 
-#define POLL_MINDELAY  MSEC2TICK(50)
-#define POLL_MAXDELAY  MSEC2TICK(200)
+#define POLL_MINDELAY  MSEC2TICK(10)
+#define POLL_MAXDELAY  MSEC2TICK(20)
 #define POLL_INCREMENT MSEC2TICK(10)
 
 /****************************************************************************
