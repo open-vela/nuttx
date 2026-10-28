@@ -211,7 +211,7 @@
 
 #define LTDC_ISR_LIF                (1 << 0)  /* Bit 0:  Line Interrupt Flag */
 #define LTDC_ISR_FUIF               (1 << 1)  /* Bit 1:  FIFO Underrun Interrupt Flag */
-#define LTDC_IER_TERRIF             (1 << 2)  /* Bit 2:  Transfer Error Interrupt Flag */
+#define LTDC_ISR_TERRIF             (1 << 2)  /* Bit 2:  Transfer Error Interrupt Flag */
 #define LTDC_ISR_RRIF               (1 << 3)  /* Bit 3:  Register Reload Interrupt Flag */
 
 /* LTDC Interrupt Clear Register */
