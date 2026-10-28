@@ -27,6 +27,8 @@ MEMORY
 OUTPUT_ARCH(arm)
 EXTERN(_vectors)
 ENTRY(_stext)
+__vg_link_base = ORIGIN(flash);
+__vg_slot_letter = 0x41;
 SECTIONS
 {
     .text :
