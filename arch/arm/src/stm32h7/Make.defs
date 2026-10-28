@@ -25,6 +25,10 @@
 
 include armv7-m/Make.defs
 
+ifeq ($(CONFIG_STM32H7_RNG),y)
+CHIP_CSRCS += stm32_rng.c
+endif
+
 ifeq ($(CONFIG_STM32H7_PROGMEM),y)
 CHIP_CSRCS += stm32_flash.c
 endif

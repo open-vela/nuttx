@@ -780,6 +780,18 @@ config STM32H7_ADC3
 	default n
 	select STM32H7_ADC
 
+config STM32H7_RNG
+	bool "Bounded hardware RNG (STM32H750XB)"
+	default n
+	depends on ARCH_CHIP_STM32H750B
+	select ARCH_HAVE_RNG
+	---help---
+		Provide the H750 hardware random source through /dev/random and
+		architecture /dev/urandom. HSI48 readiness, reads and mutex waits
+		are bounded. Clock, seed or consecutive-word health errors stop
+		output until reset; there is no software PRNG fallback. This path
+		uses HSI48 and requires HCLK <= 1.536 GHz (RNG clock > HCLK/32).
+
 config STM32H7_CRC
 	bool "CRC"
 	default n
