@@ -496,6 +496,10 @@
 
 /* Alternate function pin selections ****************************************/
 
+/* USART2 - ESP-01 (VelaGuard expansion board, STMod P1-2/3) */
+#define GPIO_USART2_RX   (GPIO_USART2_RX_2 | GPIO_SPEED_100MHz)  /* PD6 */
+#define GPIO_USART2_TX   (GPIO_USART2_TX_2 | GPIO_SPEED_100MHz)  /* PD5 */
+
 /* USART3 (Nucleo Virtual Console) */
 
 #define GPIO_USART3_RX   (GPIO_USART3_RX_1 | GPIO_SPEED_100MHz)  /* PB11 */
@@ -505,6 +509,9 @@
 
 #define GPIO_UART7_RX   (GPIO_UART7_RX_1 | GPIO_SPEED_100MHz)  /* PA8 */
 #define GPIO_UART7_TX   (GPIO_UART7_TX_2 | GPIO_SPEED_100MHz)  /* PB4 */
+
+/* TIM15 - PWM (VelaGuard D01 / passive buzzer) */
+#define GPIO_TIM15_CH2OUT (GPIO_TIM15_CH2OUT_2 | GPIO_SPEED_50MHz)  /* PE6 */
 
 /* I2C4 - Used by Touchscreen and Audio Codec */
 
@@ -544,6 +551,19 @@
 #define GPIO_LTDC_HSYNC  (GPIO_LTDC_HSYNC_3 | GPIO_SPEED_100MHz)
 #define GPIO_LTDC_DE     (GPIO_LTDC_DE_3 | GPIO_SPEED_100MHz)
 #define GPIO_LTDC_CLK    (GPIO_LTDC_CLK_3 | GPIO_SPEED_100MHz)
+
+/* RS485 direction (VelaGuard expansion, Arduino D4 / PK1) */
+#define GPIO_UART7_RS485_DIR (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_CLEAR|\
+                              GPIO_PORTK|GPIO_PIN1) /* PK1 */
+
+/* ESP-01S control (STMod P1-14 / P1-12) */
+#define GPIO_ESP_EN (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_SET|\
+                              GPIO_PORTA|GPIO_PIN3) /* PA3 */
+#define GPIO_ESP_RST (GPIO_OUTPUT|GPIO_PUSHPULL|\
+                              GPIO_SPEED_100MHz|GPIO_OUTPUT_SET|\
+                              GPIO_PORTH|GPIO_PIN10) /* PH10 */
 
 /* DMA **********************************************************************/
 

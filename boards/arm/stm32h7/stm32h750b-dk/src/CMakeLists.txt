@@ -50,6 +50,10 @@ if(CONFIG_STM32H7_LTDC)
   list(APPEND SRCS stm32_lcd.c)
 endif()
 
+if(CONFIG_PWM)
+  list(APPEND SRCS stm32_pwm.c)
+endif()
+
 target_sources(board PRIVATE ${SRCS})
 
 if(CONFIG_ARCH_CHIP_STM32H7_CORTEXM7)
