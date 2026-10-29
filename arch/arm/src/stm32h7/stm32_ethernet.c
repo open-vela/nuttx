@@ -3035,7 +3035,17 @@ static int stm32_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
         {
           struct mii_ioctl_data_s *req =
             (struct mii_ioctl_data_s *)((uintptr_t)arg);
-          ret = stm32_phyread(req->phy_id, req->reg_num, &req->val_out);
+          /* netdev_ioctl holds d_lock. Never block on net_lock here:
+           * TX work takes net_lock before d_lock. Match PHY poll without
+           * introducing that reverse blocking edge.
+           */
+
+          ret = net_trylock();
+          if (ret >= 0)
+            {
+              ret = stm32_phyread(req->phy_id, req->reg_num, &req->val_out);
+              net_unlock();
+            }
         }
         break;
 
@@ -3043,8 +3053,13 @@ static int stm32_ioctl(struct net_driver_s *dev, int cmd, unsigned long arg)
         {
           struct mii_ioctl_data_s *req =
             (struct mii_ioctl_data_s *)((uintptr_t)arg);
-          ret = stm32_phywrite(req->phy_id, req->reg_num, req->val_in,
-                               0xffff);
+          ret = net_trylock();
+          if (ret >= 0)
+            {
+              ret = stm32_phywrite(req->phy_id, req->reg_num, req->val_in,
+                                   0xffff);
+              net_unlock();
+            }
         }
         break;
 
