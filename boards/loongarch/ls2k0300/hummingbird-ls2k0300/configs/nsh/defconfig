@@ -43,6 +43,7 @@ CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_EXAMPLES_LS_LVGL=y
 CONFIG_LS2K0300_I2C0=y
 CONFIG_LS2K0300_I2C1=y
+CONFIG_LS2K0300_I2C2=y
 CONFIG_LS2K0300_I2C=y
 CONFIG_I2C_DRIVER=y
 CONFIG_LS2K0300_PINCTRL=y
@@ -170,3 +171,47 @@ CONFIG_MBR_PARTITION=y
 # （fs_partition.c/driver.h 用 CONFIG_MTD 守卫，属于上游不一致），故需开启。
 CONFIG_MTD_PARTITION=y
 
+# ── ES8388 audio: LS2K0300 I2S controller + LSIA DMA + codec ──
+CONFIG_AUDIO=y
+CONFIG_DRIVERS_AUDIO=y
+CONFIG_AUDIO_ES8388=y
+# The codec drives the 3.5mm headphone jack (LOUT1/ROUT1) and the
+# microphone connected to the same jack (LIN1).
+CONFIG_ES8388_OUTPUT_CHANNEL_LINE1=y
+CONFIG_ES8388_INPUT_CHANNEL_LINE1=y
+# Deep audio buffering: each 8KB buffer only covers 46ms of 48kHz stereo,
+# and writing to the SPI flash filesystem stalls longer than that, which
+# starves the DMA and leaves audible gaps in recordings.  32KB buffers
+# (186ms) with 3 in flight give ~560ms of cushion.
+CONFIG_ES8388_BUFFER_SIZE=32768
+CONFIG_ES8388_NUM_BUFFERS=8
+CONFIG_ES8388_INFLIGHT=3
+# Microphone preamp in dB (3dB steps, 0..24).  At 24 the captured speech
+# peaks around 30500 of 32767 - loud but not clipping - and the
+# recognizer needs that level: at 12-14 the recording comes back an order
+# of magnitude quieter (mean_abs 50 against 640) and the ASR answers
+# "no text recognized".  The "crackling" heard at this gain was not
+# clipping, it was corrupted data.
+CONFIG_ES8388_MIC_GAIN=24
+# The default 2048 is not enough: this thread runs the whole codec
+# register sequence through syslog (see DEBUG_AUDIO_INFO below), and a
+# second recording overflowed the stack and corrupted a return address.
+CONFIG_ES8388_WORKER_STACKSIZE=8192
+CONFIG_I2S=y
+CONFIG_LS2K0300_LSIA_DMA=y
+CONFIG_LS2K0300_I2S=y
+# Audio debug output: reports the I2S clock configuration and the codec
+# register transfers.  Only errors stay on: INFO logs every register write
+# and every buffer hand-off, which at 48kHz is a constant stream of serial
+# output competing with the audio path.
+CONFIG_DEBUG_AUDIO=y
+CONFIG_DEBUG_AUDIO_ERROR=y
+
+# ── audio test tools ──
+CONFIG_SYSTEM_NXPLAYER=y
+CONFIG_NXPLAYER_DEFAULT_MEDIADIR="/mnt"
+CONFIG_NXPLAYER_MAINTHREAD_STACKSIZE=4096
+CONFIG_NXPLAYER_PLAYTHREAD_STACKSIZE=4096
+CONFIG_SYSTEM_NXRECORDER=y
+CONFIG_NXRECORDER_MAINTHREAD_STACKSIZE=4096
+CONFIG_NXRECORDER_RECORDTHREAD_STACKSIZE=4096

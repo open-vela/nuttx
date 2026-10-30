@@ -44,6 +44,9 @@
 #include <nuttx/mtd/mtd.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/video/fb.h>
+#include <nuttx/audio/audio.h>
+#include <nuttx/audio/i2s.h>
+#include <nuttx/audio/es8388.h>
 #include <nuttx/sdio.h>
 #include <nuttx/fs/ioctl.h>
 #include <nuttx/fs/partition.h>
@@ -102,8 +105,114 @@ extern void ls2k0300_dc_show_test_pattern(void);
 extern int ls2k0300_ethernet_initialize(void);
 #endif
 
+#ifdef CONFIG_LS2K0300_I2S
+extern struct i2s_dev_s *ls2k0300_i2s_initialize(void);
+#endif
+
 #ifdef CONFIG_LS2K0300_SDIO
 extern FAR struct sdio_dev_s *ls2k0300_sdio_initialize(void);
+#endif
+
+/* ES8388 codec.  The codec is on I2C2 (GPIO52/53) at address 0x11.  Its
+ * analog output drives the 3.5mm headphone jack and its analog input is
+ * fed by the microphone connected to the same jack.
+ */
+
+#define LS2K0300_ES8388_I2C_PORT    2
+#define LS2K0300_ES8388_I2C_ADDR    0x11
+#define LS2K0300_ES8388_I2C_FREQ    100000
+
+#ifdef CONFIG_LS2K0300_I2S
+static struct i2c_master_s *g_i2c2;
+#endif
+
+#if defined(CONFIG_LS2K0300_I2S) && defined(CONFIG_AUDIO_ES8388)
+static struct es8388_lower_s g_es8388_lower;
+#endif
+
+#if defined(CONFIG_LS2K0300_I2S) && defined(CONFIG_AUDIO_ES8388)
+/****************************************************************************
+ * Name: ls2k0300_audio_initialize
+ *
+ * Description:
+ *   Initialize the I2S controller and the ES8388 codec and register the
+ *   playback and capture devices as /dev/audio/pcm0p and
+ *   /dev/audio/pcm0c.
+ *
+ * Returned Value:
+ *   OK on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+static int ls2k0300_audio_initialize(void)
+{
+  FAR struct audio_lowerhalf_s *es8388;
+  FAR struct i2s_dev_s *i2s;
+  int ret;
+
+  /* Get the I2C bus that carries the codec.  The instance is shared with
+   * the board I2C2 driver.
+   */
+
+  if (g_i2c2 == NULL)
+    {
+      g_i2c2 = ls2k0300_i2c_initialize(LS2K0300_ES8388_I2C_PORT);
+    }
+
+  if (g_i2c2 == NULL)
+    {
+      serr("ERROR: Failed to initialize I2C%d\n",
+           LS2K0300_ES8388_I2C_PORT);
+      return -ENODEV;
+    }
+
+  /* Get the I2S interface that carries the audio data */
+
+  i2s = ls2k0300_i2s_initialize();
+  if (i2s == NULL)
+    {
+      serr("ERROR: Failed to initialize the I2S controller\n");
+      return -ENODEV;
+    }
+
+  g_es8388_lower.address = LS2K0300_ES8388_I2C_ADDR;
+  g_es8388_lower.frequency = LS2K0300_ES8388_I2C_FREQ;
+
+  /* The ES8388 driver is a complete audio lower half: it configures the
+   * codec over I2C and moves the audio data through the I2S interface.
+   */
+
+  es8388 = es8388_initialize(g_i2c2, i2s, &g_es8388_lower);
+  if (es8388 == NULL)
+    {
+      serr("ERROR: Failed to initialize the ES8388\n");
+      return -ENODEV;
+    }
+
+  ret = audio_register("pcm0p", es8388);
+  if (ret < 0)
+    {
+      serr("ERROR: Failed to register /dev/audio/pcm0p: %d\n", ret);
+      return ret;
+    }
+
+  es8388 = es8388_initialize(g_i2c2, i2s, &g_es8388_lower);
+  if (es8388 == NULL)
+    {
+      serr("ERROR: Failed to initialize the ES8388\n");
+      return -ENODEV;
+    }
+
+  ret = audio_register("pcm0c", es8388);
+  if (ret < 0)
+    {
+      serr("ERROR: Failed to register /dev/audio/pcm0c: %d\n", ret);
+      return ret;
+    }
+
+  _info("bringup: ES8388 registered as pcm0p/pcm0c\n");
+  return OK;
+}
 #endif
 
 #ifdef CONFIG_LS2K0300_SDIO
@@ -208,17 +317,28 @@ static void ls2k0300_sdio_mount(void)
 
 void ls2k0300_hardware_init(void)
 {
-  /* GPIO50/51 配置为 I2C1 功能 (MAIN_FUNC = 0x3) */
+  /* GPIO50/51 configured for the I2C1 function (MAIN_FUNC = 0x3) */
 
   ls_pinmux_pin_setup(50, LS_PINMUX_MODE_AS_MAIN_FUNC);
   ls_pinmux_pin_setup(51, LS_PINMUX_MODE_AS_MAIN_FUNC);
 
-  /* GPIO48/49 配置为 I2C0 功能 (触摸屏 GT9147: SCL=48, SDA=49) */
+  /* GPIO48/49 configured for the I2C0 function (touch screen GT9147:
+   * SCL=48, SDA=49)
+   */
 
   ls_pinmux_pin_setup(48, LS_PINMUX_MODE_AS_MAIN_FUNC);
   ls_pinmux_pin_setup(49, LS_PINMUX_MODE_AS_MAIN_FUNC);
 
-  /* UART2 引脚复用配置
+#ifdef CONFIG_LS2K0300_I2C2
+  /* GPIO52/53 configured for the I2C2 function (ES8388 audio codec:
+   * SCL=52, SDA=53)
+   */
+
+  ls_pinmux_pin_setup(52, LS_PINMUX_MODE_AS_MAIN_FUNC);
+  ls_pinmux_pin_setup(53, LS_PINMUX_MODE_AS_MAIN_FUNC);
+#endif
+
+  /* UART2 pinmux configuration
    * GPIO44 (UART2_TX) -> MAIN_FUNC (0x3)
    * GPIO45 (UART2_RX) -> MAIN_FUNC (0x3)
    */
@@ -226,11 +346,12 @@ void ls2k0300_hardware_init(void)
   ls_pinmux_pin_setup(44, LS_PINMUX_MODE_AS_MAIN_FUNC);
   ls_pinmux_pin_setup(45, LS_PINMUX_MODE_AS_MAIN_FUNC);
 
-  /* SPI0 引脚复用配置
+  /* SPI0 pinmux configuration
    * GPIO64 (SPI0_CLK)  -> MAIN_FUNC (0x3)
    * GPIO65 (SPI0_MISO) -> MAIN_FUNC (0x3)
    * GPIO66 (SPI0_MOSI) -> MAIN_FUNC (0x3)
-   * GPIO67 (SPI0_CSN1) -> GPIO (0x0), 用于 MCP3204 软件片选
+   * GPIO67 (SPI0_CSN1) -> GPIO (0x0), used as the software chip select
+   *                       of the MCP3204
    */
 
   ls_pinmux_pin_setup(64, LS_PINMUX_MODE_AS_MAIN_FUNC);
@@ -238,23 +359,24 @@ void ls2k0300_hardware_init(void)
   ls_pinmux_pin_setup(66, LS_PINMUX_MODE_AS_MAIN_FUNC);
   ls_pinmux_pin_setup(67, LS_PINMUX_MODE_AS_GPIO);
 
-  /* SPI2 (SPIIO2) 引脚复用配置
-   * GPIO64 (SPI2_CLK)  -> MAIN_FUNC (0x3) — 与 SPI0 共用
-   * GPIO65 (SPI2_MISO) -> MAIN_FUNC (0x3) — 与 SPI0 共用
-   * GPIO66 (SPI2_MOSI) -> MAIN_FUNC (0x3) — 与 SPI0 共用
-   * GPIO85 (Flash CS)  -> GPIO (0x0), 软件片选
+  /* SPI2 (SPIIO2) pinmux configuration
+   * GPIO64 (SPI2_CLK)  -> MAIN_FUNC (0x3) - shared with SPI0
+   * GPIO65 (SPI2_MISO) -> MAIN_FUNC (0x3) - shared with SPI0
+   * GPIO66 (SPI2_MOSI) -> MAIN_FUNC (0x3) - shared with SPI0
+   * GPIO85 (Flash CS)  -> GPIO (0x0), software chip select
    */
 
 #ifdef CONFIG_LS2K0300_SDIO1
-  /* SDIO1 (SD 卡座)：GPIO100-105 -> MAIN_FUNC。
-   * 盲写不走 RMW：GPIO96-111 共用一字，读回不可靠。
-   * 值：GPIO96-99=GPIO，GPIO100-105=MAIN，保留位=0。
+  /* SDIO1 (SD card socket): GPIO100-105 -> MAIN_FUNC.
+   * Blind write instead of read-modify-write: GPIO96-111 share one word
+   * and reading it back is unreliable.
+   * Value: GPIO96-99=GPIO, GPIO100-105=MAIN, the reserved bits=0.
    */
 
   *(volatile uint32_t *)PHYS_TO_UNCACHED(0x160004a8) = 0x000fff00;
 #endif
 
-  /* PWM2 引脚复用：GPIO88 -> SECOND_FUNC (0x2)，硬件 PWM 输出 */
+  /* PWM2 pinmux: GPIO88 -> SECOND_FUNC (0x2), the hardware PWM output */
 
   ls_pinmux_pin_setup(88, LS_PINMUX_MODE_AS_SECOND_FUNC);
 
@@ -266,9 +388,24 @@ void ls2k0300_hardware_init(void)
 
   *(volatile uint32_t *)PHYS_TO_UNCACHED(0x160004a4) = 0xfffef3ff;
 
-  /* GPIO85 配置为输出，CS 默认高（空闲态）.
-   * 注意 DIR 寄存器极性：0=输出，1=输入
-   * （见 ls2k0300_gpio.c gpio_setpintype）.
+#ifdef CONFIG_LS2K0300_I2S
+  /* I2S pinmux: GPIO76(MCLK)/77(BCLK)/78(LR)/79(DI) -> MAIN_FUNC.
+   * GPIO80(DO) has already been set to MAIN_FUNC by the GPIO_CFG5 blind
+   * write above.
+   *
+   * GPIO_CFG4 covers GPIO64-79: GPIO64-66 are SPI0 (MAIN_FUNC), GPIO67 is
+   * the software chip select (GPIO), GPIO68-75 are unused (they keep the
+   * GPIO mode of the reset default).
+   * Like GPIO_CFG5 this is a blind write that does not rely on reading
+   * the register back.
+   */
+
+  *(volatile uint32_t *)PHYS_TO_UNCACHED(0x160004a0) = 0xff00003f;
+#endif
+
+  /* GPIO85 configured as an output, the CS is high by default (idle).
+   * Note the polarity of the DIR register: 0=output, 1=input
+   * (see gpio_setpintype in ls2k0300_gpio.c).
    */
 
   writeb(0, (volatile void *)(PHYS_TO_UNCACHED(LS2K0300_GPIO_BASE) + 0x800 + 85));  /* DIR=0 → OUTPUT */
@@ -355,6 +492,10 @@ int ls2k0300_bringup(void)
       FAR struct i2c_master_s *i2c = ls2k0300_i2c_initialize(2);
       if (i2c != NULL)
         {
+#ifdef CONFIG_LS2K0300_I2S
+          /* The audio codec shares this bus */
+          g_i2c2 = i2c;
+#endif
           ret = i2c_register(i2c, 2);
           if (ret < 0)
             {
@@ -585,6 +726,15 @@ int ls2k0300_bringup(void)
   if (ret < 0)
     {
       serr("ERROR: ls2k0300_ethernet_initialize failed: %d\n", ret);
+    }
+#endif
+
+#if defined(CONFIG_LS2K0300_I2S) && defined(CONFIG_AUDIO_ES8388)
+  _info("bringup: I2S/ES8388\n");
+  ret = ls2k0300_audio_initialize();
+  if (ret < 0)
+    {
+      serr("ERROR: ls2k0300_audio_initialize failed: %d\n", ret);
     }
 #endif
 

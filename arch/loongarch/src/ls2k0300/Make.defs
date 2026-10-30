@@ -80,15 +80,23 @@ ifeq ($(CONFIG_LS2K0300_ETHERNET),y)
 CHIP_CSRCS += ls2k0300_gmac.c ls2k0300_ethernet.c
 endif
 
+ifeq ($(CONFIG_LS2K0300_LSIA_DMA),y)
+CHIP_CSRCS += ls2k0300_lsia_dma.c
+endif
+
+ifeq ($(CONFIG_LS2K0300_I2S),y)
+CHIP_CSRCS += ls2k0300_i2s.c
+endif
+
 ifeq ($(CONFIG_TIMER),y)
 CHIP_CSRCS += ls2k0300_timerisr.c
 endif
 
 CHIP_ASRCS  = ls2k0300_head.S
 
-# The D-cache maintenance helper is shared by the drivers that use DMA
+# The D-cache maintenance helpers are shared by the drivers that use DMA
 
-ifneq ($(filter y,$(CONFIG_LS2K0300_ETHERNET) $(CONFIG_LS2K0300_SDIO)),)
+ifneq ($(filter y,$(CONFIG_LS2K0300_ETHERNET) $(CONFIG_LS2K0300_I2S) $(CONFIG_LS2K0300_SDIO)),)
 CHIP_ASRCS += ls2k0300_dma_cache.S
 endif
 

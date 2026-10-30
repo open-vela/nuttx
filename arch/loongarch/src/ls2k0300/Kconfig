@@ -316,6 +316,34 @@ config LS2K0300_DC
 		LCD panels driven from dvo0.  Registers /dev/fb0 through the
 		NuttX framebuffer character driver.
 
+config LS2K0300_LSIA_DMA
+	bool "LSIA DMA controller"
+	default n
+	---help---
+		Enable the LS2K0300 LSIA DMA controller driver.  The controller
+		is a general purpose DMA engine with eight channels that are
+		assigned to the on chip peripherals by the hardware.  It is
+		used by the I2S audio controller.
+
+config LS2K0300_I2S
+	bool "I2S controller"
+	default n
+	select LS2K0300_LSIA_DMA
+	depends on I2S
+	---help---
+		Enable the LS2K0300 I2S controller driver.  The controller
+		provides the I2S interface to the on board ES8388 audio codec.
+		The audio data is transferred by the LSIA DMA controller.
+
+config LS2K0300_I2S_REFCLK
+	int "I2S reference clock frequency (Hz)"
+	default 100000000
+	depends on LS2K0300_I2S
+	---help---
+		Frequency of the clock that feeds the I2S controller.  The
+		controller divides this clock to generate the master clock
+		(MCLK) that is supplied to the audio codec.
+
 config LS2K0300_ETHERNET
 	bool "Ethernet"
 	default n
@@ -324,7 +352,6 @@ config LS2K0300_ETHERNET
 	select NET_STATISTICS
 	---help---
 		Enable LS2K0300 Ethernet driver support
-
 if LS2K0300_ETHERNET
 
 config LS2K0300_ETHERNET0

@@ -227,7 +227,7 @@ uint8_t es8388_readreg(FAR struct es8388_dev_s *priv, uint8_t regaddr)
       msg[1].addr      = priv->lower->address;
       msg[1].flags     = I2C_M_READ;
       msg[1].buffer    = &data;
-      msg[1].length    = 12;
+      msg[1].length    = 1;
 
       /* Read the register data. The returned value is the number messages
        * completed.
@@ -1028,9 +1028,16 @@ static int es8388_configure(FAR struct audio_lowerhalf_s *dev,
         /* Verify that all of the requested values are supported */
 
         ret = -ERANGE;
-        if (caps->ac_channels != 1 && caps->ac_channels != 2)
+
+        /* The I2S path carries one packed stereo frame per 32 bit word and
+         * has no mono layout, so a one channel request would be recorded as
+         * interleaved data and read back at the wrong rate.  Reject it here
+         * rather than hand back a file that looks like mono but is not.
+         */
+
+        if (caps->ac_channels != 2)
           {
-            auderr("Unsupported number of channels: %d\n",
+            auderr("Unsupported number of channels: %d (stereo only)\n",
                    caps->ac_channels);
             break;
           }
@@ -1048,12 +1055,17 @@ static int es8388_configure(FAR struct audio_lowerhalf_s *dev,
 
         /* Save the current stream configuration */
 
+        es8388_audio_output(priv);
+        es8388_reset(priv);
+
+        /* Reset() restores the default stream parameters, so the
+         * requested configuration must be written after it.
+         */
+
         priv->samprate  = caps->ac_controls.hw[0];
         priv->nchannels = caps->ac_channels;
         priv->bpsamp    = caps->ac_controls.b[2];
 
-        es8388_audio_output(priv);
-        es8388_reset(priv);
         es8388_setsamplerate(priv);
         es8388_setbitspersample(priv);
 
@@ -1071,9 +1083,16 @@ static int es8388_configure(FAR struct audio_lowerhalf_s *dev,
         /* Verify that all of the requested values are supported */
 
         ret = -ERANGE;
-        if (caps->ac_channels != 1 && caps->ac_channels != 2)
+
+        /* The I2S path carries one packed stereo frame per 32 bit word and
+         * has no mono layout, so a one channel request would be recorded as
+         * interleaved data and read back at the wrong rate.  Reject it here
+         * rather than hand back a file that looks like mono but is not.
+         */
+
+        if (caps->ac_channels != 2)
           {
-            auderr("Unsupported number of channels: %d\n",
+            auderr("Unsupported number of channels: %d (stereo only)\n",
                    caps->ac_channels);
             break;
           }
@@ -1091,12 +1110,17 @@ static int es8388_configure(FAR struct audio_lowerhalf_s *dev,
 
         /* Save the current stream configuration */
 
+        es8388_audio_input(priv);
+        es8388_reset(priv);
+
+        /* Reset() restores the default stream parameters, so the
+         * requested configuration must be written after it.
+         */
+
         priv->samprate  = caps->ac_controls.hw[0];
         priv->nchannels = caps->ac_channels;
         priv->bpsamp    = caps->ac_controls.b[2];
 
-        es8388_audio_input(priv);
-        es8388_reset(priv);
         es8388_setsamplerate(priv);
         es8388_setbitspersample(priv);
 
@@ -2371,7 +2395,7 @@ static void es8388_reset(FAR struct es8388_dev_s *priv)
                   ES8388_PDNAINR_PWRDN    |
                   ES8388_PDNAINL_PWRDN);
 
-  es8388_setmicgain(priv, 24); /* +24 dB */
+  es8388_setmicgain(priv, CONFIG_ES8388_MIC_GAIN);
 
   if (priv->adc_input == ES8388_ADC_INPUT_LINE1)
     {
