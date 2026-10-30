@@ -169,14 +169,20 @@
 /* LCD data pinmux (U-Boot dtsi "dc_pins"): GPIO0-27 must be MAIN_FUNC to
  * carry CLK/VSYNC/HSYNC/DE plus the 24 RGB data lines.  2 bits per pin.
  *
- * U-Boot's mask for GPIO16-31 is 0x00ffffff: GPIO28-31 belong to GMAC
- * (gmac0_pins claims them) and the DC driver must not steal them.
+ * NOTE: U-Boot expresses this as value 0x00ffffff with mask 0x00ffffff,
+ * i.e. it only rewrites the low 24 bits and LEAVES bits 24-31 (GPIO28-31)
+ * at their previous setting.  This driver blind-writes the whole register
+ * with putreg32(), so the high byte must explicitly carry 0b11 (MAIN_FUNC)
+ * for GPIO28-31: those pins are GMAC0_RX_CTL/RX0/RX1/RX2 per SoC manual
+ * table 1-1, and writing 0 there demotes them to GPIO mode, disconnects
+ * the RGMII receive lines, and the MAC never sees the PHY's in-band link
+ * status ("PHY: link still DOWN" + no DHCP + ping fails).
  */
 
 #define LS_PINMUX_GPIO0_15      0x16000490
 #define LS_PINMUX_GPIO0_15_VAL  0xffffffff
 #define LS_PINMUX_GPIO16_31     0x16000494
-#define LS_PINMUX_GPIO16_31_VAL 0x00ffffff
+#define LS_PINMUX_GPIO16_31_VAL 0xffffffff
 
 /* Backlight pin has to be plain GPIO rather than its alternate function.
  * GPIO43 lives in the GPIO32-47 bank; the mask is computed at runtime so

@@ -63,6 +63,8 @@ static int ls2k0300_i2c_transfer(struct i2c_master_s *dev,
                                 struct i2c_msg_s *msgs, int count);
 static int ls2k0300_i2c_setup(struct i2c_master_s *dev);
 static int ls2k0300_i2c_shutdown(struct i2c_master_s *dev);
+static int ls2k0300_i2c_check_errors(struct ls2k0300_i2c_priv_s *priv,
+                                    uint32_t status);
 
 /****************************************************************************
  * Private Data
@@ -193,6 +195,17 @@ static int ls2k0300_i2c_wait_status(struct ls2k0300_i2c_priv_s *priv,
   while (elapsed < timeout_us)
     {
       status = i2c_getreg(priv, LS2K0300_I2C_SR1);
+
+      /* A NACK or bus error aborts the transfer immediately.  The hardware
+       * stops driving the clock on AF, so waiting for the requested flag
+       * would just run into the timeout and leave the bus wedged.
+       */
+
+      if (status & (I2C_SR1_AF | I2C_SR1_BERR | I2C_SR1_ARLO))
+        {
+          ls2k0300_i2c_check_errors(priv, status);
+          return -EIO;
+        }
 
       if (set && (status & mask))
         {
