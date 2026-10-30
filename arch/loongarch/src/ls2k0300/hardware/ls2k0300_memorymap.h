@@ -104,8 +104,15 @@
 
 #define LS2K0300_DC_BASE             PHYS_TO_UNCACHED(0x16090000)
 
-#define LS2K0300_SDIO0_BASE          PHYS_TO_UNCACHED(0x1ff64000)
-#define LS2K0300_SDIO1_BASE          PHYS_TO_UNCACHED(0x1ff66000)
+/* SDIO0/SDIO1: 32KB register windows, chapter 15 of the user manual.
+ * The PHYS variants are the addresses the DMA masters see.
+ */
+
+#define LS2K0300_SDIO0_PHYS          0x16140000
+#define LS2K0300_SDIO1_PHYS          0x16148000
+
+#define LS2K0300_SDIO0_BASE          PHYS_TO_UNCACHED(LS2K0300_SDIO0_PHYS)
+#define LS2K0300_SDIO1_BASE          PHYS_TO_UNCACHED(LS2K0300_SDIO1_PHYS)
 
 #define LS2K0300_WDT_BASE            PHYS_TO_UNCACHED(0x16124000)
 

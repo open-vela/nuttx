@@ -28,6 +28,9 @@
 
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <debug.h>
@@ -41,6 +44,9 @@
 #include <nuttx/mtd/mtd.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/video/fb.h>
+#include <nuttx/sdio.h>
+#include <nuttx/fs/ioctl.h>
+#include <nuttx/fs/partition.h>
 
 #include <arch/board/board.h>
 
@@ -96,6 +102,110 @@ extern void ls2k0300_dc_show_test_pattern(void);
 extern int ls2k0300_ethernet_initialize(void);
 #endif
 
+#ifdef CONFIG_LS2K0300_SDIO
+extern FAR struct sdio_dev_s *ls2k0300_sdio_initialize(void);
+#endif
+
+#ifdef CONFIG_LS2K0300_SDIO
+/****************************************************************************
+ * Name: ls2k0300_sdio_report
+ *
+ * Description:
+ *   Report the geometry of the card once the MMC/SD core has probed it.
+ *   Purely diagnostic.
+ *
+ ****************************************************************************/
+
+static void ls2k0300_sdio_report(FAR const char *devname)
+{
+  struct geometry geo;
+  int fd;
+
+  fd = open(devname, O_RDONLY);
+  if (fd < 0)
+    {
+      return;
+    }
+
+  if (ioctl(fd, BIOC_GEOMETRY, (unsigned long)(uintptr_t)&geo) == OK)
+    {
+      unsigned long long sectors =
+        (unsigned long long)geo.geo_nsectors;
+      unsigned long long bytes = sectors * geo.geo_sectorsize;
+
+      _info("bringup: %s: %llu sectors x %lu bytes (%llu MiB)%s\n",
+            devname, sectors, (unsigned long)geo.geo_sectorsize,
+            bytes / (1024 * 1024),
+            geo.geo_writeenabled ? "" : ", read-only");
+    }
+
+  close(fd);
+}
+#endif /* CONFIG_LS2K0300_SDIO */
+
+#ifdef CONFIG_LS2K0300_SDIO_AUTOMOUNT
+/****************************************************************************
+ * Name: ls2k0300_partition_handler
+ *
+ * Description:
+ *   parse_block_partition() callback.  Registers the first partition of
+ *   the card as its own block device: the FAT driver mounts a filesystem,
+ *   it does not look inside a partition table.
+ *
+ ****************************************************************************/
+
+static void ls2k0300_partition_handler(FAR struct partition_s *part,
+                                       FAR void *arg)
+{
+  FAR bool *registered = (FAR bool *)arg;
+
+  if (*registered || part->index != 0)
+    {
+      return;
+    }
+
+  if (register_blockpartition("/dev/mmcsd0p1", 0666, "/dev/mmcsd0",
+                              part->firstblock, part->nblocks) == 0)
+    {
+      *registered = true;
+    }
+}
+
+/****************************************************************************
+ * Name: ls2k0300_sdio_mount
+ *
+ * Description:
+ *   Mount the card at /mnt.  A card written by a PC carries an MBR and a
+ *   single FAT partition, which has to be mounted through its own block
+ *   device; a card formatted without a partition table is mounted as-is.
+ *
+ ****************************************************************************/
+
+static void ls2k0300_sdio_mount(void)
+{
+  FAR const char *devname = "/dev/mmcsd0";
+  bool registered = false;
+  int ret;
+
+  if (parse_block_partition("/dev/mmcsd0", ls2k0300_partition_handler,
+                            &registered) == 0 && registered)
+    {
+      devname = "/dev/mmcsd0p1";
+    }
+
+  mkdir("/mnt", 0777);
+  ret = nx_mount(devname, "/mnt", "vfat", 0, NULL);
+  if (ret < 0)
+    {
+      serr("ERROR: Failed to mount %s: %d\n", devname, ret);
+    }
+  else
+    {
+      _info("bringup: %s mounted at /mnt\n", devname);
+    }
+}
+#endif /* CONFIG_LS2K0300_SDIO_AUTOMOUNT */
+
 void ls2k0300_hardware_init(void)
 {
   /* GPIO50/51 配置为 I2C1 功能 (MAIN_FUNC = 0x3) */
@@ -134,6 +244,15 @@ void ls2k0300_hardware_init(void)
    * GPIO66 (SPI2_MOSI) -> MAIN_FUNC (0x3) — 与 SPI0 共用
    * GPIO85 (Flash CS)  -> GPIO (0x0), 软件片选
    */
+
+#ifdef CONFIG_LS2K0300_SDIO1
+  /* SDIO1 (SD 卡座)：GPIO100-105 -> MAIN_FUNC。
+   * 盲写不走 RMW：GPIO96-111 共用一字，读回不可靠。
+   * 值：GPIO96-99=GPIO，GPIO100-105=MAIN，保留位=0。
+   */
+
+  *(volatile uint32_t *)PHYS_TO_UNCACHED(0x160004a8) = 0x000fff00;
+#endif
 
   /* PWM2 引脚复用：GPIO88 -> SECOND_FUNC (0x2)，硬件 PWM 输出 */
 
@@ -466,6 +585,29 @@ int ls2k0300_bringup(void)
   if (ret < 0)
     {
       serr("ERROR: ls2k0300_ethernet_initialize failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_LS2K0300_SDIO
+  /* SD/SDIO host: the MMC/SD core probes the card and registers the block
+   * device before returning, so the report and the mount below can follow
+   * immediately.
+   */
+
+  _info("bringup: SDIO\n");
+    {
+      FAR struct sdio_dev_s *sdio = ls2k0300_sdio_initialize();
+      if (sdio == NULL)
+        {
+          serr("ERROR: ls2k0300_sdio_initialize failed\n");
+        }
+      else
+        {
+          ls2k0300_sdio_report("/dev/mmcsd0");
+#ifdef CONFIG_LS2K0300_SDIO_AUTOMOUNT
+          ls2k0300_sdio_mount();
+#endif
+        }
     }
 #endif
 

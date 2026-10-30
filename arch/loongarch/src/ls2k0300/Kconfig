@@ -247,6 +247,65 @@ config LS2K0300_PINCTRL
 	---help---
 		Enable LS2K0300 pin controller driver support
 
+config LS2K0300_SDIO
+	bool "SD/SDIO host controller"
+	default n
+	select ARCH_HAVE_SDIO
+	select SDIO_DMA
+	select SDIO_BLOCKSETUP
+	---help---
+		Enable the LS2K0300 SDIO/eMMC host controller driver.  The
+		controller carries the SD card socket (SDIO1) or the eMMC
+		device (SDIO0) and registers it with the generic MMC/SD core
+		as /dev/mmcsd0.
+
+if LS2K0300_SDIO
+
+choice
+	prompt "SDIO instance"
+	default LS2K0300_SDIO1
+
+config LS2K0300_SDIO0
+	bool "SDIO0 (eMMC, GPIO90-99)"
+	---help---
+		Use the SDIO0 controller at 0x16140000.  It carries the 8 bit
+		eMMC interface on GPIO90-99.
+
+config LS2K0300_SDIO1
+	bool "SDIO1 (SD card, GPIO100-105)"
+	---help---
+		Use the SDIO1 controller at 0x16148000.  It carries the 4 bit
+		SD card socket on GPIO100-105.
+
+endchoice
+
+config LS2K0300_SDIO_CLKFREQ
+	int "SDIO module clock (Hz)"
+	default 200000000
+	---help---
+		Frequency of the clock that feeds the SDIO controller.  The
+		controller divides it with an 8 bit prescaler to generate the
+		SD card clock.  The default is the dev_pllclk frequency that
+		the bootloader configures.
+
+config LS2K0300_SDIO_MAXFREQ
+	int "Maximum SD clock (Hz)"
+	default 25000000
+	---help---
+		Highest SD card clock the driver will select once the card has
+		been identified.  The identification stage always runs at
+		400 kHz.
+
+config LS2K0300_SDIO_AUTOMOUNT
+	bool "Mount the card at /mnt at boot"
+	default y
+	---help---
+		Mount the first partition of the card on /mnt as a FAT
+		filesystem once the MMC/SD core has probed it.  The mount can
+		also be done by hand with 'mount -t vfat /dev/mmcsd0 /mnt'.
+
+endif
+
 config LS2K0300_DC
 	bool "Display Controller (LCD)"
 	default n

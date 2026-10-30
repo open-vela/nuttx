@@ -75,7 +75,17 @@ if(CONFIG_LS2K0300_DC)
 endif()
 
 if(CONFIG_LS2K0300_ETHERNET)
-  list(APPEND SRCS ls2k0300_gmac.c ls2k0300_ethernet.c ls2k0300_dma_cache.S)
+  list(APPEND SRCS ls2k0300_gmac.c ls2k0300_ethernet.c)
+endif()
+
+if(CONFIG_LS2K0300_SDIO)
+  list(APPEND SRCS ls2k0300_sdio.c)
+endif()
+
+# The D-cache maintenance helper is shared by the drivers that use DMA
+
+if(CONFIG_LS2K0300_ETHERNET OR CONFIG_LS2K0300_SDIO)
+  list(APPEND SRCS ls2k0300_dma_cache.S)
 endif()
 
 target_sources(arch PRIVATE ${SRCS})

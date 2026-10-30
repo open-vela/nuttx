@@ -227,7 +227,7 @@
 #define LS_UART8_REG_BASE            PHYS_TO_UNCACHED(0x16102000)
 #define LS_UART9_REG_BASE            PHYS_TO_UNCACHED(0x16102400)
 
-/* 串口各寄存器相对基地址的偏移 */
+/* UART register offsets relative to the base address */
 #define LS2K_UART_DAT_OFFSET (0)
 #define LS2K_UART_IER_OFFSET (1)
 #define LS2K_UART_IIR_OFFSET (2)
@@ -237,18 +237,18 @@
 #define LS2K_UART_LSR_OFFSET (5)
 #define LS2K_UART_MSR_OFFSET (6)
 
-#define LS2K_UART_LSB_OFFSET (0)  /* 分频锁存器1 */
-#define LS2K_UART_MSB_OFFSET (1)  /* 分频锁存器2 */
+#define LS2K_UART_LSB_OFFSET (0)  /* Divisor latch low byte */
+#define LS2K_UART_MSB_OFFSET (1)  /* Divisor latch high byte */
 
-/* 串口线路状态寄存器的位域 */
+/* Line status register bit fields */
 #define LS2K_UART_LSR_TE (1 << 6)
 #define LS2K_UART_LSR_TFE (1 << 5)
 
 /* interrupt enable register */
-#define IER_IRxE 0x1    /* 接收有效数据中断使能 */
-#define IER_ITxE 0x2    /* 传输保存寄存器为空中断使能 */
-#define IER_ILE 0x4     /* 接收器线路状态中断使能 */
-#define IER_IME 0x8     /* Modem状态中断使能 */
+#define IER_IRxE 0x1    /* Received data available interrupt enable */
+#define IER_ITxE 0x2    /* Transmitter holding register empty interrupt enable */
+#define IER_ILE 0x4     /* Receiver line status interrupt enable */
+#define IER_IME 0x8     /* Modem status interrupt enable */
 
 #define IIR_RXTOUT 0xc
 #define IIR_RXRDY 0x4
@@ -260,9 +260,9 @@
 #define LCR_SB (1 << 2)
 #define LCR_BEC (0)
 
-/* 串口波特率 */
+/* UART baud rate */
 #define UART_REF_CLK (APB_FREQ * MHZ_TO_HZ)  /* MHz */
-#define UART_BAUDRATE (115200)               /* 波特率 */
+#define UART_BAUDRATE (115200)               /* Baud rate */
 #define UART_DIV_HI (((UART_REF_CLK + (UART_BAUDRATE * 8)) / (UART_BAUDRATE * 16)) >> 8)
 #define UART_DIV_LO (((UART_REF_CLK + (UART_BAUDRATE * 8)) / (UART_BAUDRATE * 16)) & 0xff)
 
@@ -332,7 +332,7 @@
 #define PWM_INTE (5)
 #define PWM_RST (7)
 #define PWM_CAPTE (8)
-#define PWM_SINGLE (4)  /* 单脉冲控制位 */
+#define PWM_SINGLE (4)  /* Single pulse control bit */
 #define PWM_INT (6)
 #define PWM_OE (3)
 #define PWM_EN (0)
@@ -347,9 +347,13 @@
 
 #define PWM_REF_CLK (APB_FREQ * MHZ_TO_HZ)
 
-/* SDIO regs */
-#define LS_SDIO0_BASE                PHYS_TO_UNCACHED(0x1ff64000)
-#define LS_SDIO1_BASE                PHYS_TO_UNCACHED(0x1ff66000)
+/* SDIO regs (user manual 15.2: SDIO0 0x16140000, SDIO1 0x16148000).
+ * The canonical names live in hardware/ls2k0300_memorymap.h; these are
+ * kept for the board code.  The 0x1ff64000/0x1ff66000 values that used to
+ * be here belong to the LS2K0500, not to this chip.
+ */
+#define LS_SDIO0_BASE                PHYS_TO_UNCACHED(0x16140000)
+#define LS_SDIO1_BASE                PHYS_TO_UNCACHED(0x16148000)
 
 /* HPET regs */
 #define LS_HPET0_BASE                PHYS_TO_UNCACHED(0x16120000)
@@ -472,37 +476,37 @@
 #define PAD_CTRL_EMMC  26
 
 /* Core INT regs */
-#define CORE_IPISR_REG   PHYS_TO_UNCACHED(0x16001000)  /* RO NA 处理器核的 IPI_Status 寄存器 */
-#define CORE_IPIEN_REG   PHYS_TO_UNCACHED(0x16001004)  /* RW 0x0 处理器核的 IPI_Enalbe 寄存器 */
-#define CORE_IPISET_REG  PHYS_TO_UNCACHED(0x16001008)  /* WO NA 处理器核的 IPI_Set 寄存器 */
-#define CORE_IPI_CLR_REG PHYS_TO_UNCACHED(0x1600100c)  /* WO NA 处理器核的 IPI_Clear 寄存器 */
-#define CORE_INTISR0_REG PHYS_TO_UNCACHED(0x16001040)  /* 路由给CORE的低32位中断状态 */
-#define CORE_INTISR1_REG PHYS_TO_UNCACHED(0x16001048)  /* 路由给CORE的高32位中断状态 */
+#define CORE_IPISR_REG   PHYS_TO_UNCACHED(0x16001000)  /* RO NA: the IPI_Status register of the processor core */
+#define CORE_IPIEN_REG   PHYS_TO_UNCACHED(0x16001004)  /* RW 0x0: the IPI_Enable register of the processor core */
+#define CORE_IPISET_REG  PHYS_TO_UNCACHED(0x16001008)  /* WO NA: the IPI_Set register of the processor core */
+#define CORE_IPI_CLR_REG PHYS_TO_UNCACHED(0x1600100c)  /* WO NA: the IPI_Clear register of the processor core */
+#define CORE_INTISR0_REG PHYS_TO_UNCACHED(0x16001040)  /* Low 32 bits of the interrupt status routed to CORE */
+#define CORE_INTISR1_REG PHYS_TO_UNCACHED(0x16001048)  /* High 32 bits of the interrupt status routed to CORE */
 
 /* LIO INT regs */
-#define INTISR_0_REG  PHYS_TO_UNCACHED(0x16001420)  /* 低32位中断状态寄存器 */
-#define INTSET_0_REG  PHYS_TO_UNCACHED(0x16001428)  /* 低32位设置使能寄存器 */
-#define INTIEN_0_REG  PHYS_TO_UNCACHED(0x16001424)  /* 低32位中断使能状态寄存器 */
-#define INTPOL_0_REG  PHYS_TO_UNCACHED(0x16001430)  /* 低32位极性设置寄存器(电平中断) */
-#define INTEDGE_0_REG PHYS_TO_UNCACHED(0x16001434)  /* 低32位触发方式寄存器 */
-#define INTCLR_0_REG  PHYS_TO_UNCACHED(0x1600142c)  /* 低32位中断清除寄存器,清除使能寄存器和脉冲触发的中断 */
+#define INTISR_0_REG  PHYS_TO_UNCACHED(0x16001420)  /* Low 32 bit interrupt status register */
+#define INTSET_0_REG  PHYS_TO_UNCACHED(0x16001428)  /* Low 32 bit interrupt set enable register */
+#define INTIEN_0_REG  PHYS_TO_UNCACHED(0x16001424)  /* Low 32 bit interrupt enable status register */
+#define INTPOL_0_REG  PHYS_TO_UNCACHED(0x16001430)  /* Low 32 bit interrupt polarity register (level interrupts) */
+#define INTEDGE_0_REG PHYS_TO_UNCACHED(0x16001434)  /* Low 32 bit interrupt trigger mode register */
+#define INTCLR_0_REG  PHYS_TO_UNCACHED(0x1600142c)  /* Low 32 bit interrupt clear register, clears the enable registers and the edge triggered interrupts */
 
-#define INTISR_1_REG  PHYS_TO_UNCACHED(0x16001460)  /* 高32位中断状态寄存器 */
-#define INTSET_1_REG  PHYS_TO_UNCACHED(0x16001468)  /* 高32位设置使能寄存器 */
-#define INTIEN_1_REG  PHYS_TO_UNCACHED(0x16001464)  /* 高32位中断使能状态寄存器 */
-#define INTPOL_1_REG  PHYS_TO_UNCACHED(0x16001470)  /* 高32位极性设置寄存器(电平中断) */
-#define INTEDGE_1_REG PHYS_TO_UNCACHED(0x16001474)  /* 高32位触发方式寄存器 */
-#define INTCLR_1_REG  PHYS_TO_UNCACHED(0x1600146c)  /* 高32位中断清除寄存器,清除使能寄存器和脉冲触发的中断 */
+#define INTISR_1_REG  PHYS_TO_UNCACHED(0x16001460)  /* High 32 bit interrupt status register */
+#define INTSET_1_REG  PHYS_TO_UNCACHED(0x16001468)  /* High 32 bit interrupt set enable register */
+#define INTIEN_1_REG  PHYS_TO_UNCACHED(0x16001464)  /* High 32 bit interrupt enable status register */
+#define INTPOL_1_REG  PHYS_TO_UNCACHED(0x16001470)  /* High 32 bit interrupt polarity register (level interrupts) */
+#define INTEDGE_1_REG PHYS_TO_UNCACHED(0x16001474)  /* High 32 bit interrupt trigger mode register */
+#define INTCLR_1_REG  PHYS_TO_UNCACHED(0x1600146c)  /* High 32 bit interrupt clear register, clears the enable registers and the edge triggered interrupts */
 
-#define ENTRY0_0_REG  PHYS_TO_UNCACHED(0x16001400)  /* 8位中断路由寄存器[0--7] */
-#define ENTRY8_0_REG  PHYS_TO_UNCACHED(0x16001408)  /* 8位中断路由寄存器[8--15] */
-#define ENTRY16_0_REG PHYS_TO_UNCACHED(0x16001410)  /* 8位中断路由寄存器[16--23] */
-#define ENTRY24_0_REG PHYS_TO_UNCACHED(0x16001418)  /* 8位中断路由寄存器[24--31] */
+#define ENTRY0_0_REG  PHYS_TO_UNCACHED(0x16001400)  /* 8 bit interrupt routing register [0--7] */
+#define ENTRY8_0_REG  PHYS_TO_UNCACHED(0x16001408)  /* 8 bit interrupt routing register [8--15] */
+#define ENTRY16_0_REG PHYS_TO_UNCACHED(0x16001410)  /* 8 bit interrupt routing register [16--23] */
+#define ENTRY24_0_REG PHYS_TO_UNCACHED(0x16001418)  /* 8 bit interrupt routing register [24--31] */
 
-#define ENTRY0_1_REG  PHYS_TO_UNCACHED(0x16001440)  /* 8位中断路由寄存器[32--39] */
-#define ENTRY8_1_REG  PHYS_TO_UNCACHED(0x16001448)  /* 8位中断路由寄存器[40--47] */
-#define ENTRY16_1_REG PHYS_TO_UNCACHED(0x16001450)  /* 8位中断路由寄存器[48--55] */
-#define ENTRY24_1_REG PHYS_TO_UNCACHED(0x16001458)  /* 8位中断路由寄存器[56--63] */
+#define ENTRY0_1_REG  PHYS_TO_UNCACHED(0x16001440)  /* 8 bit interrupt routing register [32--39] */
+#define ENTRY8_1_REG  PHYS_TO_UNCACHED(0x16001448)  /* 8 bit interrupt routing register [40--47] */
+#define ENTRY16_1_REG PHYS_TO_UNCACHED(0x16001450)  /* 8 bit interrupt routing register [48--55] */
+#define ENTRY24_1_REG PHYS_TO_UNCACHED(0x16001458)  /* 8 bit interrupt routing register [56--63] */
 
 /* S3 Need
  *
