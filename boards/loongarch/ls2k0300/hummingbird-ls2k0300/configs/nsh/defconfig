@@ -171,8 +171,9 @@ CONFIG_MMCSD_SDIO=y
 CONFIG_MMCSD_MULTIBLOCK_LIMIT=4095
 CONFIG_FS_FAT=y
 CONFIG_MBR_PARTITION=y
-# fs/partition 引用 register_partition_with_mtd，而它只在 MTD_PARTITION 下编译
-# （fs_partition.c/driver.h 用 CONFIG_MTD 守卫，属于上游不一致），故需开启。
+# fs/partition references register_partition_with_mtd, which is only built
+# when MTD_PARTITION is set (fs_partition.c/driver.h are guarded by
+# CONFIG_MTD, an upstream inconsistency), so it has to be enabled.
 CONFIG_MTD_PARTITION=y
 
 # ── ES8388 audio: LS2K0300 I2S controller + LSIA DMA + codec ──
@@ -219,3 +220,23 @@ CONFIG_NXPLAYER_PLAYTHREAD_STACKSIZE=4096
 CONFIG_SYSTEM_NXRECORDER=y
 CONFIG_NXRECORDER_MAINTHREAD_STACKSIZE=4096
 CONFIG_NXRECORDER_RECORDTHREAD_STACKSIZE=4096
+
+# ── LVGL CJK font for the AI panel subtitle (freetetype loads
+#    /mnt/MiSans-Normal.ttf from the SD card at runtime; '/' is the fs
+#    drive letter so plain absolute paths work) ──
+CONFIG_LIB_FREETYPE=y
+CONFIG_LV_USE_FREETYPE=y
+CONFIG_LV_USE_FS_POSIX=y
+CONFIG_LV_FS_POSIX_LETTER=47
+
+# lv_freetype_init() reports its failures through LV_LOG_ERROR, which is
+# compiled out without these - the only thing visible was our own
+# "freetype init failed", with no way to tell which step failed.  WARN and
+# not ERROR: the "already initialized" path logs at WARN and was filtered.
+CONFIG_LV_USE_LOG=y
+CONFIG_LV_LOG_LEVEL_WARN=y
+CONFIG_LV_LOG_PRINTF=y
+
+# ── zlib: V3 speech APIs gzip-compress every WebSocket frame ──
+CONFIG_LIB_ZLIB=y
+
