@@ -5286,6 +5286,23 @@ int esp_wifi_sta_password(struct iwreq *iwr, bool set)
               return ret;
             }
         }
+      else
+        {
+          /* [WIFI-FIX 2026-09-14] Previously, when the station was not yet
+           * connected the new credentials were only copied into the global
+           * g_sta_wifi_cfg and never reached the blob, so a plain
+           * `wapi psk` was a silent no-op at hardware level.  Push them
+           * now; a later esp_wifi_sta_connect() then uses the right key.
+           * Error is logged but not propagated: the following connect()
+           * re-applies g_sta_wifi_cfg anyway, so behaviour cannot regress.
+           */
+          ret = esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+          if (ret)
+            {
+              wlerr("Failed to set Wi-Fi config data ret=%d (ignored)\n",
+                    ret);
+            }
+        }
 
       g_sta_wifi_cfg = wifi_cfg;
     }
