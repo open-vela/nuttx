@@ -688,7 +688,7 @@ define kconfig_tweak_disable
 endef
 else
   OVERWRITE_WARNING = "set more than once"
-  KCONFIG_WARNING   = 2> >(grep -v ${OVERWRITE_WARNING} | tee kwarning) | \
+  KCONFIG_WARNING   = 2> >(grep -v ${OVERWRITE_WARNING} | grep -vE 'outside the choice|is not contained in the choice' | tee kwarning) | \
                                                   cat && if [ -s kwarning ]; \
                                                   then rm kwarning; \
                                                   exit 1; \
