@@ -244,6 +244,16 @@ config ES8388_INPUT_INITVOLUME
 	int "ES8388 initial input volume setting"
 	default 1000
 
+config ES8388_MIC_GAIN
+	int "ES8388 microphone preamp gain in dB"
+	default 12
+	range 0 24
+	---help---
+		Analog gain of the microphone preamplifier, in 3dB steps.  The
+		upstream default is 24, the maximum, which clips a hot microphone
+		and shows up as distortion and crackling on the recording.  Lower
+		it until the peaks stay well below full scale.
+
 config ES8388_OUTPUT_CHANNEL
 	int
 	default 0 if ES8388_OUTPUT_CHANNEL_LINE1
