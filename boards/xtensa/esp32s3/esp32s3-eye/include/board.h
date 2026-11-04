@@ -47,8 +47,18 @@
 
 /* GPIO pins used by the GPIO Subsystem */
 
+/* [COMPANION] 重排为桌面小跟班外设：
+ *   OUT: GPIO4 台灯继电器 / GPIO48 震动马达
+ *   IN : GPIO42 TTP223 触摸
+ *   INT: GPIO0  BOOT 键
+ * 注意 GPIO3 已让给俯仰舵机 PWM，不能再当普通 GPIO 输出。*/
+/* [COMPANION] 引脚方向以 doc20 为准：触摸和震动都是**输入**传感器。
+ *   OUT : GPIO4  台灯继电器
+ *   IN  : GPIO42 TTP223 触摸 / GPIO48 SW-420 震动传感器（被拍）
+ *   INT : GPIO0  BOOT 键
+ * 注意 GPIO3 已让给俯仰舵机 PWM，不能再当普通 GPIO 输出。 */
 #define BOARD_NGPIOOUT    1 /* Amount of GPIO Output pins */
-#define BOARD_NGPIOIN     0
+#define BOARD_NGPIOIN     2
 #define BOARD_NGPIOINT    1
 
 #endif /* __BOARDS_XTENSA_ESP32S3_ESP32S3_EYE_INCLUDE_BOARD_H */

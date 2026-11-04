@@ -74,11 +74,51 @@
  ****************************************************************************/
 
 #if defined (CONFIG_ESP32S3_SPIFLASH_SMARTFS)
+/****************************************************************************
+ * Name: smartfs_format
+ *
+ * Description:
+ *   Prepare a blank SMART volume on the block driver at 'path'.
+ *
+ *   This is the device side of what apps/fsutils/mksmartfs does, repeated here
+ *   because mksmartfs() is an apps symbol and the nuttx board code cannot
+ *   reference it.  Same sequence: low-level format, read the geometry back,
+ *   then mark the root directory sector as a directory.
+ *
+ *   Without it /data stays unformatted for ever: netinit reports
+ *
+ *     Smartfs seems unformatted. Did you run 'mksmartfs /dev/smart0'?
+ *
+ *   and bringup falls back to a tmpfs on RAM, so every file the agent persists
+ *   lives in RAM - which is the memory pressure that made the station's
+ *   association fail in the first place.
+ *
+ ****************************************************************************/
+
 static int setup_smartfs(int smartn, struct mtd_dev_s *mtd,
                          const char *mnt_pt)
 {
   int ret = OK;
   char path[22];
+
+  /* [R37] SMARTFS on the internal SPI flash is switched off.
+   *
+   * Round 36 formatted the volume and the mount then succeeded, at which point
+   * the agent's files under /data/ai_agent stopped landing in the tmpfs and
+   * became real flash writes.  The board dies at that first write: the legacy
+   * esp32s3 SPIFLASH MTD path disables the flash cache while this image
+   * executes from flash, so the CPU can no longer fetch its own code.  Measured
+   * twice: the boot stops just after NuttShell's banner, no console output
+   * afterwards at all, and only a power cycle brings it back.
+   *
+   * The partition is already formatted, so re-enabling this is a one-line
+   * change - but only after the flash write path is IRAM-safe.  Until then
+   * /data falls back to the tmpfs bringup mounts, which is the configuration
+   * this board has always booted with.
+   */
+
+  syslog(LOG_ERR, "[R37] smartfs disabled, /data uses tmpfs\n");
+  return -ENODEV;
 
   ret = smart_initialize(smartn, mtd, NULL);
   if (ret < 0)

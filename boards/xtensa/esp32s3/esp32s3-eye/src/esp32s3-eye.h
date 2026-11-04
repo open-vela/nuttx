@@ -42,9 +42,9 @@
 #define BUTTON_BOOT         0
 /* Display */
 
-#define ESP32S3_EYE_DISPLAY_SPI         2
-#define ESP32S3_EYE_DISPLAY_DC          43
-#define ESP32S3_EYE_DISPLAY_BCKL        48
+#define ESP32S3_EYE_DISPLAY_SPI         3
+#define ESP32S3_EYE_DISPLAY_DC          14
+#define ESP32S3_EYE_DISPLAY_BCKL        16
 
 /****************************************************************************
  * Public Types
@@ -114,7 +114,7 @@ int board_spiflash_init(void);
  *
  ****************************************************************************/
 
-#ifdef CONFIG_ESP32S3_EYE_LCD
+#if defined(CONFIG_ESP32S3_EYE_LCD) || defined(CONFIG_LCD_ST7789)
 int board_lcd_initialize(void);
 #endif
 
@@ -127,7 +127,7 @@ int board_lcd_initialize(void);
  *
  ****************************************************************************/
 
-#ifdef CONFIG_ESP32S3_EYE_LCD
+#if defined(CONFIG_ESP32S3_EYE_LCD) || defined(CONFIG_LCD_ST7789)
 struct lcd_dev_s *board_lcd_getdev(int lcddev);
 #endif
 
@@ -139,7 +139,7 @@ struct lcd_dev_s *board_lcd_getdev(int lcddev);
  *
  ****************************************************************************/
 
-#ifdef CONFIG_ESP32S3_EYE_LCD
+#if defined(CONFIG_ESP32S3_EYE_LCD) || defined(CONFIG_LCD_ST7789)
 void board_lcd_uninitialize(void);
 #endif
 
@@ -159,5 +159,26 @@ void board_lcd_uninitialize(void);
 int board_i2c_init(void);
 #endif
 
+/****************************************************************************
+ * Name: esp32s3_board_audio_initialize
+ *
+ * Description:
+ *   Initialize the AI-VOX3 ES8311 audio codec (I2C0 addr 0x18) on the
+ *   shared I2S0 port and register /dev/audio/pcm0p, /dev/audio/pcm0c
+ *   (ALSA-lib default names used by ai_agent) plus the NuttX-native
+ *   aliases /dev/audio/pcm0 and /dev/audio/pcm_in0.
+ *
+ * Returned Value:
+ *   Zero (OK) is returned on success; a negated errno value is returned
+ *   to indicate the nature of any failure.
+ *
+ ****************************************************************************/
+
+#if defined(CONFIG_ESP32S3_I2S) && defined(CONFIG_AUDIO_ES8311)
+int esp32s3_board_audio_initialize(void);
+#endif
+
 #endif /* __ASSEMBLY__ */
 #endif /* __BOARDS_XTENSA_ESP32S3_ESP32S3_EYE_SRC_ESP32S3_EYE_H */
+
+void board_lcd_backlight_on(void);

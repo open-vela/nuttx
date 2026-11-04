@@ -22,7 +22,13 @@
 
 include $(TOPDIR)/.config
 include $(TOPDIR)/tools/Config.mk
+# ARCH-TOOLCHAIN-SELECT: 原文件硬编码 risc-v，导致 xtensa 板子拿不到
+# CROSSDEV，整套构建会静默降级成宿主 gcc/g++（编出 x86 目标文件）。
+ifeq ($(CONFIG_ARCH_XTENSA),y)
+include $(TOPDIR)/arch/xtensa/src/lx7/Toolchain.defs
+else ifeq ($(CONFIG_ARCH_RISCV),y)
 include $(TOPDIR)/arch/risc-v/src/common/Toolchain.defs
+endif
 
 ifeq ($(CONFIG_ARCH_CHIP_K230),y)
 ifeq ($(CONFIG_NUTTSBI),y)
@@ -34,9 +40,14 @@ else ifeq ($(CONFIG_BUILD_PROTECTED),y)
 else
   LDSCRIPT = ld-flat.script
 endif
+  ARCHSCRIPT += $(BOARD_DIR)$(DELIM)scripts$(DELIM)$(LDSCRIPT)
+else
+# ARCH-SCRIPT-SELECT: 非 K230（含 xtensa/esp32s3）走上游标准的板级
+# scripts/Make.defs，由它挂上 esp32s3_peripherals.ld / flat_memory.ld /
+# esp32s3_sections.ld。原来这里是空档，ARCHSCRIPT 只剩一条
+# "$(BOARD_DIR)/scripts/" 的垃圾路径，CPP 会把它当源文件报错。
+  include $(BOARD_DIR)$(DELIM)scripts$(DELIM)Make.defs
 endif
-
-ARCHSCRIPT += $(BOARD_DIR)$(DELIM)scripts$(DELIM)$(LDSCRIPT)
 ARCHPICFLAGS = -fpic -msingle-pic-base
 
 CFLAGS := $(ARCHCFLAGS) $(ARCHOPTIMIZATION) $(ARCHCPUFLAGS) $(ARCHINCLUDES) $(ARCHDEFINES) $(EXTRAFLAGS) -pipe
