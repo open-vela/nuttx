@@ -283,11 +283,13 @@ int ls2k0300_lsia_dma_start(int chn, uint32_t periph, uint32_t mem,
   if (tomem)
     {
       /* 0: read from the peripheral */
+
       ccr &= ~LSIA_DMA_CCR_DIR;
     }
   else
     {
       /* 1: read from the memory */
+
       ccr |= LSIA_DMA_CCR_DIR;
     }
 

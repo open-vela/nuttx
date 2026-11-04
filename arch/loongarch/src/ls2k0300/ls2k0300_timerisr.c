@@ -98,7 +98,8 @@ void up_timer_initialize(void)
   /* LS2K0300 (LA264): TCFG init value is the raw tick count, EN/PERIOD bits
    * OR-ed at bit0/bit1. No left shift -- Linux time.c writes it the same way
    * (period & CSR_TCFG_VAL | EN | PERIOD), verified against Linux dmesg
-   * and measured tick interval. */
+   * and measured tick interval.
+   */
 
   tcfg  = (tval & CSR_TCFG_VAL) | CSR_TCFG_PERIOD | CSR_TCFG_EN;
 

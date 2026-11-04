@@ -213,7 +213,8 @@
 #define LS_PIXPLL_LOCK_BIT     0x80
 
 /* PLL lock wait timeout: 1 second of 1 us delays.  U-Boot spins forever;
- * a bounded wait keeps a dead PLL from hanging boot. */
+ * a bounded wait keeps a dead PLL from hanging boot.
+ */
 
 #define LS_PIXPLL_LOCK_RETRIES 1000000
 
@@ -691,7 +692,6 @@ int ls2k0300_dc_initialize(void)
          "fb_cpu=%s\n",
          LS_DC_XRES, LS_DC_YRES, LS_DC_PIXCLK_KHZ, LS_DC_FB_STRIDE_BYTES,
          LS_DC_FB_PA, LS_DC_FB_UNCACHED ? "uncached" : "cached");
-
 
   g_dc_hw_ready = true;
   return OK;

@@ -1517,7 +1517,8 @@ static int es8388_start(FAR struct audio_lowerhalf_s *dev)
                       ES8388_ADC_DIGPDN_NORMAL);
 
       /* The analog reference needs time to come up before anything is
-       * allowed to use it. */
+       * allowed to use it.
+       */
 
       usleep(20000);
     }
@@ -1538,7 +1539,8 @@ static int es8388_start(FAR struct audio_lowerhalf_s *dev)
 
       /* Mic bias and the input PGA settle after power-up.  Without this
        * wait the ADC can come up with its input railed, which shows up as
-       * a burst followed by digital silence for the whole take. */
+       * a burst followed by digital silence for the whole take.
+       */
 
       usleep(50000);
     }

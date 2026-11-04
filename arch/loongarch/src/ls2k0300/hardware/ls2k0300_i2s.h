@@ -51,14 +51,14 @@
 #define IIS_VERSION_ADRW_SHIFT       8       /* Address bus width */
 #define IIS_VERSION_DATW_SHIFT       4       /* Data bus width */
 
-/* IISConfig0 **************************************************************/
+/* IISConfig0 ***************************************************************/
 
 #define IIS_CONFIG0_LR_LEN_SHIFT     24      /* L/R channel word length */
 #define IIS_CONFIG0_TX_DEPTH_SHIFT   16      /* TX sample depth */
 #define IIS_CONFIG0_BCLK_RATIO_SHIFT 8       /* BCLK divider */
 #define IIS_CONFIG0_RX_DEPTH_SHIFT   0       /* RX sample depth */
 
-/* IISControl **************************************************************/
+/* IISControl ***************************************************************/
 
 #define IIS_CONTROL_MCLK_READY       (1 << 16) /* MCLK output stable (RO) */
 #define IIS_CONTROL_MASTER           (1 << 15) /* 1: IIS is master */
@@ -73,7 +73,7 @@
 #define IIS_CONTROL_RX_INT_EN        (1 << 1)  /* RX interrupt enable */
 #define IIS_CONTROL_TX_INT_EN        (1 << 0)  /* TX interrupt enable */
 
-/* IISConfig1 **************************************************************/
+/* IISConfig1 ***************************************************************/
 
 #define IIS_CONFIG1_MCLK_FRAC_SHIFT  16      /* MCLK divider fraction */
 #define IIS_CONFIG1_MCLK_RATIO_SHIFT 0       /* MCLK divider integer part */

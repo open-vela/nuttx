@@ -42,19 +42,19 @@
 #define LSIA_DMA_MAX_CHANNELS        8
 #define LSIA_DMA_CHANNEL_STRIDE      0x14
 
-/* Global registers ********************************************************/
+/* Global registers *********************************************************/
 
 #define LSIA_DMA_ISR                 0x0000  /* DMA interrupt status */
 #define LSIA_DMA_IFCR                0x0004  /* DMA interrupt flag clear */
 
-/* Per channel registers **************************************************/
+/* Per channel registers ****************************************************/
 
 #define LSIA_DMA_CCR(ch)             (0x0008 + LSIA_DMA_CHANNEL_STRIDE * (ch))
 #define LSIA_DMA_CNDTR(ch)           (0x000c + LSIA_DMA_CHANNEL_STRIDE * (ch))
 #define LSIA_DMA_CPAR(ch)            (0x0010 + LSIA_DMA_CHANNEL_STRIDE * (ch))
 #define LSIA_DMA_CMAR(ch)            (0x0014 + LSIA_DMA_CHANNEL_STRIDE * (ch))
 
-/* DMA_CCRx bits **********************************************************/
+/* DMA_CCRx bits ************************************************************/
 
 #define LSIA_DMA_CCR_MEM2MEM         (1 << 14) /* Memory to memory mode */
 #define LSIA_DMA_CCR_PL_MASK         (3 << 12) /* Channel priority */
@@ -72,7 +72,7 @@
 #define LSIA_DMA_CCR_TCIE            (1 << 1)  /* Transfer complete IRQ enable */
 #define LSIA_DMA_CCR_EN              (1 << 0)  /* Channel enable */
 
-/* Data width encoding (identical for MSIZE and PSIZE) *********************/
+/* Data width encoding (identical for MSIZE and PSIZE) **********************/
 
 #define LSIA_DMA_WIDTH_8BIT          0
 #define LSIA_DMA_WIDTH_16BIT         1

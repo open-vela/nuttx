@@ -512,6 +512,7 @@ int ls2k0300_bringup(void)
         {
 #ifdef CONFIG_LS2K0300_I2S
           /* The audio codec shares this bus */
+
           g_i2c2 = i2c;
 #endif
           ret = i2c_register(i2c, 2);

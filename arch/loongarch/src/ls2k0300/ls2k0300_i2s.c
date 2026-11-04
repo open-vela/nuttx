@@ -155,7 +155,8 @@ static int ls2k0300_i2s_txchannels(FAR struct i2s_dev_s *dev,
                                    uint8_t channels);
 static uint32_t ls2k0300_i2s_txsamplerate(FAR struct i2s_dev_s *dev,
                                           uint32_t rate);
-static uint32_t ls2k0300_i2s_txdatawidth(FAR struct i2s_dev_s *dev, int bits);
+static uint32_t ls2k0300_i2s_txdatawidth(FAR struct i2s_dev_s *dev,
+                                         int bits);
 static int ls2k0300_i2s_send(FAR struct i2s_dev_s *dev,
                              FAR struct ap_buffer_s *apb,
                              i2s_callback_t callback, FAR void *arg,
@@ -164,7 +165,8 @@ static int ls2k0300_i2s_rxchannels(FAR struct i2s_dev_s *dev,
                                    uint8_t channels);
 static uint32_t ls2k0300_i2s_rxsamplerate(FAR struct i2s_dev_s *dev,
                                           uint32_t rate);
-static uint32_t ls2k0300_i2s_rxdatawidth(FAR struct i2s_dev_s *dev, int bits);
+static uint32_t ls2k0300_i2s_rxdatawidth(FAR struct i2s_dev_s *dev,
+                                         int bits);
 static int ls2k0300_i2s_receive(FAR struct i2s_dev_s *dev,
                                 FAR struct ap_buffer_s *apb,
                                 i2s_callback_t callback, FAR void *arg,

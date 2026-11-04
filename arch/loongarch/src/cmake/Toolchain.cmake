@@ -21,7 +21,8 @@
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_VERSION 1)
 
-add_compile_options(-march=loongarch64 -mabi=lp64d -mcmodel=normal -mstrict-align)
+add_compile_options(-march=loongarch64 -mabi=lp64d -mcmodel=normal
+                    -mstrict-align)
 
 # include the toolchain specific cmake file
 
