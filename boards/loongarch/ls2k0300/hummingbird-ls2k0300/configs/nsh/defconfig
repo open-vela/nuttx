@@ -179,6 +179,9 @@ CONFIG_MTD_PARTITION=y
 # ── ES8388 audio: LS2K0300 I2S controller + LSIA DMA + codec ──
 CONFIG_AUDIO=y
 CONFIG_DRIVERS_AUDIO=y
+# ap_buffer_s stores byte counts in a 16-bit field by default, which caps a
+# buffer below 64KB; the 64KB capture buffer below needs the 32-bit type.
+CONFIG_AUDIO_LARGE_BUFFERS=y
 CONFIG_AUDIO_ES8388=y
 # The codec drives the 3.5mm headphone jack (LOUT1/ROUT1) and the
 # microphone connected to the same jack (LIN1).
@@ -187,9 +190,13 @@ CONFIG_ES8388_INPUT_CHANNEL_LINE1=y
 # Deep audio buffering: each 8KB buffer only covers 46ms of 48kHz stereo,
 # and writing to the SPI flash filesystem stalls longer than that, which
 # starves the DMA and leaves audible gaps in recordings.  32KB buffers
-# (186ms) with 3 in flight give ~560ms of cushion.
-CONFIG_ES8388_BUFFER_SIZE=32768
-CONFIG_ES8388_NUM_BUFFERS=8
+# (170ms) with 3 in flight gave ~1.3s of cushion, which was still not
+# enough while LVGL redraws the uncached framebuffer: the 2-frame I2S RX
+# FIFO overruns at every buffer boundary and the gaps hurt ASR.  64KB
+# buffers halve the number of those boundaries; 16 of them give ~5.4s of
+# cushion (1MB of the 32MB RAM).
+CONFIG_ES8388_BUFFER_SIZE=65536
+CONFIG_ES8388_NUM_BUFFERS=16
 CONFIG_ES8388_INFLIGHT=3
 # Microphone preamp in dB (3dB steps, 0..24).  At 24 the captured speech
 # peaks around 30500 of 32767 - loud but not clipping - and the

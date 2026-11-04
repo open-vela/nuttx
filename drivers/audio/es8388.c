@@ -1352,7 +1352,11 @@ static int es8388_processbegin(FAR struct es8388_dev_s *priv)
     }
 
   while (priv->inflight < CONFIG_ES8388_INFLIGHT &&
-         dq_peek(&priv->pendq) != NULL && !priv->paused)
+         dq_peek(&priv->pendq) != NULL && !priv->paused
+#ifndef CONFIG_AUDIO_EXCLUDE_STOP
+         && !priv->terminating
+#endif
+        )
     {
       /* Take next buffer from the queue of pending transfers */
 
@@ -1511,6 +1515,11 @@ static int es8388_start(FAR struct audio_lowerhalf_s *dev)
                       ES8388_ADC_STM_RST_NORMAL |
                       ES8388_DAC_DIGPDN_NORMAL  |
                       ES8388_ADC_DIGPDN_NORMAL);
+
+      /* The analog reference needs time to come up before anything is
+       * allowed to use it. */
+
+      usleep(20000);
     }
 
   if (priv->audio_mode == ES_MODULE_LINE    ||
@@ -1526,6 +1535,12 @@ static int es8388_start(FAR struct audio_lowerhalf_s *dev)
                       ES8388_PDNADCL_PWRUP        |
                       ES8388_PDNAINR_NORMAL       |
                       ES8388_PDNAINL_NORMAL);
+
+      /* Mic bias and the input PGA settle after power-up.  Without this
+       * wait the ADC can come up with its input railed, which shows up as
+       * a burst followed by digital silence for the whole take. */
+
+      usleep(50000);
     }
 
   if (priv->audio_mode == ES_MODULE_LINE    ||
@@ -1544,6 +1559,41 @@ static int es8388_start(FAR struct audio_lowerhalf_s *dev)
 #ifndef CONFIG_AUDIO_EXCLUDE_MUTE
   es8388_setmute(priv, priv->audio_mode, false);
 #endif
+
+  if (priv->audio_mode == ES_MODULE_ADC ||
+      priv->audio_mode == ES_MODULE_ADC_DAC)
+    {
+      /* ALC and the noise gate are not initialized anywhere else in this
+       * driver, so they keep whatever they powered up with.  A noise gate
+       * that closes below its threshold mutes the microphone as soon as
+       * the startup transient decays, which is exactly what a take of
+       * "burst followed by digital silence" looks like.  Pin them to the
+       * datasheet defaults: ALC off, noise gate off.
+       */
+
+      es8388_writereg(priv, ES8388_ADCCONTROL10, 0x38);
+      es8388_writereg(priv, ES8388_ADCCONTROL11, 0xb0);
+      es8388_writereg(priv, ES8388_ADCCONTROL12, 0x32);
+      es8388_writereg(priv, ES8388_ADCCONTROL13, 0x06);
+      es8388_writereg(priv, ES8388_ADCCONTROL14, 0x00);
+
+      /* Let the mic bias and the ADC reference settle before streaming,
+       * then make sure the ADC really came up unmuted: a lost write in
+       * this sequence otherwise records a take of digital silence.
+       */
+
+      usleep(20000);
+
+      if ((es8388_readreg(priv, ES8388_ADCCONTROL7) &
+           ES8388_ADCMUTE_BITMASK) != 0)
+        {
+          syslog(LOG_WARNING,
+                 "ES8388 ADC still muted after start, re-arming\n");
+#ifndef CONFIG_AUDIO_EXCLUDE_MUTE
+          es8388_setmute(priv, ES_MODULE_ADC, false);
+#endif
+        }
+    }
 
   /* Create a message queue for the worker thread */
 
@@ -1667,14 +1717,14 @@ static int es8388_stop(FAR struct audio_lowerhalf_s *dev)
       priv->audio_mode == ES_MODULE_ADC_DAC)
     {
       es8388_writereg(priv, ES8388_ADCPOWER,
-                      ES8388_INT1LP_LP        |
-                      ES8388_FLASHLP_LP       |
-                      ES8388_PDNADCBIASGEN_LP |
-                      ES8388_PDNMICB_PWRDN    |
-                      ES8388_PDNADCR_PWRDN    |
-                      ES8388_PDNADCL_PWRDN    |
-                      ES8388_PDNAINR_PWRDN    |
-                      ES8388_PDNAINL_PWRDN);
+                      ES8388_INT1LP_NORMAL        |
+                      ES8388_FLASHLP_NORMAL       |
+                      ES8388_PDNADCBIASGEN_NORMAL |
+                      ES8388_PDNMICB_PWRON        |
+                      ES8388_PDNADCR_PWRUP        |
+                      ES8388_PDNADCL_PWRUP        |
+                      ES8388_PDNAINR_NORMAL       |
+                      ES8388_PDNAINL_NORMAL);
     }
 
   if (priv->audio_mode == ES_MODULE_ADC_DAC)
@@ -2247,6 +2297,18 @@ static void es8388_reset(FAR struct es8388_dev_s *priv)
 
   audinfo("ES8388 reset triggered.\n");
 
+  /* Chip reset, not just a rewrite of the defaults: repeated power-down /
+   * power-up cycles can leave the ADC state machine stuck, which shows up
+   * as a capture that is pure digital silence for the whole take.  The
+   * reset bit is held while set, so it must be released before any of the
+   * configuration below is written.
+   */
+
+  es8388_writereg(priv, ES8388_CONTROL1, ES8388_SCPRESET_RESET);
+  usleep(10000);
+  es8388_writereg(priv, ES8388_CONTROL1, ES8388_SCPRESET_NORMAL);
+  usleep(1000);
+
   priv->dac_output = CONFIG_ES8388_OUTPUT_CHANNEL;
   priv->adc_input  = CONFIG_ES8388_INPUT_CHANNEL;
   priv->samprate   = ES8388_DEFAULT_SAMPRATE;
@@ -2490,14 +2552,14 @@ static void es8388_reset(FAR struct es8388_dev_s *priv)
       priv->audio_mode == ES_MODULE_ADC_DAC)
     {
       es8388_writereg(priv, ES8388_ADCPOWER,
-                      ES8388_INT1LP_LP        |
-                      ES8388_FLASHLP_LP       |
-                      ES8388_PDNADCBIASGEN_LP |
-                      ES8388_PDNMICB_PWRDN    |
-                      ES8388_PDNADCR_PWRDN    |
-                      ES8388_PDNADCL_PWRDN    |
-                      ES8388_PDNAINR_PWRDN    |
-                      ES8388_PDNAINL_PWRDN);
+                      ES8388_INT1LP_NORMAL        |
+                      ES8388_FLASHLP_NORMAL       |
+                      ES8388_PDNADCBIASGEN_NORMAL |
+                      ES8388_PDNMICB_PWRON        |
+                      ES8388_PDNADCR_PWRUP        |
+                      ES8388_PDNADCL_PWRUP        |
+                      ES8388_PDNAINR_NORMAL       |
+                      ES8388_PDNAINL_NORMAL);
     }
 
   if (priv->audio_mode == ES_MODULE_ADC_DAC)

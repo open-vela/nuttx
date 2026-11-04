@@ -394,16 +394,14 @@ static int ls2k0300_i2s_dir_start(FAR struct ls2k0300_i2s_s *priv,
   dir->active = true;
 
   /* Sync the buffer with the DMA engine.  For TX the CPU wrote the
-   * samples, so dirty cache lines must be pushed to memory; for RX the
-   * device will overwrite memory, so stale CPU-side lines are only
-   * dropped.
+   * samples, so dirty cache lines must be pushed to memory.  For RX the
+   * device overwrites memory and the stale CPU-side lines are dropped
+   * when the buffer is submitted (see ls2k0300_i2s_receive): doing it
+   * here would walk 32KB with interrupts disabled in the completion
+   * path, while the 2-frame RX FIFO is already filling up.
    */
 
-  if (tomem)
-    {
-      ls2k0300_dma_invalidate(samp, nbytes);
-    }
-  else
+  if (!tomem)
     {
       ls2k0300_dma_flush(samp, nbytes);
     }
@@ -486,6 +484,19 @@ static void ls2k0300_i2s_rxdone(FAR void *arg, int result)
   done = dir->queue[(dir->tail + LS2K0300_I2S_QUEUE_DEPTH - 1) %
                     LS2K0300_I2S_QUEUE_DEPTH];
 
+  /* Arm the next transfer before doing anything else.  The RX FIFO holds
+   * only two 32-bit frames, so at 48kHz the controller has about 42us of
+   * slack between the completed buffer and the next DMA start; the cache
+   * maintenance below used to eat most of it.
+   */
+
+  if (dir->count > 0)
+    {
+      ls2k0300_i2s_dir_start(priv, dir, LS2K0300_I2S_RX_CHANNEL, true);
+    }
+
+  up_irq_restore(flags);
+
   if (result == OK)
     {
       done.apb->nbytes = done.apb->nmaxbytes;
@@ -499,13 +510,6 @@ static void ls2k0300_i2s_rxdone(FAR void *arg, int result)
       ls2k0300_dma_invalidate(&done.apb->samp[done.apb->curbyte],
                               done.apb->nbytes);
     }
-
-  if (dir->count > 0)
-    {
-      ls2k0300_i2s_dir_start(priv, dir, LS2K0300_I2S_RX_CHANNEL, true);
-    }
-
-  up_irq_restore(flags);
 
   if (done.callback != NULL)
     {
@@ -746,6 +750,13 @@ static int ls2k0300_i2s_receive(FAR struct i2s_dev_s *dev,
     {
       return -EINVAL;
     }
+
+  /* Drop the stale CPU-side cache lines now, in thread context.  The
+   * completion ISR arms the next transfer and must not spend time walking
+   * 32KB of cache while the 2-frame RX FIFO is draining.
+   */
+
+  ls2k0300_dma_invalidate(&apb->samp[apb->curbyte], nbytes);
 
   nxmutex_lock(&priv->lock);
 

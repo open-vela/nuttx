@@ -263,16 +263,18 @@ int ls2k0300_lsia_dma_start(int chn, uint32_t periph, uint32_t mem,
   g_channels[chn].arg = arg;
   g_channels[chn].active = true;
 
-  /* High priority, 32 bit peripheral accesses, incrementing memory
-   * address, transfer complete interrupt.  Both sides are 32 bit wide:
-   * one bus word is one packed stereo frame, which is what the I2S data
-   * register serves.  The reference driver keeps the two widths equal,
-   * and the manual only describes what happens to the *data* when they
-   * differ, not how the memory address advances - so unequal widths are
-   * left alone.
+  /* Very high priority, 32 bit peripheral accesses, incrementing memory
+   * address, transfer complete interrupt.  The I2S RX FIFO is only two
+   * frames deep, so a delayed memory read loses samples; give this
+   * channel the top bus priority.  Both sides are 32 bit wide: one bus
+   * word is one packed stereo frame, which is what the I2S data register
+   * serves.  The reference driver keeps the two widths equal, and the
+   * manual only describes what happens to the *data* when they differ,
+   * not how the memory address advances - so unequal widths are left
+   * alone.
    */
 
-  ccr = LSIA_DMA_CCR_PL(2) |
+  ccr = LSIA_DMA_CCR_PL(3) |
         LSIA_DMA_CCR_MSIZE(LSIA_DMA_WIDTH_32BIT) |
         LSIA_DMA_CCR_PSIZE(LSIA_DMA_WIDTH_32BIT) |
         LSIA_DMA_CCR_MINC |
