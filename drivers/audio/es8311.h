@@ -112,7 +112,7 @@
 
 /* Codec Default Parameters *************************************************/
 
-#define ES8311_DEFAULT_SAMPRATE      48000
+#define ES8311_DEFAULT_SAMPRATE      16000
 #define ES8311_DEFAULT_BPSAMP        16
 
 /****************************************************************************
@@ -141,6 +141,19 @@ struct es8311_dev_s
   struct file                         mq;               /* Message queue for receiving messages */
   char                                mqname[NAME_MAX]; /* Our message queue name */
   pthread_t                           threadid;         /* ID of our thread */
+
+  /* [V751] Worker lifecycle bookkeeping.
+   *
+   * The worker is created detached, so pthread_join() must never be
+   * used on it: the worker cannot leave its loop while
+   * priv->inflight > 0, and when the I2S DMA fails to deliver a
+   * completion that is *forever*.  Before v751 every es8311_stop()
+   * and es8311_release() joined it and could therefore hang for
+   * good.  See es8311_wait_worker_exit() in es8311.c.
+   */
+  volatile int                        worker_gen;       /* Bumped by es8311_start()   */
+  volatile int                        worker_done;      /* 1 = worker returned        */
+  volatile int                        worker_stuck;     /* 1 = worker abandoned       */
   mutex_t                             pendlock;         /* Protect pendq */
   uint32_t                            samprate;         /* Configured samprate (samples/sec) */
 #ifndef CONFIG_AUDIO_EXCLUDE_VOLUME
@@ -153,7 +166,7 @@ struct es8311_dev_s
   bool                                paused;           /* True: Playing is paused */
   bool                                mute;             /* True: Output is muted */
 #ifndef CONFIG_AUDIO_EXCLUDE_STOP
-  bool                                terminating;      /* True: Stop requested */
+  volatile bool                       terminating;      /* True: Stop requested */
 #endif
   bool                                reserved;         /* True: Device is reserved */
   volatile int                        result;           /* The result of the last transfer */
