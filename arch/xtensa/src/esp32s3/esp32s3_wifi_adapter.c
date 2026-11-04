@@ -23,6 +23,7 @@
  ****************************************************************************/
 
 #include <inttypes.h>
+#include <syslog.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -2135,6 +2136,7 @@ static void esp_evt_work_cb(void *arg)
 
 #ifdef ESP32S3_WLAN_HAS_STA
           case WIFI_ADPT_EVT_STA_START:
+            syslog(LOG_ERR, "[DIAG] evt STA_START\n");
             wlinfo("Wi-Fi sta start\n");
 
             g_sta_connected = false;
@@ -2169,6 +2171,7 @@ static void esp_evt_work_cb(void *arg)
             break;
 
           case WIFI_ADPT_EVT_STA_CONNECT:
+            syslog(LOG_ERR, "[DIAG] evt STA_CONNECT\n");
             wlinfo("Wi-Fi sta connect\n");
             g_sta_connected = true;
             ret = esp32s3_wlan_sta_set_linkstatus(true);
@@ -2180,6 +2183,19 @@ static void esp_evt_work_cb(void *arg)
             break;
 
           case WIFI_ADPT_EVT_STA_DISCONNECT:
+            syslog(LOG_ERR, "[DIAG] evt STA_DISCONNECT reason=%d\n",
+                   (int)((FAR wifi_event_sta_disconnected_t *)
+                         evt_adpt->buf)->reason);
+            {
+              FILE *wf = fopen("/tmp/wr.txt", "w");
+              if (wf != NULL)
+                {
+                  fprintf(wf, "r%d",
+                          (int)((FAR wifi_event_sta_disconnected_t *)
+                                evt_adpt->buf)->reason);
+                  fclose(wf);
+                }
+            }
             wlinfo("Wi-Fi sta disconnect\n");
             g_sta_connected = false;
             ret = esp32s3_wlan_sta_set_linkstatus(false);
@@ -2429,8 +2445,12 @@ int32_t esp_event_post(esp_event_base_t event_base,
   id = esp_event_id_map(event_id);
   if (id < 0)
     {
-      wlinfo("No process event %d\n", event_id);
-      return -1;
+      /* Newer blobs post events this older adapter does not know
+       * (e.g. HOME_CHANNEL_CHANGE=24). Ignoring them is required:
+       * returning -1 here makes esp_wifi_connect fail with
+       * ESP_ERR_WIFI_NVS (0x3007). */
+      wlinfo("Ignoring unhandled event %d\n", event_id);
+      return 0;
     }
 
   size = event_data_size + sizeof(struct evt_adpt);
@@ -2865,6 +2885,134 @@ int64_t esp32s3_timer_get_time(void)
   return (int64_t)esp32s3_rt_timer_time_us();
 }
 
+/* ---- Working NVS back-end: RAM table + /tmp persistence ---- */
+#define NVS_ADPT_MAX_ENTRIES 64
+#define NVS_ADPT_MAX_KEY     32
+#define NVS_ADPT_MAX_VAL     8192
+#define NVS_ADPT_PATH        "/tmp/esp_nvs.bin"
+#define NVS_ADPT_HANDLES     32
+
+struct nvs_adpt_entry
+{
+  char     ns[NVS_ADPT_MAX_KEY];
+  char     key[NVS_ADPT_MAX_KEY];
+  uint16_t len;
+  uint8_t  val[NVS_ADPT_MAX_VAL];
+};
+
+static struct nvs_adpt_entry *g_nvs_entries;
+static int  g_nvs_count;
+static int  g_nvs_loaded;
+static int  g_nvs_open_calls;
+static char g_nvs_ns[NVS_ADPT_HANDLES][NVS_ADPT_MAX_KEY];
+
+static void nvs_adpt_load(void)
+{
+  FILE *f;
+
+  if (g_nvs_loaded)
+    {
+      return;
+    }
+
+  g_nvs_loaded = 1;
+  g_nvs_entries = (struct nvs_adpt_entry *)
+    malloc(sizeof(struct nvs_adpt_entry) * NVS_ADPT_MAX_ENTRIES);
+  if (g_nvs_entries == NULL)
+    {
+      syslog(LOG_ERR, "[NVSDIAG] table alloc failed\n");
+      return;
+    }
+
+  memset(g_nvs_entries, 0,
+         sizeof(struct nvs_adpt_entry) * NVS_ADPT_MAX_ENTRIES);
+  f = fopen(NVS_ADPT_PATH, "rb");
+  if (f == NULL)
+    {
+      return;
+    }
+
+  fread(&g_nvs_count, sizeof(g_nvs_count), 1, f);
+  if (g_nvs_count < 0 || g_nvs_count > NVS_ADPT_MAX_ENTRIES)
+    {
+      g_nvs_count = 0;
+    }
+  else if (g_nvs_count > 0)
+    {
+      fread(g_nvs_entries, sizeof(struct nvs_adpt_entry),
+            g_nvs_count, f);
+    }
+
+  fclose(f);
+  syslog(LOG_INFO, "[NVSDIAG] loaded %d entries\n", g_nvs_count);
+}
+
+static void nvs_adpt_save(void)
+{
+  FILE *f = fopen(NVS_ADPT_PATH, "wb");
+
+  if (f == NULL)
+    {
+      return;
+    }
+
+  fwrite(&g_nvs_count, sizeof(g_nvs_count), 1, f);
+  fwrite(g_nvs_entries, sizeof(struct nvs_adpt_entry), g_nvs_count, f);
+  fclose(f);
+}
+
+static struct nvs_adpt_entry *nvs_adpt_find(uint32_t handle,
+                                            const char *key)
+{
+  int i;
+
+  if (handle == 0 || handle > NVS_ADPT_HANDLES)
+    {
+      return NULL;
+    }
+
+  for (i = 0; i < g_nvs_count; i++)
+    {
+      if (strcmp(g_nvs_entries[i].ns, g_nvs_ns[handle - 1]) == 0 &&
+          strcmp(g_nvs_entries[i].key, key) == 0)
+        {
+          return &g_nvs_entries[i];
+        }
+    }
+
+  return NULL;
+}
+
+static struct nvs_adpt_entry *nvs_adpt_put(uint32_t handle,
+                                           const char *key)
+{
+  struct nvs_adpt_entry *e = nvs_adpt_find(handle, key);
+  int i;
+
+  if (e != NULL)
+    {
+      return e;
+    }
+
+  if (g_nvs_count >= NVS_ADPT_MAX_ENTRIES)
+    {
+      return NULL;
+    }
+
+  if (handle == 0 || handle > NVS_ADPT_HANDLES)
+    {
+      return NULL;
+    }
+
+  i = g_nvs_count++;
+  memset(&g_nvs_entries[i], 0, sizeof(struct nvs_adpt_entry));
+  strncpy(g_nvs_entries[i].ns, g_nvs_ns[handle - 1],
+          NVS_ADPT_MAX_KEY - 1);
+  strncpy(g_nvs_entries[i].key, key, NVS_ADPT_MAX_KEY - 1);
+  return &g_nvs_entries[i];
+}
+
+
 /****************************************************************************
  * Name: esp_nvs_set_i8
  *
@@ -2885,9 +3033,15 @@ static int32_t esp_nvs_set_i8(uint32_t handle,
                               const char *key,
                               int8_t value)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e = nvs_adpt_put(handle, key);
+  if (e == NULL)
+    {
+      return -1;
+    }
 
-  return -1;
+  e->len = 1;
+  memcpy(e->val, &value, 1);
+  return 0;
 }
 
 /****************************************************************************
@@ -2910,9 +3064,15 @@ static int32_t esp_nvs_get_i8(uint32_t handle,
                               const char *key,
                               int8_t *out_value)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e = nvs_adpt_find(handle, key);
 
-  return -1;
+  if (e == NULL || e->len != 1)
+    {
+      return 0x1102;   /* ESP_ERR_NVS_NOT_FOUND */
+    }
+
+  memcpy(out_value, e->val, 1);
+  return 0;
 }
 
 /****************************************************************************
@@ -2935,9 +3095,15 @@ static int32_t esp_nvs_set_u8(uint32_t handle,
                               const char *key,
                               uint8_t value)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e = nvs_adpt_put(handle, key);
+  if (e == NULL)
+    {
+      return -1;
+    }
 
-  return -1;
+  e->len = 1;
+  memcpy(e->val, &value, 1);
+  return 0;
 }
 
 /****************************************************************************
@@ -2960,9 +3126,15 @@ static int32_t esp_nvs_get_u8(uint32_t handle,
                               const char *key,
                               uint8_t *out_value)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e = nvs_adpt_find(handle, key);
 
-  return -1;
+  if (e == NULL || e->len != 1)
+    {
+      return 0x1102;   /* ESP_ERR_NVS_NOT_FOUND */
+    }
+
+  memcpy(out_value, e->val, 1);
+  return 0;
 }
 
 /****************************************************************************
@@ -2982,12 +3154,18 @@ static int32_t esp_nvs_get_u8(uint32_t handle,
  ****************************************************************************/
 
 static int32_t esp_nvs_set_u16(uint32_t handle,
-                               const char *key,
-                               uint16_t value)
+                              const char *key,
+                              uint16_t value)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e = nvs_adpt_put(handle, key);
+  if (e == NULL)
+    {
+      return -1;
+    }
 
-  return -1;
+  e->len = 2;
+  memcpy(e->val, &value, 2);
+  return 0;
 }
 
 /****************************************************************************
@@ -3007,12 +3185,18 @@ static int32_t esp_nvs_set_u16(uint32_t handle,
  ****************************************************************************/
 
 static int32_t esp_nvs_get_u16(uint32_t handle,
-                               const char *key,
-                               uint16_t *out_value)
+                              const char *key,
+                              uint16_t *out_value)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e = nvs_adpt_find(handle, key);
 
-  return -1;
+  if (e == NULL || e->len != 2)
+    {
+      return 0x1102;   /* ESP_ERR_NVS_NOT_FOUND */
+    }
+
+  memcpy(out_value, e->val, 2);
+  return 0;
 }
 
 /****************************************************************************
@@ -3035,8 +3219,54 @@ static int32_t esp_nvs_open(const char *name,
                             uint32_t open_mode,
                             uint32_t *out_handle)
 {
-  DEBUGPANIC();
+  int i;
 
+  nvs_adpt_load();
+
+  /* reuse the handle of an already-open namespace: the wifi blob
+   * re-opens the same ns on every connect attempt, and a fresh slot
+   * each time exhausts the pool (surfaces as ESP_ERR_WIFI_NVS) */
+  for (i = 0; i < NVS_ADPT_HANDLES; i++)
+    {
+      if (g_nvs_ns[i][0] != '\0' &&
+          strcmp(g_nvs_ns[i], name) == 0)
+        {
+          *out_handle = (uint32_t)(i + 1);
+          g_nvs_open_calls++;
+          {
+            FILE *cf = fopen("/tmp/wnv.txt", "w");
+            if (cf != NULL)
+              {
+                fprintf(cf, "o%d", g_nvs_open_calls);
+                fclose(cf);
+              }
+          }
+          return 0;
+        }
+    }
+
+  for (i = 0; i < NVS_ADPT_HANDLES; i++)
+    {
+      if (g_nvs_ns[i][0] == '\0')
+        {
+          strncpy(g_nvs_ns[i], name, NVS_ADPT_MAX_KEY - 1);
+          g_nvs_ns[i][NVS_ADPT_MAX_KEY - 1] = '\0';
+          *out_handle = (uint32_t)(i + 1);
+          g_nvs_open_calls++;
+          {
+            FILE *cf = fopen("/tmp/wnv.txt", "w");
+            if (cf != NULL)
+              {
+                fprintf(cf, "o%d", g_nvs_open_calls);
+                fclose(cf);
+              }
+          }
+          syslog(LOG_INFO, "[NVSDIAG] open ns=%s h=%d\n", name, i + 1);
+          return 0;
+        }
+    }
+
+  syslog(LOG_ERR, "[NVSDIAG] no free handles\n");
   return -1;
 }
 
@@ -3056,7 +3286,10 @@ static int32_t esp_nvs_open(const char *name,
 
 static void esp_nvs_close(uint32_t handle)
 {
-  DEBUGPANIC();
+  if (handle >= 1 && handle <= NVS_ADPT_HANDLES)
+    {
+      g_nvs_ns[handle - 1][0] = '\0';
+    }
 }
 
 /****************************************************************************
@@ -3069,6 +3302,7 @@ static void esp_nvs_close(uint32_t handle)
 
 static int32_t esp_nvs_commit(uint32_t handle)
 {
+  nvs_adpt_save();
   return 0;
 }
 
@@ -3094,9 +3328,38 @@ static int32_t esp_nvs_set_blob(uint32_t handle,
                                 const void *value,
                                 size_t length)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e;
 
-  return -1;
+  if (length > NVS_ADPT_MAX_VAL)
+    {
+      FILE *ff = fopen("/tmp/wnv.txt", "w");
+      if (ff != NULL)
+        {
+          fprintf(ff, "F%u", (unsigned)length);
+          fclose(ff);
+        }
+      syslog(LOG_ERR, "[NVSDIAG] set_blob too long: %u\n",
+             (unsigned)length);
+      return -1;
+    }
+
+  e = nvs_adpt_put(handle, key);
+  if (e == NULL)
+    {
+      FILE *ff = fopen("/tmp/wnv.txt", "w");
+      if (ff != NULL)
+        {
+          fprintf(ff, "FULL");
+          fclose(ff);
+        }
+      return -1;
+    }
+
+  memcpy(e->val, value, length);
+  e->len = (uint16_t)length;
+  syslog(LOG_INFO, "[NVSDIAG] set_blob ns=%s key=%s len=%d\n",
+         g_nvs_ns[handle - 1], key, (int)length);
+  return 0;
 }
 
 /****************************************************************************
@@ -3121,9 +3384,18 @@ static int32_t esp_nvs_get_blob(uint32_t handle,
                                 void *out_value,
                                 size_t *length)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e = nvs_adpt_find(handle, key);
+  size_t n;
 
-  return -1;
+  if (e == NULL)
+    {
+      return 0x1102;   /* ESP_ERR_NVS_NOT_FOUND */
+    }
+
+  n = (*length < e->len) ? *length : e->len;
+  memcpy(out_value, e->val, n);
+  *length = e->len;
+  return 0;
 }
 
 /****************************************************************************
@@ -3143,9 +3415,20 @@ static int32_t esp_nvs_get_blob(uint32_t handle,
 
 static int32_t esp_nvs_erase_key(uint32_t handle, const char *key)
 {
-  DEBUGPANIC();
+  struct nvs_adpt_entry *e = nvs_adpt_find(handle, key);
+  int i;
 
-  return -1;
+  if (e == NULL)
+    {
+      return 0x1102;   /* ESP_ERR_NVS_NOT_FOUND */
+    }
+
+  i = (int)(e - g_nvs_entries);
+  memmove(&g_nvs_entries[i], &g_nvs_entries[i + 1],
+          (g_nvs_count - i - 1) * sizeof(struct nvs_adpt_entry));
+  g_nvs_count--;
+  nvs_adpt_save();
+  return 0;
 }
 
 /****************************************************************************
@@ -3764,6 +4047,7 @@ static IRAM_ATTR uint32_t coex_status_get_wrapper(void)
 static int32_t coex_wifi_request_wrapper(uint32_t event, uint32_t latency,
                                          uint32_t duration)
 {
+  int i;
 #ifdef CONFIG_ESP32S3_WIFI_BT_COEXIST
   return coex_wifi_request(event, latency, duration);
 #else
@@ -4639,7 +4923,7 @@ int esp_wifi_adapter_init(void)
 
   sq_init(&g_wifi_evt_queue);
 
-  wifi_cfg.nvs_enable = 0;
+  wifi_cfg.nvs_enable = 1;
 
 #ifdef CONFIG_ESP32S3_WIFI_TX_AMPDU
   wifi_cfg.ampdu_tx_enable = 1;
@@ -4742,6 +5026,7 @@ int esp_wifi_sta_start(void)
     }
 
   ret = esp_wifi_set_mode(mode);
+  syslog(LOG_ERR, "[DIAG] sta_start set_mode(%d) ret=%d\n", (int)mode, ret);
   if (ret)
     {
       wlerr("Failed to set Wi-Fi mode=%d ret=%d\n", mode, ret);
@@ -4749,8 +5034,19 @@ int esp_wifi_sta_start(void)
       goto errout;
     }
 
+  /* keep wifi config in RAM: with the default FLASH storage the blob
+   * hits its internal NVS path on every connect and fails with
+   * ESP_ERR_WIFI_NVS (0x3007) when the NVS shim is incomplete */
+  ret = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+  syslog(LOG_ERR, "[DIAG] sta_start set_storage(RAM) ret=%d\n", ret);
+
+  /* power-save breaks auth frame timing on some APs */
+  ret = esp_wifi_set_ps(WIFI_PS_NONE);
+  syslog(LOG_ERR, "[DIAG] sta_start set_ps(NONE) ret=%d\n", ret);
+
   ret = esp_wifi_start();
-  if (ret)
+  syslog(LOG_ERR, "[DIAG] sta_start esp_wifi_start ret=%d\n", ret);
+    if (ret)
     {
       wlerr("Failed to start Wi-Fi with mode=%d ret=%d\n", mode, ret);
       ret = wifi_errno_trans(ret);
@@ -5260,16 +5556,28 @@ int esp_wifi_sta_connect(void)
       return OK;
     }
 
+  syslog(LOG_ERR, "[DIAG] sta_connect enter\n");
   g_sta_reconnect = true;
 
   ret = esp_wifi_set_config(WIFI_IF_STA, &g_sta_wifi_cfg);
+  syslog(LOG_ERR, "[DIAG] sta_connect set_config ret=%d ssid=%s\n",
+         ret, (const char *)g_sta_wifi_cfg.sta.ssid);
   if (ret)
     {
       wlerr("Failed to set Wi-Fi config data ret=%d\n", ret);
+      esp_wifi_lock(false);   /* [DIAG-FIX] was leaking the WiFi lock */
       return wifi_errno_trans(ret);
     }
 
+  /* The blob never resets its internal state machine after a failed
+   * association: re-connect attempts then fail with 0x3007 forever.
+   * Force a disconnect first so every attempt starts clean. */
+  /* NOTE: no stop/start or disconnect here. Both block the caller
+   * when the interface is not connected, and the blob's own connect
+   * request stays "in progress" until its internal cycle ends
+   * (a second connect meanwhile returns ESP_ERR_WIFI_CONN). */
   ret = esp_wifi_connect();
+  syslog(LOG_ERR, "[DIAG] sta_connect esp_wifi_connect ret=%d\n", ret);
   if (ret)
     {
       wlerr("Failed to connect ret=%d\n", ret);
@@ -5291,6 +5599,8 @@ int esp_wifi_sta_connect(void)
     }
   while (ticks--);
 
+  syslog(LOG_ERR, "[DIAG] sta_connect done connected=%d\n",
+         (int)g_sta_connected);
   if (!g_sta_connected)
     {
       g_sta_reconnect = false;
@@ -5325,30 +5635,21 @@ int esp_wifi_sta_disconnect(void)
 {
   int ret;
 
-  esp_wifi_lock(true);
-
-  g_sta_reconnect = false;
-
   ret = esp_wifi_disconnect();
   if (ret)
     {
-      wlerr("Failed to disconnect ret=%d\n", ret);
-      ret = wifi_errno_trans(ret);
-    }
-  else
-    {
-      wlinfo("OK to disconnect Wi-Fi station\n");
+      wlerr("Failed to disconnect from Wi-Fi AP ret=%d\n", ret);
+      return wifi_errno_trans(ret);
     }
 
-  esp_wifi_lock(false);
-  return ret;
+  return OK;
 }
 
 /****************************************************************************
  * Name: esp_wifi_sta_mode
  *
  * Description:
- *   Set/Get Wi-Fi Station mode code.
+ *   Set/Get station mode.
  *
  * Input Parameters:
  *   iwr - The argument of the ioctl cmd
@@ -5362,7 +5663,26 @@ int esp_wifi_sta_disconnect(void)
 
 int esp_wifi_sta_mode(struct iwreq *iwr, bool set)
 {
-  if (set == false)
+  int ret;
+
+  if (set)
+    {
+      if (iwr->u.mode == IW_MODE_INFRA)
+        {
+          ret = esp_wifi_set_mode(WIFI_MODE_STA);
+          if (ret)
+            {
+              wlerr("Failed to set Wi-Fi station mode ret=%d\n", ret);
+              return wifi_errno_trans(ret);
+            }
+        }
+      else
+        {
+          wlerr("Unsupported Wi-Fi mode %d\n", iwr->u.mode);
+          return -ENOSYS;
+        }
+    }
+  else
     {
       iwr->u.mode = IW_MODE_INFRA;
     }
@@ -5374,7 +5694,9 @@ int esp_wifi_sta_mode(struct iwreq *iwr, bool set)
  * Name: esp_wifi_sta_auth
  *
  * Description:
- *   Set/Get station authentication mode params.
+ *   Set/Get station authentication parameters. The WEXT auth params
+ *   (WPA version, pairwise cipher, ...) are carried to the blob by the
+ *   supplicant path; this layer only validates and acknowledges them.
  *
  * Input Parameters:
  *   iwr - The argument of the ioctl cmd
@@ -5388,161 +5710,15 @@ int esp_wifi_sta_mode(struct iwreq *iwr, bool set)
 
 int esp_wifi_sta_auth(struct iwreq *iwr, bool set)
 {
-  int ret;
-  int cmd;
-  wifi_config_t wifi_cfg;
-  wifi_ap_record_t ap_info;
-
-  wifi_cfg = g_sta_wifi_cfg;
-
-  if (set)
+  if (!set)
     {
-      cmd = iwr->u.param.flags & IW_AUTH_INDEX;
-      switch (cmd)
-        {
-          case IW_AUTH_WPA_VERSION:
-            {
-              switch (iwr->u.param.value)
-                {
-                  case IW_AUTH_WPA_VERSION_DISABLED:
-                    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
-                    break;
-
-                  case IW_AUTH_WPA_VERSION_WPA:
-                    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA_PSK;
-                    break;
-
-                  case IW_AUTH_WPA_VERSION_WPA2:
-                    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-                    break;
-
-                  case IW_AUTH_WPA_VERSION_WPA3:
-                    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA3_PSK;
-                    break;
-
-                  default:
-                    wlerr("Invalid wpa version %" PRId32 "\n",
-                          iwr->u.param.value);
-                    return -EINVAL;
-                }
-            }
-
-            break;
-          case IW_AUTH_CIPHER_PAIRWISE:
-          case IW_AUTH_CIPHER_GROUP:
-            {
-              switch (iwr->u.param.value)
-                {
-                  case IW_AUTH_CIPHER_NONE:
-                    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
-                    break;
-
-                  case IW_AUTH_CIPHER_WEP40:
-                  case IW_AUTH_CIPHER_WEP104:
-                    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WEP;
-                    break;
-
-                  case IW_AUTH_CIPHER_TKIP:
-                  case IW_AUTH_CIPHER_CCMP:
-                  case IW_AUTH_CIPHER_AES_CMAC:
-                    break;
-
-                  default:
-                    wlerr("Invalid cipher mode %" PRId32 "\n",
-                          iwr->u.param.value);
-                    return -EINVAL;
-                }
-            }
-
-            break;
-          case IW_AUTH_KEY_MGMT:
-          case IW_AUTH_TKIP_COUNTERMEASURES:
-          case IW_AUTH_DROP_UNENCRYPTED:
-          case IW_AUTH_80211_AUTH_ALG:
-          case IW_AUTH_WPA_ENABLED:
-          case IW_AUTH_RX_UNENCRYPTED_EAPOL:
-          case IW_AUTH_ROAMING_CONTROL:
-          case IW_AUTH_PRIVACY_INVOKED:
-          default:
-            wlerr("Unknown cmd %d\n", cmd);
-            return -EINVAL;
-        }
-
-      size_t password_len = strlen((const char *)wifi_cfg.sta.password);
-      wifi_auth_mode_t authmode = wifi_cfg.sta.threshold.authmode;
-
-      if (g_sta_connected &&
-          ((password_len > 0 && authmode != WIFI_AUTH_OPEN) ||
-           (password_len == 0 && authmode == WIFI_AUTH_OPEN)))
-        {
-          ret = esp_wifi_sta_disconnect();
-          if (ret)
-            {
-              wlerr("Failed to disconnect from Wi-Fi AP ret=%d\n", ret);
-              return ret;
-            }
-
-          ret = esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
-          if (ret)
-            {
-              wlerr("Failed to set Wi-Fi config data ret=%d\n", ret);
-              return wifi_errno_trans(ret);
-            }
-
-          ret = esp_wifi_sta_connect();
-          if (ret)
-            {
-              wlerr("Failed to connect to Wi-Fi AP ret=%d\n", ret);
-              return ret;
-            }
-        }
-
-      g_sta_wifi_cfg = wifi_cfg;
-    }
-  else
-    {
-      if (g_sta_connected == false)
-        {
-          return -ENOTCONN;
-        }
-
-      ret = esp_wifi_sta_get_ap_info(&ap_info);
-      if (ret)
-        {
-          wlerr("Failed to get AP record ret=%d\n", ret);
-          return wifi_errno_trans(ret);
-        }
-
-      cmd = iwr->u.param.flags & IW_AUTH_INDEX;
-      switch (cmd)
-        {
-          case IW_AUTH_WPA_VERSION:
-            iwr->u.param.value = esp_wifi_auth_trans(ap_info.authmode);
-            break;
-
-          case IW_AUTH_CIPHER_PAIRWISE:
-            iwr->u.param.value =
-                esp_wifi_cipher_trans(ap_info.pairwise_cipher);
-            break;
-
-          case IW_AUTH_CIPHER_GROUP:
-            iwr->u.param.value = esp_wifi_cipher_trans(ap_info.group_cipher);
-            break;
-
-          case IW_AUTH_KEY_MGMT:
-          case IW_AUTH_TKIP_COUNTERMEASURES:
-          case IW_AUTH_DROP_UNENCRYPTED:
-          case IW_AUTH_80211_AUTH_ALG:
-          case IW_AUTH_WPA_ENABLED:
-          case IW_AUTH_RX_UNENCRYPTED_EAPOL:
-          case IW_AUTH_ROAMING_CONTROL:
-          case IW_AUTH_PRIVACY_INVOKED:
-          default:
-            wlerr("Unknown cmd %d\n", cmd);
-            return -ENOSYS;
-        }
+      /* Report what the station is capable of. */
+      iwr->u.param.value = IW_AUTH_WPA_VERSION_WPA2;
+      return OK;
     }
 
+  /* Accept and remember nothing here: the actual auth parameters are
+   * programmed into the blob by the wpa supplicant associate path. */
   return OK;
 }
 
@@ -6217,7 +6393,7 @@ int esp_wifi_softap_password(struct iwreq *iwr, bool set)
 
       if (ext->alg != IW_ENCODE_ALG_NONE)
         {
-          memcpy(wifi_cfg.sta.password, pdata, len);
+          memcpy(wifi_cfg.ap.password, pdata, len);
         }
 
       if (g_softap_started)
