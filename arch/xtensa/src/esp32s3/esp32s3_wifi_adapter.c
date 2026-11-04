@@ -5053,6 +5053,20 @@ int esp_wifi_sta_start(void)
       goto errout;
     }
 
+  /* [WIFI-FIX] country CN (channels 1-13) BEFORE any scan: the blob
+   * default is world 01 (ch1-11), and netinit scans at boot long
+   * before the app-level wapi country, so ch12/13 APs were invisible. */
+  {
+    wifi_country_t country;
+    memset(&country, 0, sizeof(country));
+    country.schan  = 1;
+    country.nchan  = 13;
+    country.policy = WIFI_COUNTRY_POLICY_MANUAL;
+    memcpy(country.cc, "CN", 2);
+    ret = esp_wifi_set_country(&country);
+    syslog(LOG_ERR, "[DIAG] sta_start set_country(CN) ret=%d\n", ret);
+  }
+
   g_sta_started = true;
 
   wlinfo("OK to start Wi-Fi station\n");
