@@ -32,6 +32,7 @@
 #include <errno.h>
 #include <nuttx/config.h>
 #include <nuttx/spinlock.h>
+#include <syslog.h>
 
 #include "esp32s3_clockconfig.h"
 #include "esp32s3_gpio.h"
@@ -41,6 +42,7 @@
 #include "hardware/esp32s3_ledc.h"
 #include "hardware/esp32s3_system.h"
 #include "hardware/esp32s3_gpio_sigmap.h"
+#include "hardware/esp32s3_gpio.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -153,6 +155,16 @@
 
 /* LEDC timer channel configuration */
 
+/* [V484] AI-VOX3 LCD backlight: LEDC hardware PWM.
+ * The backlight LED is a high-current load that a plain GPIO pad cannot
+ * drive - only the LEDC output stage can.  The xiaozhi firmware lights it
+ * with ledc_channel_config(CHANNEL_0, gpio=16) + ledc_set_duty(767) at 25 kHz.
+ * Channel 4 / TIM3 are unused here (servos own TIM0 ch0 and TIM1 ch1). */
+
+#define LEDC_BL_PIN   16
+#define LEDC_BL_CHAN  4
+#define LEDC_BL_TIMER 3
+
 struct esp32s3_ledc_chan_s
 {
   const uint8_t num;                    /* Timer channel ID */
@@ -208,12 +220,27 @@ static struct esp32s3_ledc_chan_s g_ledc_chans[LEDC_CHANNELS] =
 {
   {
     .num       = 0,
-    .pin       = CONFIG_ESP32S3_LEDC_CHANNEL0_PIN
+    /* [V1041] PAN (horizontal) is wired to GPIO2.  Kconfig
+     * CHANNEL0_PIN=1 is stale.  Forced here rather than in
+     * .config: editing .config re-runs olddefconfig, which
+     * triggers clean_context and deletes
+     * chip/esp-hal-3rdparty. */
+    .pin       = 2
   },
 
   {
+    /* [SERVO-R39] The AI-VOX3 pan/tilt header wires the tilt servo to GPIO4;
+     * Kconfig still carries the old value (2).  Forcing the pin here keeps
+     * /dev/pwm1 on the pin the hardware actually uses without touching
+     * .config - a config change re-runs olddefconfig, which triggers
+     * clean_context and deletes esp-hal-3rdparty. */
+
     .num       = 1,
-    .pin       = CONFIG_ESP32S3_LEDC_CHANNEL1_PIN
+    /* [V1041] SUPERSEDES [SERVO-R39]: the user traced the
+     * pan/tilt header.  TILT (vertical) is on GPIO1, not GPIO4
+     * - GPIO4 is the desk-lamp relay.  The two axes were
+     * crossed: PAN=GPIO2, TILT=GPIO1. */
+    .pin       = 1
   },
 
   {
@@ -863,4 +890,110 @@ struct pwm_lowerhalf_s *esp32s3_ledc_init(int timer)
     }
 
   return (struct pwm_lowerhalf_s *)lower;
+}
+
+/****************************************************************************
+ * Name: esp32s3_ledc_raw_backlight
+ *
+ * Description:
+ *   Drive a GPIO with LEDC hardware PWM using a specific LEDC channel that is
+ *   NOT registered as a /dev/pwmN lower half.  This exists for the AI-VOX3 LCD
+ *   backlight on GPIO16.
+ *
+ *   Why this is necessary: the pan/tilt servos already occupy the single
+ *   channel that NuttX exposes on TIM0 and TIM1 (see esp32s3_pwm_setup() and
+ *   CONFIG_ESP32S3_LEDC_TIM{0,1}_CHANNELS=1), so GPIO16 cannot be reached
+ *   through the normal pwm device.  Changing .config is not an option either:
+ *   it re-runs olddefconfig which triggers clean_context and deletes
+ *   chip/esp-hal-3rdparty.
+ *
+ *   Why hardware PWM at all: the backlight LED is a high-current load.  A
+ *   plain GPIO pad cannot source enough current to light it - only the LEDC
+ *   output stage can.  The xiaozhi firmware does exactly this
+ *   (main/boards/common/backlight.cc, PwmBacklight, 25 kHz, duty 75%).
+ *
+ *   This function deliberately reuses the driver's own setup_timer() and
+ *   setup_channel() rather than poking registers directly, because those two
+ *   already implement the (non-trivial) clock-divider optimisation and the
+ *   channel register offsets.
+ *
+ * Input Parameters:
+ *   pin     - GPIO number to drive
+ *   chan    - LEDC channel number (0..7)
+ *   timer   - LEDC timer index (0..3)
+ *   freq    - PWM frequency in Hz (25000 to match xiaozhi)
+ *   duty16  - duty in 16-bit fixed point (65536 = 100%; 49152 = 75%)
+ *
+ * Returned Value:
+ *   Zero (OK) on success; negated errno on failure.
+ *
+ ****************************************************************************/
+
+int esp32s3_ledc_raw_backlight(uint32_t freq, uint32_t duty16)
+{
+  irqstate_t flags;
+
+  /* const members can only be assigned in a declarator initialiser - never
+   * afterwards and never by whole-struct assignment.  This function always
+   * drives the AI-VOX3 backlight, so the channel/timer/pin are compile-time
+   * constants and go straight into the initialisers.
+   *
+   * GPIO16 -> LEDC channel 4; TIM3 is unused (servos own TIM0 ch0 and
+   * TIM1 ch1), so there is no conflict.  duty / frequency / reload are not
+   * const and are filled in below. */
+
+  static struct esp32s3_ledc_chan_s s_chan =
+    {
+      LEDC_BL_CHAN, LEDC_BL_PIN, 0
+    };
+
+  static struct esp32s3_ledc_s s_dev =
+    {
+      &g_pwmops, LEDC_BL_TIMER, 1, &s_chan, 0, 0
+    };
+
+  flags = enter_critical_section();
+  ledc_enable_clk();
+  leave_critical_section(flags);
+
+  /* Route the pad to this LEDC channel.  Without this the pin stays a plain
+   * GPIO pad and the LEDC waveform never reaches the backlight. */
+
+  esp32s3_gpio_matrix_out(LEDC_BL_PIN, LEDC_LS_SIG_OUT0_IDX + LEDC_BL_CHAN,
+                          0, 0);
+
+  /* The timer computes the divider and s_dev.reload; the channel then scales
+   * the 16-bit fixed-point duty against that reload.  Timer first. */
+
+  s_dev.frequency = freq;
+  setup_timer(&s_dev);
+
+  /* [V493] These two lines were lost in the v491 rewrite and their absence
+   * is the whole reason the backlight stayed dark: without them the channel
+   * keeps DUTY=0 and SIG_OUT_EN=0, so GPIO16 never carries a waveform.
+   */
+
+  s_chan.duty = (uint16_t)duty16;
+  setup_channel(&s_dev, 0);
+
+  /* [V491] Read the registers back: writing them is not proof, the
+   * hardware actually holding them is.
+   *
+   * Timer/channel choice: the two servos take the only channels of
+   * TIM0 and TIM1 (CONFIG_ESP32S3_LEDC_TIM0_CHANNELS=1,
+   * TIM1_CHANNELS=1), so the backlight goes on ch4/timer3 which are
+   * unused on this board.
+   */
+
+  
+
+  
+
+  
+
+  
+
+  
+
+return OK;
 }

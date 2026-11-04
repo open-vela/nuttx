@@ -42,6 +42,9 @@
 #include "hardware/esp32s3_gpio.h"
 #include "hardware/esp32s3_iomux.h"
 #include "hardware/esp32s3_usb_serial_jtag.h"
+#include <string.h>
+#include <syslog.h>
+#include <nuttx/sched.h>        /* [V678] this_task() */
 
 /****************************************************************************
  * Private Data
@@ -177,6 +180,36 @@ int esp32s3_configgpio(uint32_t pin, gpio_pinattr_t attr)
   uint32_t pin2func;
 
   DEBUGASSERT(esp32s3_is_valid_gpio(pin));
+
+  /* [V678] Backlight pad audit.  The panel went dark after hours of runtime
+   * with no display-off or sleep command anywhere in the log, so the leading
+   * theory is that something re-configures GPIO16 out from under the
+   * blkeeper thread.  blkeeper itself re-pins the pad every 2 s (legal);
+   * anyone else touching it gets one line here.  Capped at 8 lines so an
+   * interrupt-path flood cannot eat the IRQ stack. */
+  if (pin == 16)
+    {
+      static int s_v678_n;
+
+      if (s_v678_n < 16)
+        {
+          struct tcb_s *tcb = this_task();
+          const char *nm = (tcb != NULL) ? tcb->name : NULL;
+
+          /* [V679] scrinit == lcd_selftest startup re-pins (8x, all legal,
+           * board_lcd.c:303-304).  It must NOT eat the quota or a real
+           * grabber stays silent for the whole runtime. */
+          if (nm == NULL || (strcmp(nm, "blkeeper") != 0 &&
+                             strcmp(nm, "scrinit") != 0))
+            {
+              s_v678_n++;
+              syslog(LOG_ERR, "[V679] pad16 reconf by %s pid=%d (attr=%lu)\n",
+                     nm != NULL ? nm : "?",
+                     (tcb != NULL) ? (int)tcb->pid : -1,
+                     (unsigned long)attr);
+            }
+        }
+    }
 
   func  = 0;
   cntrl = 0;
