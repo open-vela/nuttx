@@ -37,7 +37,9 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <errno.h>
+#include <time.h>
 #include <debug.h>
+#include <syslog.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/mqueue.h>
@@ -182,9 +184,13 @@ static int audio_open(FAR struct file *filep)
       return ret;
     }
 
-  /* First open, alloc status memory */
+  /* [V647-B] Allocate the status structure once and keep it for the
+   * lifetime of the device.  It used to be freed in audio_close() while
+   * buffer completions were still in flight, and audio_dequeuebuffer()
+   * dereferences upper->status->tail unconditionally.
+   */
 
-  if (upper->head == NULL)
+  if (upper->status == NULL)
     {
       upper->status = kumm_zalloc(sizeof(struct audio_status_s));
       if (!upper->status)
@@ -270,8 +276,15 @@ static int audio_close(FAR struct file *filep)
       audinfo("calling shutdown\n");
 
       lower->ops->shutdown(lower);
-      kumm_free(upper->status);
-      upper->status = NULL;
+
+      /* [V647-B] Do NOT free upper->status.  shutdown() only asks the
+       * lower half to stop; buffers that are already in flight still
+       * come back through dev.upper(AUDIO_CALLBACK_DEQUEUE) ->
+       * audio_dequeuebuffer(), which does "upper->status->tail++".
+       * Freeing it turned every "close while buffers are in flight"
+       * into a NULL dereference: xtensa_user_panic EXCCAUSE=001c,
+       * vaddr=0x8, task es8311 (v646 probe).
+       */
     }
 
   spin_unlock_irqrestore(&upper->spinlock, flags);
@@ -630,12 +643,43 @@ static int audio_start(FAR struct file *filep)
 
   /* Verify that the Audio is not already running */
 
+  /* [V695] *** Also start when this very handle is not running yet. ***
+   *
+   * pcm0p and pcm0c share one audio_upperhalf_s (v647), so
+   * upper->status->state is the aggregate of both directions.  The voice
+   * channel keeps the playback fd open for TTS, which leaves nstate ==
+   * RUNNING in audio_stop(); that function only folds the shared state back
+   * to PREPARED when every OTHER priv is AUDIO_STATE_OPEN, so the state
+   * stayed RUNNING for the rest of the boot.
+   *
+   * With the old condition (PREPARED || XRUN) this branch was then skipped
+   * for every capture after the first, and lower->ops->start() -- the only
+   * path that runs es8311_start() and with it the ADC power-up train -- was
+   * never invoked.  The function still ended with
+   *
+   *     priv->state = AUDIO_STATE_RUNNING;
+   *     return OK;
+   *
+   * so the capture client believed it had started and later died with five
+   * "capture EIO" retries and zero bytes, while the codec never drove DIN:
+   *
+   *   [V660] pins MCLK=1509 BCLK=985 WS=1016 DIN(9)=0 /2000 rxstart=1 ...
+   *   [voice] recording thread exit: 0 chunks, 0 read, 0 sent (abnormal)
+   *
+   * The first capture after a boot still worked because the shared state
+   * was PREPARED at that point.  Starting whenever this handle is not
+   * already RUNNING is a no-op for a handle that is, so playback does not
+   * restart, and it makes the capture independent of the playback state.
+   */
+
   if (upper->status->state == AUDIO_STATE_PREPARED ||
-      upper->status->state == AUDIO_STATE_XRUN)
+      upper->status->state == AUDIO_STATE_XRUN ||
+      priv->state != AUDIO_STATE_RUNNING)
     {
       /* Invoke the bottom half method to start the audio stream */
 
-      audinfo("start: status=%d\n", upper->status->state);
+      audinfo("start: status=%d priv=%d\n", upper->status->state,
+              priv->state);
 
 #ifdef CONFIG_AUDIO_MULTI_SESSION
       ret = lower->ops->start(lower, session);
@@ -1266,9 +1310,81 @@ static int audio_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
 
       case AUDIOIOC_GETBUFFERINFO:
         {
+          FAR struct ap_buffer_info_s *bufinfo;
+
           audinfo("AUDIOIOC_GETBUFFERINFO\n");
 
           ret = lower->ops->ioctl(lower, AUDIOIOC_GETBUFFERINFO, arg);
+
+          /* [AUDIO-FIX-R38] The lower half may not implement this query.
+           *
+           * audio_allocbuffer() rejects an allocation whenever
+           * upper->periods >= upper->nbuffers, and nbuffers is only ever set
+           * here.  A lower half that answers -ENOTTY (the es8311 half answers
+           * only when CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS is set, which it is
+           * not in this build) therefore left nbuffers at zero and every
+           * allocation failed - the first one included, which is the
+           * "alloc apb 0 failed" that kept TTS silent and capture unusable.
+           *
+           * Fall back to the generic geometry, which is also what
+           * drivers/audio/audio_dma.c sizes its own ring with.
+           */
+
+          if (ret < 0)
+            {
+              bufinfo              = (FAR struct ap_buffer_info_s *)arg;
+              bufinfo->buffer_size = CONFIG_AUDIO_BUFFER_NUMBYTES;
+              bufinfo->nbuffers    = CONFIG_AUDIO_NUM_BUFFERS;
+
+              /* [AUDIO-FIX-R43] CONFIG_AUDIO_BUFFER_NUMBYTES is 8192 in this
+               * build, but the ESP32-S3 I2S driver refuses any single audio
+               * buffer bigger than
+               *
+               *   ESP32S3_DMA_BUFLEN_MAX * I2S_DMADESC_NUM = 4095 * 2 = 8190
+               *
+               * i2s_send() answered -EFBIG (-27) for every buffer, so no DMA
+               * descriptor was ever loaded, no EOF interrupt ever fired and
+               * no buffer ever came back: playback timed out waiting for a
+               * played-out buffer and capture never delivered a byte.
+               *
+               * Clamp the geometry to 4 x 4096 B - same total depth, well
+               * inside the DMA ceiling, and a multiple of every sample width
+               * the codec supports.  (The alternative, raising
+               * CONFIG_I2S_DMADESC_NUM, needs a .config edit, and that
+               * triggers clean_context which deletes esp-hal-3rdparty.)
+               */
+
+              if (bufinfo->buffer_size > 4096)
+                {
+                  bufinfo->buffer_size = 4096;
+                  /* [V1001] Buffer COUNT 4 -> 8.  The 4096 B size stays
+                   * inside the DMA ceiling (4095 * 2 = 8190 B); only the
+                   * depth grows, 4 x 4096 = 16 KB (512 ms) -> 8 x 4096 =
+                   * 32 KB (1.0 s) at 16 kHz 16-bit mono.
+                   *
+                   * v1000b proved the software jitter queue is NOT the
+                   * limiter: doubling its cushion (primed 9600 -> 18240
+                   * samples) left the [V967] q=0 starvation rate at 62%
+                   * vs 67% before.  Measured downlink holes reach
+                   * 940-1060 ms, which a 512 ms pool physically cannot
+                   * bridge, so the DMA starves and the effective rate
+                   * swings 6200..23574 Hz around a nominal 16000. */
+                  bufinfo->nbuffers    = 8;
+
+                  /* [V1001b] Print the geometry actually chosen.  The old
+                   * text hardcoded "4 x 4096", which would have kept
+                   * reporting 4 after V1001 raised the count to 8. */
+                  syslog(LOG_ERR, "[R43] clamped audio buffer to %d x %d "
+                         "(DMA ceiling %d)\n", bufinfo->nbuffers,
+                         bufinfo->buffer_size, 4095 * 2);
+                }
+
+              syslog(LOG_ERR, "[R38] no driver buffer info, using %d x %d\n",
+                     bufinfo->nbuffers, bufinfo->buffer_size);
+
+              ret = OK;
+            }
+
           if (ret >= 0)
             {
               upper->nbuffers =
@@ -1420,23 +1536,83 @@ static int audio_poll(FAR struct file *filep,
  *
  ****************************************************************************/
 
+/* [V752] Number of notifications dropped because the user queue was full.
+ * Dropped on purpose: see the note in audio_sendmsg(). */
+
+static unsigned long g752_sendmsg_drop;
+
 static inline void audio_sendmsg(FAR struct audio_upperhalf_s *upper,
                                  FAR struct audio_msg_s *msg)
 {
   FAR struct audio_openpriv_s *priv;
   irqstate_t flags;
+  struct timespec abstime;
+  int dropped = 0;
+  int ret;
+
+  /* [V752] *** Never block in here. ***
+   *
+   * The old code called the *blocking* file_mq_send() while holding
+   * upper->spinlock with preemption suppressed.  When the user queue is
+   * full that call never returns, so the spinlock -- and, further up the
+   * stack, the caller's own mutex -- is never released.  The only thread
+   * that could drain the queue is the consumer, which is typically
+   * blocked on exactly that mutex.  Circular wait, board dead until a
+   * power cycle.
+   *
+   * Measured on the v751 field run (8 min autoptt).  ps, with the thread
+   * entry addresses resolved through the ELF symbol table:
+   *
+   *   51  button_cmd_worker   Waiting  MQ full    <- parked right here
+   *  105  recording_thread    Waiting  Mutex:51   <- cannot drain the queue
+   *   53  _agent_task_shim    Waiting  Mutex:105
+   *
+   * The freeze started immediately after "[V750] close: enter", i.e. on
+   * voice_channel_stop() -> audio_capture_close() -> close(fd), which is
+   * one of this function's callers.
+   *
+   * file_mq_timedsend() bounds the wait to 20 ms.  Losing a notification
+   * costs at most one buffer; hanging costs the whole device.
+   */
+
+  clock_gettime(CLOCK_REALTIME, &abstime);
+  abstime.tv_nsec += 20 * 1000 * 1000;             /* +20 ms */
+  if (abstime.tv_nsec >= 1000000000)
+    {
+      abstime.tv_sec  += 1;
+      abstime.tv_nsec -= 1000000000;
+    }
 
   flags = spin_lock_irqsave_nopreempt(&upper->spinlock);
   for (priv = upper->head; priv != NULL; priv = priv->flink)
     {
       if (priv->usermq != NULL)
         {
-          file_mq_send(priv->usermq, (FAR const char *)msg, sizeof(*msg),
-                       CONFIG_AUDIO_BUFFER_DEQUEUE_PRIO);
+          ret = file_mq_timedsend(priv->usermq, (FAR const char *)msg,
+                                  sizeof(*msg),
+                                  CONFIG_AUDIO_BUFFER_DEQUEUE_PRIO,
+                                  &abstime);
+          if (ret < 0)
+            {
+              dropped++;
+            }
         }
     }
 
   spin_unlock_irqrestore_nopreempt(&upper->spinlock, flags);
+
+  if (dropped != 0)
+    {
+      /* Logged outside the spinlock: syslog() must never be called with
+       * preemption suppressed.
+       */
+
+      g752_sendmsg_drop += dropped;
+      syslog(LOG_ERR,
+             "[V752] audio_sendmsg: %d notification(s) dropped "
+             "(total %lu)\n",
+             dropped, g752_sendmsg_drop);
+    }
 }
 
 /****************************************************************************
@@ -1875,38 +2051,58 @@ int audio_register(FAR const char *name, FAR struct audio_lowerhalf_s *dev)
       return -EINVAL;
     }
 
-  /* Allocate the upper-half data structure */
-
-  upper = kmm_zalloc(sizeof(struct audio_upperhalf_s));
-  if (!upper)
-    {
-      auderr("ERROR: Allocation failed\n");
-      return -ENOMEM;
-    }
-
-  /* Initialize the Audio device structure
-   * (it was already zeroed by kmm_zalloc())
+  /* [V647-A] One upper half per *lower-half instance*, not per name.
+   *
+   * The board registers the same lower half under two names
+   * ("pcm0p"+"pcm0" for playback, "pcm0c"+"pcm_in0" for capture).
+   * Allocating a fresh upper for every call and overwriting dev->priv
+   * meant the last alias won: opening /dev/audio/pcm0c allocated
+   * upper_B->status, but the lower half kept delivering its DEQUEUE
+   * callbacks to upper_D->priv, whose ->status was never allocated --
+   * audio_dequeuebuffer() then faulted on status->tail (vaddr 0x8).
+   * Reusing the upper that is already bound to this lower half keeps
+   * every alias name working with a single, consistent context.
    */
 
-  nxmutex_init(&upper->lock);
-  spin_lock_init(&upper->spinlock);
-  upper->dev = dev;
+  upper = (FAR struct audio_upperhalf_s *)dev->priv;
+
+  if (upper == NULL)
+    {
+      /* Allocate the upper-half data structure */
+
+      upper = kmm_zalloc(sizeof(struct audio_upperhalf_s));
+      if (!upper)
+        {
+          auderr("ERROR: Allocation failed\n");
+          return -ENOMEM;
+        }
+
+      /* Initialize the Audio device structure
+       * (it was already zeroed by kmm_zalloc())
+       */
+
+      nxmutex_init(&upper->lock);
+      spin_lock_init(&upper->spinlock);
+      upper->dev = dev;
+
+      /* Give the lower-half a context to the upper half */
+
+      dev->upper = audio_callback;
+      dev->priv = upper;
+    }
 
   /* Register the Audio device */
 
   audio_get_path(name, path, sizeof(path));
 
-  /* Give the lower-half a context to the upper half */
-
-  dev->upper = audio_callback;
-  dev->priv = upper;
-
   audinfo("Registering %s\n", path);
   ret = register_driver(path, &g_audioops, 0666, upper);
   if (ret != OK)
     {
+      /* Do not free upper here: it may already be shared by another
+       * alias of the same lower half (and dev->priv references it). */
+
       auderr("Failed to register %s\n", path);
-      kmm_free(upper);
     }
 
   return ret;

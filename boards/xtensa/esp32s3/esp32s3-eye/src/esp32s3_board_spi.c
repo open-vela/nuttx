@@ -114,7 +114,12 @@ int esp32s3_spi3_cmddata(struct spi_dev_s *dev, uint32_t devid, bool cmd)
        *  data bits are data or a command.
        */
 
-      esp32s3_gpiowrite(CONFIG_ESP32S3_SPI3_MISOPIN, !cmd);
+      /* AI-VOX3: the SPI3 DC pad is GPIO14 (ESP32S3_EYE_DISPLAY_DC).
+       * The stock code wrote CONFIG_ESP32S3_SPI3_MISOPIN here, which only
+       * worked while MISOPIN happened to be 14.  That is a misnomer: the
+       * panel has NO MISO, so MISOPIN is now -1 and gpiowrite(-1) is a
+       * no-op that would freeze DC.  Use the real DC macro instead. */
+      esp32s3_gpiowrite(ESP32S3_EYE_DISPLAY_DC, !cmd);
 
       return OK;
     }

@@ -261,8 +261,7 @@ endef
 endif
 
 chip/$(ESP_HAL_3RDPARTY_REPO):
-	$(Q) echo "Cloning Espressif HAL for 3rd Party Platforms"
-	$(Q) $(call CLONE_ESP_HAL_3RDPARTY_REPO)
+	$(Q) echo "Using cached Espressif HAL (clone disabled)"
 ifneq ($(USE_NXTMPDIR_ESP_REPO_DIRECTLY),y)
 	$(Q) echo "Espressif HAL for 3rd Party Platforms: ${ESP_HAL_3RDPARTY_VERSION}"
 	$(Q) git -C chip/$(ESP_HAL_3RDPARTY_REPO) checkout --quiet $(ESP_HAL_3RDPARTY_VERSION)

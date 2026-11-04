@@ -53,12 +53,15 @@
 /* Output pins. GPIO3 is the LED.
  */
 
-#define GPIO_OUT1    3
+#define GPIO_OUT1    4    /* [COMPANION] 台灯继电器 */
+/* [COMPANION] 原来这里有个 GPIO_OUT2=48，是错的：SW-420 是**输入**
+ * 传感器（感知"被拍"），不是马达。已改为 GPIO_IN2，见下方。 */
 
 /* Input pins. GPIO0 is the BOOT button.
  */
 
-#define GPIO_IN1     0
+#define GPIO_IN1     42   /* [COMPANION] TTP223 触摸（摸它） */
+#define GPIO_IN2     48   /* [COMPANION] SW-420 震动传感器（拍它） */
 
 /* Interrupt pins. GPIO0 can be used as an interrupt.
  */
@@ -137,7 +140,8 @@ static const struct gpio_operations_s gpin_ops =
 
 static const uint32_t g_gpioinputs[BOARD_NGPIOIN] =
 {
-  GPIO_IN1
+  GPIO_IN1,
+  GPIO_IN2
 };
 
 static struct esp32s3gpio_dev_s g_gpin[BOARD_NGPIOIN];
@@ -358,7 +362,9 @@ int esp32s3_gpio_init(void)
 
       /* Configure the pins that will be used as INPUT */
 
-      esp32s3_configgpio(g_gpioinputs[i], INPUT_FUNCTION_2 | PULLUP);
+      /* [COMPANION] TTP223 空闲输出低电平；若在此加上拉会读到恒高，
+       * 表现为"一直被摸"，所以浮空输入。 */
+      esp32s3_configgpio(g_gpioinputs[i], INPUT_FUNCTION_2);
 
       pincount++;
     }

@@ -234,6 +234,8 @@ void esp32s3_dma_release(int chan)
  *
  ****************************************************************************/
 
+/* [V643] PROBE: direct ROM console, does not go through /dev/kmsg */
+
 uint32_t esp32s3_dma_setup(struct esp32s3_dmadesc_s *dmadesc, uint32_t num,
                            uint8_t *pbuf, uint32_t len, bool tx, int chan)
 {
@@ -247,8 +249,18 @@ uint32_t esp32s3_dma_setup(struct esp32s3_dmadesc_s *dmadesc, uint32_t num,
   int dma_size = ESP32S3_DMA_BUFFER_MAX_SIZE;
   bool buffer_in_psram = esp32s3_ptr_extram(pdata);
   int block_size_index = 0;
+  if (!tx)
+    {
+      
+    }
+
   uint32_t addr = GDMA_CH_REG_ADDR(DMA_IN_CONF0_CH0_REG, chan);
   bool burst_en = REG_GET_FIELD(addr, DMA_IN_DATA_BURST_EN_CH0);
+
+  if (!tx)
+    {
+      
+    }
 
   DEBUGASSERT(dmadesc != NULL);
   DEBUGASSERT(num > 0);
@@ -312,6 +324,11 @@ uint32_t esp32s3_dma_setup(struct esp32s3_dmadesc_s *dmadesc, uint32_t num,
       dmadesc[i].pbuf = pdata;
       dmadesc[i].next = &dmadesc[i + 1];
 
+      if (!tx)
+        {
+          
+        }
+
       bytes -= data_len;
       if (bytes == 0)
         {
@@ -331,6 +348,11 @@ uint32_t esp32s3_dma_setup(struct esp32s3_dmadesc_s *dmadesc, uint32_t num,
     }
 
   dmadesc[i].next  = NULL;
+
+  if (!tx)
+    {
+      
+    }
 
   return len - bytes;
 }
@@ -572,4 +594,19 @@ void esp32s3_dma_init(void)
   /* enable DMA clock gating */
 
   modifyreg32(DMA_MISC_CONF_REG, 0, DMA_CLK_EN_M);
+
+  /* [V226] Power up and un-gate the GDMA's internal descriptor RAM.
+   *
+   * DMA_PD_CONF controls the RAM the outlink/inlink FSM reads its
+   * descriptors from.  dma_ram_force_pd (bit 4) must be cleared,
+   * dma_ram_force_pu (bit 5) set, and dma_ram_clk_fo (bit 6) forces the RAM
+   * clock open instead of relying on the gate-clock.  NuttX never touched
+   * this register, so with the gate-clock inactive the outlink would start,
+   * find no descriptor to fetch and park immediately -- which is exactly what
+   * we measured on the I2S TX path (START written then cleared, PARK=1,
+   * OWNER never taken, INT_RAW permanently zero, not even a dscr_err). */
+
+  modifyreg32(DMA_PD_CONF_REG,
+              DMA_DMA_RAM_FORCE_PD_M, DMA_DMA_RAM_FORCE_PU_M |
+                                      DMA_DMA_RAM_CLK_FO_M);
 }
