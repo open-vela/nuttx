@@ -41,6 +41,33 @@
 
 #include "st7789.h"
 
+/* [LCDDIAG] Panel-layer tracing for the black-screen investigation.
+ * Every line is tagged "[LCDDIAG] st7789:" so the probes are easy to find and
+ * remove.  The verbose probes (one per SPI transfer) are capped so the console
+ * is not flooded once the startup sweep has proven whether data reaches the
+ * panel; the important init/power probes are always printed.
+ */
+
+#include <syslog.h>
+
+#define LCDDIAG_VERBOSE_LIMIT 0   /* [QUIET] 屏幕每秒重绘，会淹没 NSH */
+
+static unsigned long g_st7789_diag_n;
+
+#define LCDDIAG(fmt, ...) \
+  syslog(LOG_ERR, "[LCDDIAG] st7789: " fmt "\n", ##__VA_ARGS__)
+
+#define LCDDIAG_V(fmt, ...) \
+  do \
+    { \
+      if (g_st7789_diag_n < LCDDIAG_VERBOSE_LIMIT) \
+        { \
+          syslog(LOG_ERR, "[LCDDIAG] st7789: " fmt "\n", ##__VA_ARGS__); \
+        } \
+      g_st7789_diag_n++; \
+    } \
+  while (0)
+
 #ifdef CONFIG_LCD_ST7789
 
 /****************************************************************************
@@ -305,7 +332,10 @@ static void st7789_select(FAR struct spi_dev_s *spi, int bits)
    * devices competing for the SPI bus
    */
 
-  SPI_LOCK(spi, true);
+  int lock;
+  uint32_t freq;
+
+  lock = SPI_LOCK(spi, true);
   SPI_SELECT(spi, SPIDEV_DISPLAY(0), true);
 
   /* Now make sure that the SPI bus is configured for the ST7789 (it
@@ -314,7 +344,10 @@ static void st7789_select(FAR struct spi_dev_s *spi, int bits)
 
   SPI_SETMODE(spi, CONFIG_LCD_ST7789_SPIMODE);
   SPI_SETBITS(spi, bits);
-  SPI_SETFREQUENCY(spi, CONFIG_LCD_ST7789_FREQUENCY);
+  freq = SPI_SETFREQUENCY(spi, CONFIG_LCD_ST7789_FREQUENCY);
+
+  LCDDIAG_V("select: SPI_LOCK=%d bits=%d freq_got=%u mode=%d",
+            lock, bits, (unsigned)freq, CONFIG_LCD_ST7789_SPIMODE);
 }
 
 /****************************************************************************
@@ -337,8 +370,12 @@ static void st7789_deselect(FAR struct spi_dev_s *spi)
 {
   /* De-select ST7789 chip and relinquish the SPI bus. */
 
+  int lock;
+
   SPI_SELECT(spi, SPIDEV_DISPLAY(0), false);
-  SPI_LOCK(spi, false);
+  lock = SPI_LOCK(spi, false);
+
+  LCDDIAG_V("deselect: SPI_LOCK=%d", lock);
 }
 
 /****************************************************************************
@@ -380,6 +417,8 @@ static inline void st7789_sendcmd(FAR struct st7789_dev_s *dev, uint8_t cmd)
 
 static void st7789_sleep(FAR struct st7789_dev_s *dev, bool sleep)
 {
+  LCDDIAG("sleep(%d) -> send %s", (int)sleep,
+          sleep ? "SLPIN(0x10)" : "SLPOUT(0x11)");
   st7789_sendcmd(dev, sleep ? ST7789_SLPIN : ST7789_SLPOUT);
   up_mdelay(120);
 }
@@ -394,6 +433,13 @@ static void st7789_sleep(FAR struct st7789_dev_s *dev, bool sleep)
 
 static void st7789_display(FAR struct st7789_dev_s *dev, bool on)
 {
+#ifdef CONFIG_LCD_ST7789_INVCOLOR
+  LCDDIAG("display(on=%d) -> %s + INVON(0x21)  [INVCOLOR=y]",
+          (int)on, on ? "DISPON(0x29)" : "DISPOFF(0x28)");
+#else
+  LCDDIAG("display(on=%d) -> %s + INVOFF(0x20) [INVCOLOR=n]",
+          (int)on, on ? "DISPON(0x29)" : "DISPOFF(0x28)");
+#endif
   st7789_sendcmd(dev, on ? ST7789_DISPON : ST7789_DISPOFF);
 #ifdef CONFIG_LCD_ST7789_INVCOLOR
   st7789_sendcmd(dev, ST7789_INVON);
@@ -505,7 +551,7 @@ static void st7789_ramctl(FAR struct st7789_dev_s *dev)
   uint16_t ramctl = 0x0;
 
   st7789_sendcmd(dev, ST7789_RAMCTRL);
-  st7789_select(dev->spi, LCD_ST7789_SPI_BITS * 2);
+  st7789_select(dev->spi, LCD_ST7789_SPI_BITS);   /* [V841] two 8-bit params */
 
   /* Fill the reserved bits */
 
@@ -521,7 +567,19 @@ static void st7789_ramctl(FAR struct st7789_dev_s *dev)
   ramctl |= 0x800;
 #endif
 
-  SPI_SEND(dev->spi, LCD_ST7789_DATA_PREFIX | ramctl);
+  /* [V841] Send the two parameters as two bytes, in the order the register
+   * table above states: 1st (RM / DM) then 2nd (reserved + EPF + ENDIAN).
+   *
+   * This used to be one 16-bit SPI transfer of 0xF000.  SPI clocks the MSB
+   * out first, so the panel received 0xF0 followed by 0x00 -- the two bytes
+   * the wrong way round.  ESP-IDF sends 0x00, 0xF0.
+   *
+   * The rest of this driver already does it the explicit way (see
+   * st7789_setarea, which sends the high byte then the low byte as separate
+   * 8-bit transfers); RAMCTRL was the single exception. */
+  SPI_SEND(dev->spi, LCD_ST7789_DATA_PREFIX | (uint8_t)(ramctl & 0xff));
+  SPI_SEND(dev->spi,
+           LCD_ST7789_DATA_PREFIX | (uint8_t)((ramctl >> 8) & 0xff));
   st7789_deselect(dev->spi);
 }
 
@@ -590,7 +648,28 @@ static void st7789_bpp(FAR struct st7789_dev_s *dev, int bpp)
 
   /* REVISIT: Works only for 12 and 16 bpp! */
 
-  depth = bpp >> 2 | 1;
+  /* [V841] 16 bpp must be 0x55, not 0x05.
+   *
+   * `bpp >> 2 | 1` yields 0x05, and it is only ever called with 16 here, so
+   * the panel was being told "16 bits/pixel, RGB interface format 0".
+   * ESP-IDF's esp_lcd_panel_st7789 programs colmod_val = 0x55, and the
+   * bit-bang sequence in this same tree -- the one path that has actually
+   * produced a picture on this board -- sends the same value:
+   *
+   *   esp32s3_board_lcd.c:1171   v771_cmd(0x3a); v771_data8(0x55);
+   *
+   * 0x55 and 0x05 both select 16 bits/pixel on the MCU side; the difference
+   * is the RGB-interface field, which is what the reference uses.  Align
+   * with the two things that are known to work rather than with arithmetic
+   * that was never checked. */
+  if (bpp == 16)
+    {
+      depth = 0x55;
+    }
+  else
+    {
+      depth = bpp >> 2 | 1;
+    }
   st7789_sendcmd(dev, ST7789_COLMOD);
   st7789_select(dev->spi, LCD_ST7789_SPI_BITS);
   SPI_SEND(dev->spi, LCD_ST7789_DATA_PREFIX | depth);
@@ -609,6 +688,34 @@ static void st7789_bpp(FAR struct st7789_dev_s *dev, int bpp)
  *   while skipping some values.
  *
  ****************************************************************************/
+
+/* [V797] Bytes actually handed to SPI3.
+ *
+ * st7789_putarea() ends in an unconditional `return OK;` -- the value returned
+ * by st7789_wrram() is discarded, and st7789_wrram() is itself void.  So
+ * putarea=0 in the [V765] white-shot log means only "the upper layers accepted
+ * the request"; it says nothing about whether any byte left the chip.  That is
+ * why every software-side reading so far (display ok, page built, fb=3,
+ * putarea>=0) has been consistent with a black screen.
+ *
+ * These counters are the first measurement of the transport itself: they are
+ * incremented with each SPI_SNDBLOCK() size, so a shortfall against the
+ * expected byte count is visible rather than inferred. */
+static volatile uint32_t g_v797_spi_calls;
+static volatile uint32_t g_v797_spi_bytes;
+
+void st7789_v797_spi_stats(uint32_t *calls, uint32_t *bytes)
+{
+  if (calls != NULL)
+    {
+      *calls = g_v797_spi_calls;
+    }
+
+  if (bytes != NULL)
+    {
+      *bytes = g_v797_spi_bytes;
+    }
+}
 
 static void st7789_wrram(FAR struct st7789_dev_s *dev,
                          FAR const uint8_t *buff, size_t size, size_t skip,
@@ -650,13 +757,23 @@ static void st7789_wrram(FAR struct st7789_dev_s *dev,
                            (uint16_t)buff[j + (i * (size + skip))];
         }
 
+      g_v797_spi_calls++;
+      g_v797_spi_bytes += (uint32_t)size;
       SPI_SNDBLOCK(dev->spi, rowbuff, size);
     }
 #else
+  LCDDIAG_V("wrram: count=%u size=%u skip=%u nwords/tr=%u -> %u bytes via SPI;"
+            " first_px=0x%04x",
+            (unsigned)count, (unsigned)size, (unsigned)skip,
+            (unsigned)(size / ST7789_BYTESPP), (unsigned)(count * size),
+            (unsigned)((FAR const uint16_t *)buff)[0]);
+
   st7789_select(dev->spi, ST7789_BYTESPP * LCD_ST7789_SPI_BITS);
 
   for (i = 0; i < count; i++)
     {
+      g_v797_spi_calls++;
+      g_v797_spi_bytes += (uint32_t)size;
       SPI_SNDBLOCK(dev->spi, buff + (i * (size + skip)),
                    size / ST7789_BYTESPP);
     }
@@ -696,6 +813,9 @@ static void st7789_rdram(FAR struct st7789_dev_s *dev,
 static void st7789_fill(FAR struct st7789_dev_s *dev, uint16_t color)
 {
   int i;
+
+  LCDDIAG_V("fill(color=0x%04x) full %dx%d", (unsigned)color,
+            ST7789_XRES, ST7789_YRES);
 
   st7789_setarea(dev, 0, 0, ST7789_XRES - 1, ST7789_YRES - 1);
 
@@ -782,6 +902,13 @@ static int st7789_putarea(FAR struct lcd_dev_s *dev,
 
   ginfo("row_start: %d row_end: %d col_start: %d col_end: %d\n",
          row_start, row_end, col_start, col_end);
+
+  LCDDIAG_V("putarea: r=%d..%d c=%d..%d rows=%u cols=%u row_size=%u stride=%d"
+            " mode=%s total_bytes=%u buf=%p",
+            (int)row_start, (int)row_end, (int)col_start, (int)col_end,
+            (unsigned)rows, (unsigned)cols, (unsigned)row_size, (int)stride,
+            (stride == row_size) ? "full" : "rowbyrow",
+            (unsigned)(rows * row_size), (FAR const void *)buffer);
 
   DEBUGASSERT(buffer && ((uintptr_t)buffer & 1) == 0);
 
@@ -914,15 +1041,52 @@ static int st7789_setpower(FAR struct lcd_dev_s *dev, int power)
   FAR struct st7789_dev_s *priv = (FAR struct st7789_dev_s *)dev;
 
   lcdinfo("power: %d\n", power);
+  LCDDIAG("setpower(power=%d) MAXPOWER=%d", power, CONFIG_LCD_MAXPOWER);
   DEBUGASSERT((unsigned)power <= CONFIG_LCD_MAXPOWER);
 
   /* Set new power level */
 
   if (power > 0)
     {
+      /* [V760] Exit Sleep-In BEFORE turning the display on.
+       *
+       * The ST7789 powers up in Sleep-In mode.  While it is asleep the
+       * DISPON(0x29) command is silently ignored -- the charge pump is off
+       * and the panel keeps showing nothing at all.  st7789_display() only
+       * sends DISPON plus INVON, so every "power on" that reached a
+       * sleeping panel was a no-op.  That is the cold-boot black screen:
+       * the one-shot SWRESET + SLPOUT + DISPON sequence in
+       * st7789_lcdinitialize() is clocked out before the panel rail is up,
+       * those bytes are lost, and nothing ever re-issued SLPOUT.  A warm
+       * (EN) reset works because the rail never dropped, so the panel
+       * stayed awake and the boot sequence landed.
+       *
+       * st7789_sleep(dev, false) sends SLPOUT(0x11) and then waits the
+       * 120 ms the datasheet requires before the next command.  On a panel
+       * that is already awake it is harmless, so emitting it on every
+       * setpower(1) is safe.  Callers audited: only lcd_framebuffer.c
+       * (once, at fb init) and the V760 panel waker (every 2~6 s).
+       */
+
+      st7789_sleep(priv, false);
+
+      /* [V765] The same gap v760 left open, one step further along.
+       * Waking the panel out of Sleep-In is only half of it.  Without
+       * NORON(0x13) the controller may sit in inversion or partial mode,
+       * where DISPON is accepted and GRAM is writable but nothing is
+       * displayed.  The V742 watchdog re-asserts setpower(1) every 2 s,
+       * so leaving NORON out here means the watchdog actively pushes the
+       * panel back into that half-awake state on every round.
+       * Placed after SLPOUT (which already carries its own 120 ms wait)
+       * and before DISPON, matching the sequence verified on real
+       * hardware: SWRESET / SLPOUT / COLMOD / MADCTL / INVON / NORON / DISPON. */
+      st7789_sendcmd(priv, 0x13);          /* NORON */
+      up_mdelay(10);
+
       /* Turn on the display */
 
       st7789_display(priv, true);
+
 
       /* Save the power */
 
@@ -1017,6 +1181,53 @@ FAR struct lcd_dev_s *st7789_lcdinitialize(FAR struct spi_dev_s *spi)
 
   /* Init the hardware and clear the display */
 
+  LCDDIAG("lcdinitialize: ENTER (%dx%d bpp=%d spi=%p)",
+          ST7789_XRES, ST7789_YRES, ST7789_BPP, (FAR void *)spi);
+
+  /* [V325] 补软复位（移植小智 esp_lcd_panel_reset 的语义）。
+   *
+   * 本板 LCD **没有复位引脚**（RST=NC），而原实现只发 SLPOUT(0x11)、
+   * 从不发 SWRESET(0x01)。ST7789 在多次热重启后会停在未定义状态：
+   * 命令全部被 ACK、就是不显示 —— 这正是本项目"刷多少次都黑"的合理成因。
+   * 小智侧靠 esp_lcd_panel_reset() 完成同一件事，NuttX 没有等价动作。 */
+
+  /* [V774 -> RETRACTED in v781] "SWRESET IS THE CULPRIT" was
+   * WRONG: the A/B behind it ran under a warm reset and the
+   * v774 follow-up falsified it.  The reasoning is kept below
+   * as a record; see the [V781] block for the restoration. */
+  /* --- v774 rationale, retracted, kept for the record ---
+   *
+   * v771/v773 ran a single-variable A/B with the raw GPIO bit-bang sequence:
+   *
+   *   v771  SLPOUT/COLMOD/MADCTL/INVON/NORON/RAMWR/fill/DISPON   -> LIT
+   *   v773  SWRESET + 200ms + the exact same sequence            -> BLACK
+   *
+   * Same pins, same routing, same fill, same backlight; the only difference
+   * is one byte on the wire.  So SWRESET is what puts this panel into a
+   * state it never leaves.
+   *
+   * Why it bites here specifically: the LCD has RST=NC, so after power-up
+   * the controller sits in an undefined state in which it silently swallows
+   * SPI commands -- every command is ACKed, GRAM is writable, the driver
+   * reports "display ok", and the screen stays black.  v325 added SWRESET as
+   * the only way to force a known state; on this part that cure is worse
+   * than the disease.  The panel lights correctly without it, which is why
+   * the raw sequence in esp32s3_board_lcd.c (no SWRESET) is the reference
+   * bring-up path.
+   */
+  /* [V781] *** SWRESET(0x01) RESTORED -- the v774 removal was based on
+   * a warm-reset A/B and has been DISPROVEN.  Both v773 (SWRESET, black)
+   * and v774 (no SWRESET, still black on cold boot) were measured, and the
+   * second one falsifies the hypothesis instead of confirming it.  The
+   * removal was never reverted, so v771..v780 all initialised the panel
+   * without the exact command v325 added for this board: with RST=NC the
+   * controller otherwise stays in a state that silently swallows SPI
+   * traffic (all commands ACKed, GRAM writable, display ok, screen black)
+   * -- which is precisely the symptom v760 fixed by adding it. */
+  st7789_sendcmd(priv, 0x01);            /* SWRESET */
+  up_mdelay(150);
+  LCDDIAG("lcdinitialize: SWRESET(0x01) RE-ISSUED + 150ms settle [V781]\n");
+
   st7789_sleep(priv, false);
   st7789_bpp(priv, ST7789_BPP);
 #ifdef  CONFIG_LCD_DYN_ORIENTATION
@@ -1025,10 +1236,167 @@ FAR struct lcd_dev_s *st7789_lcdinitialize(FAR struct spi_dev_s *spi)
   st7789_setorientation(priv);
 #endif
   st7789_ramctl(priv);
+
+  /* [V765] ★★★ NORON(0x13) —— 本板初始化序列一直缺的那一条。
+   *
+   * 本板 LCD 的 RST 是 NC（不接），所以唯一能让面板回到确定状态的通路就是
+   * SPI 的 SWRESET。而真实硬件验证通过的序列（本仓库 esp32s3_board_lcd.c
+   * 里逐字抄下的实测通过程序）是：
+   *
+   *     SWRESET / SLPOUT / COLMOD(0x55) / MADCTL(0x00) / INVON / NORON / DISPON
+   *
+   * 原实现发的是：SWRESET → SLPOUT → bpp → MADCTL → RAMCTL → DISPON+INVON
+   * —— 少了 NORON。全树 grep NORON / 0x13 在本文件是 0 命中，从来没发过。
+   *
+   * ST7789 数据手册对 0x13 的定义是 "Normal Display Mode ON"。控制器从
+   * Sleep-In 醒来后若停在 inversion mode 或 partial mode，DISPON 会被正常
+   * 接受、GRAM 也可写可读，但面板不输出图像。这个症状与冷上电现场完全
+   * 对得上：SLPOUT 发了 171 次、DISPON+INVON 发了 172 次、fill(0xffff)
+   * 也执行了、背光 GPIO16 有电、UI 报 display ok，而屏是黑的。
+   *
+   * 放在 fill(0xffff) 之前：NORON 复位的是显示模式而不是 GRAM 内容，
+   * 顺序上先退出异常模式、再灌白屏，两者都做到才有确定结果。 */
+
+  st7789_sendcmd(priv, 0x13);          /* NORON */
+  up_mdelay(10);
+  LCDDIAG("lcdinitialize: NORON(0x13) issued");
+
+  /* [V766] ★★★ fill BEFORE DISPON —— 与小智固件的实际顺序对齐。
+   *
+   * 小智 Display::Start()（VOX3/ai_vox/ai_vox-main/examples/ai-vox3/
+   * ai-vox3/display.cpp:50-54）的第一件事就是逐行把整屏填白，
+   * 然后才 DISPON：
+   *
+   *     std::vector<uint16_t> buffer(width_, 0xFFFF);
+   *     for (int y = 0; y < height_; y++) {
+   *         esp_lcd_panel_draw_bitmap(panel, 0, y, width_, y + 1, buffer.data());
+   *     }
+   *     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+   *
+   * 本板原来反过来：DISPON + INVON 先发，白屏后灌。ST7789 的 charge
+   * pump 在 DISPON 之后才开始工作，面板被点亮的那一刻 GRAM 里还是
+   * 上电垃圾 —— 这正好对��「命令全部被 ACK、软件侧 display ok、
+   * 屏全黑」这个现象。
+   *
+   * 引脚已经核对过是同一套（小智 BL=16/MOSI=21/SCLK=17/CS=15/DC=14，
+   * 本板 DC=14/BCKL=16/cs=15/clk=17/mosi=21），所以这不是接线差异，
+   * 是纯粹的时序顺序差异。 */
+
+  /* [V885] black instead of white: this is the other white flash. */
+  st7789_fill(priv, 0x0000);
+  LCDDIAG("[V766] GRAM filled 0xffff BEFORE DISPON");
+
   st7789_display(priv, true);
-  st7789_fill(priv, 0xffff);
+
+  LCDDIAG("lcdinitialize: DONE [V781=SWRESET restored] (SWRESET+SLPOUT+NORON+fill(0xffff)"
+          "+DISPON+%s) [V765][V766]",
+#ifdef CONFIG_LCD_ST7789_INVCOLOR
+          "INVON"
+#else
+          "INVOFF"
+#endif
+          );
 
   return &priv->dev;
+}
+
+
+/****************************************************************************
+ * Name: st7789_display_on_only
+ *
+ * Description:
+ *   Re-assert DISPON(0x29) without touching Sleep-In.
+ *
+ *   st7789_setpower(dev, 1) is the right way to wake a panel whose rail has
+ *   just come up, but it starts with SLPOUT(0x11) and then waits the 120 ms
+ *   the datasheet requires, and that wait is spent with the panel in
+ *   Sleep-In, i.e. blank.  Re-issuing setpower(1) on a timer is therefore
+ *   what makes the panel visibly blink: every beat blanks the screen for
+ *   120 ms before turning it back on.
+ *
+ *   Once the panel is awake it stays awake, so a keep-alive only has to keep
+ *   the display on.  This sends DISPON (+INVON) alone - no SLPOUT, no
+ *   NORON, no 120 ms gap - so the screen is never blanked in between.
+ *
+ *   The V892 panel waker uses this for every beat after its bounded wake
+ *   window.  The first V819_WAKE_ATTEMPTS calls still go through
+ *   setpower(1), which is the only thing that can recover a panel that
+ *   booted with no rail at all.
+ ****************************************************************************/
+
+int st7789_display_on_only(FAR struct lcd_dev_s *dev)
+{
+  FAR struct st7789_dev_s *priv = (FAR struct st7789_dev_s *)dev;
+
+  if (priv == NULL)
+    {
+      return -EINVAL;
+    }
+
+  st7789_display(priv, true);   /* DISPON(0x29) (+INVON) only */
+  priv->power = 1;
+
+  LCDDIAG("[V892] display_on_only: DISPON re-asserted\n");
+
+  return OK;
+}
+
+/****************************************************************************
+ * Name: st7789_reconfigure
+ *
+ * Description:
+ *   Re-send everything the panel forgets when its power rail drops.
+ *
+ *   st7789_setpower(1) only sends SLPOUT + NORON + DISPON.  That is enough
+ *   for a panel that has been awake since boot, because it still holds the
+ *   pixel format, the scan direction and the RAM control word that
+ *   st7789_lcdinitialize() programmed into it.
+ *
+ *   It is NOT enough for a panel that lost its rail.  On this board the
+ *   panel is powered by a hardware latch, so on a cold start
+ *   st7789_lcdinitialize() runs while the panel has no supply at all: every
+ *   one of those configuration writes is swallowed.  When the rail finally
+ *   arrives the controller comes back on its power-on defaults, and the
+ *   RGB565 stream the driver then pushes is decoded with the wrong pixel
+ *   format -- every byte arrives correctly and the screen is still black,
+ *   which is exactly the reported symptom.
+ *
+ *   This replays the configuration half of the init sequence, without the
+ *   SWRESET and without the full-screen fill (both would blank or flash an
+ *   already-running panel).  On a panel that is already configured it is a
+ *   no-op.
+ ****************************************************************************/
+
+int st7789_reconfigure(FAR struct lcd_dev_s *dev)
+{
+  FAR struct st7789_dev_s *priv = (FAR struct st7789_dev_s *)dev;
+
+  if (priv == NULL)
+    {
+      return -EINVAL;
+    }
+
+  /* Wake: the panel ignores GRAM writes until SLPOUT has settled. */
+
+  st7789_sleep(priv, false);                 /* SLPOUT + 120 ms */
+
+  /* The configuration half that a power-cycled panel has lost. */
+
+  st7789_bpp(priv, ST7789_BPP);              /* COLMOD -- pixel format */
+#ifndef CONFIG_LCD_DYN_ORIENTATION
+  st7789_setorientation(priv);               /* MADCTL -- scan direction */
+#else
+  st7789_setorientation(priv, 0);
+#endif
+  st7789_ramctl(priv);                       /* RAMCTRL -- GRAM window */
+
+  st7789_sendcmd(priv, 0x13);                /* NORON */
+  up_mdelay(10);
+  st7789_display(priv, true);                /* DISPON (+INVON) */
+
+  LCDDIAG("[V833] reconfigure: SLPOUT+COLMOD+MADCTL+RAMCTL+NORON+DISPON\n");
+
+  return OK;
 }
 
 #endif /* CONFIG_LCD_ST7789 */

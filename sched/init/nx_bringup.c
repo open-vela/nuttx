@@ -25,6 +25,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+extern int ets_printf(const char *fmt, ...);
 
 #include <sched.h>
 #include <stdlib.h>
@@ -329,7 +330,9 @@ static inline void nx_start_application(void)
    */
 
   boards_trace_begin();
+  ets_printf("[CHK] brg-pre-boardlate\n");
   board_late_initialize();
+  ets_printf("[CHK] brg-boardlate-ok\n");
   boards_trace_end();
 #endif
 
@@ -414,6 +417,7 @@ static inline void nx_start_application(void)
 #ifdef CONFIG_BOARD_LATE_INITIALIZE
 static int nx_start_task(int argc, FAR char **argv)
 {
+  ets_printf("[CHK] brg-task-start\n");
   /* Do the board/application initialization and exit */
 
   nx_start_application();
@@ -451,6 +455,7 @@ static inline void nx_create_initthread(void)
                         CONFIG_BOARD_INITTHREAD_PRIORITY,
                         NULL, CONFIG_BOARD_INITTHREAD_STACKSIZE,
                         nx_start_task, NULL, environ);
+  ets_printf("[CHK] brg-thread pid=%d\n", pid);
   DEBUGASSERT(pid > 0);
   UNUSED(pid);
 #else
@@ -501,6 +506,7 @@ static inline void nx_create_initthread(void)
 void nx_bringup(void)
 {
   sched_trace_begin();
+  ets_printf("[CHK] brg-enter\n");
 
 #ifndef CONFIG_DISABLE_ENVIRON
   /* Setup up the initial environment for the idle task.  At present, this
@@ -529,12 +535,14 @@ void nx_bringup(void)
    */
 
   nx_pgworker();
+  ets_printf("[CHK] brg-pgw\n");
 
   /* Start the worker thread that will serve as the device driver "bottom-
    * half" and will perform misc garbage clean-up.
    */
 
   nx_workqueues();
+  ets_printf("[CHK] brg-wq\n");
 
   /* Once the operating system has been initialized, the system must be
    * started by spawning the user initialization thread of execution.  This

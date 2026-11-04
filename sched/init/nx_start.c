@@ -765,6 +765,7 @@ void nx_start(void)
   g_nx_initstate = OSINIT_BOOT;
   sched_trace_begin();
   sinfo("Entry\n");
+  ets_printf("[CHK] nx-enter\n");
 
   /* Head of ready-to-run/assigned task lists valid */
 
@@ -773,10 +774,12 @@ void nx_start(void)
   /* The memory manager has been initialized */
 
   memory_initialize();
+  ets_printf("[CHK] nx-mem\n");
 
   /* MCU-specific hardware is initialized */
 
   hardware_initialize();
+  ets_printf("[CHK] nx-hw\n");
 
   /* Setup for Multi-Tasking ************************************************/
 
@@ -792,6 +795,7 @@ void nx_start(void)
    */
 
   DEBUGVERIFY(group_setupidlefiles());
+  ets_printf("[CHK] nx-files\n");
 
 #ifdef CONFIG_SMP
   for (i = 1; i < CONFIG_SMP_NCPUS; i++)
@@ -823,6 +827,7 @@ void nx_start(void)
 
   /* Create initial tasks and bring-up the system */
 
+  ets_printf("[CHK] nx-pre-bringup\n");
   nx_bringup();
 
   /* Enter to idleloop */

@@ -50,3 +50,5 @@
 struct pwm_lowerhalf_s *esp32s3_ledc_init(int timer);
 
 #endif /* __ARCH_RISCV_SRC_ESP32S3_ESP32S3_LEDC_H */
+/* [V481] Register-level LEDC PWM for the LCD backlight (pin 16). */
+int esp32s3_ledc_raw_backlight(uint32_t freq, uint32_t duty16);

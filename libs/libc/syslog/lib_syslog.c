@@ -60,13 +60,63 @@ static DEFINE_RATELIMIT_STATE(g_ratelimit,
  *
  ****************************************************************************/
 
+
+/* [V880] task_get_info() cannot be trusted on this board.
+ *
+ * vsyslog() used to dereference it immediately:
+ *
+ *     rsr.misc0 a8        thread pointer
+ *     l32i    a8, a8, 112 tls_info_s -> tl_task
+ *     l32i.n  a8, a8, 0
+ *     addmi   a8, a8, 0x100
+ *     l8ui    a4, a12, 52 <-- info->ta_syslog_mask, faults
+ *
+ * and the board died there with EXCCAUSE=001c (vaddr 0x0f20366b) or
+ * EXCCAUSE=0003 (vaddr 0x40054d24).  The fault address is always
+ * pointer + 52, so the value returned was never a task_info_s.
+ *
+ * Data in this build only ever lives in two windows, so check those
+ * instead of dereferencing blindly. */
+
+unsigned int g_v880_bad  = 0;
+int          g_v880_busy = 0;
+uintptr_t    g_v880_last = 0;
+
+static int v880_ok(FAR struct task_info_s *info, int priority)
+{
+  uintptr_t v = (uintptr_t)info;
+
+  g_v880_last = v;
+
+  if (!((v >= 0x3c000000u && v < 0x3d000000u) ||
+        (v >= 0x3fc00000u && v < 0x3fd00000u)))
+    {
+      /* Not a pointer this build can own.  Report the first few and let
+       * the message through - dropping it would hide the diagnostics
+       * needed to find whatever overwrites tl_task. */
+
+      if (g_v880_bad < 8u && g_v880_busy == 0)
+        {
+          g_v880_busy = 1;
+          g_v880_bad++;
+          syslog(LOG_ERR, "[V880] bogus task_info=%p n=%u\n",
+                 (FAR void *)info, g_v880_bad);
+          g_v880_busy = 0;
+        }
+
+      return 1;
+    }
+
+  return ((info->ta_syslog_mask & LOG_MASK(priority)) != 0);
+}
+
 void vsyslog(int priority, FAR const IPTR char *fmt, va_list ap)
 {
   FAR struct task_info_s *info = task_get_info();
 
   /* Check if this priority is enabled */
 
-  if ((info && info->ta_syslog_mask & LOG_MASK(priority)) != 0)
+  if (info != NULL && v880_ok(info, priority))
     {
       /* Yes.. Perform the nx_vsyslog system call.
        *

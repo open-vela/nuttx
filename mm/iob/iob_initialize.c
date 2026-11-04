@@ -37,6 +37,31 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+/* [V634] Shrink the IOB pool for this board.
+ *
+ * CONFIG_IOB_NBUFFERS is 160 here, where the NuttX default is 8.  With
+ * CONFIG_IOB_BUFSIZE=512 every IOB costs 524 bytes, so this single static
+ * pool holds 83,843 bytes of .dram0.bss - and on the ESP32-S3 .bss competes
+ * byte for byte with the internal, DMA-capable region of the system heap the
+ * WiFi driver keeps its static_rx=10 + dynamic_rx=32 + dynamic_tx=32 buffers
+ * in (see the comment in esp32s3_wifi_adapter.c).
+ *
+ * Measured with the [V633] internal-DRAM probe: once the link is up the
+ * largest block still allocatable from that region falls 1024 -> 512 -> 128
+ * -> 0 bytes while 7.5 MB of PSRAM sits idle, and every data frame from the
+ * 47th onward then returns ESP_ERR_NO_MEM.  64 buffers is still 8x the NuttX
+ * default and covers the sockets this application uses, and it returns about
+ * 50 KB to the radio.
+ *
+ * Both IOB_BUFFER_SIZE and the initialisation loop below are defined in this
+ * file, so the override is local and cannot desynchronise another translation
+ * unit: the only other consumers are iob_statistics (reports the number) and
+ * iob_free (a <= assertion, which a smaller pool keeps trivially true).
+ */
+
+#undef  CONFIG_IOB_NBUFFERS
+#define CONFIG_IOB_NBUFFERS 64
+
 /* Fix the I/O Buffer size with specified alignment size */
 
 #ifdef CONFIG_IOB_ALLOC

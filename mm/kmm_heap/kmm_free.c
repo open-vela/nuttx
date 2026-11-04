@@ -27,7 +27,11 @@
 #include <assert.h>
 #include <debug.h>
 
+#include <stdint.h>
 #include <nuttx/mm/mm.h>
+
+/* [V764] ledger hook, see esp32s3_allocateheap.c */
+void vox3_kmm_note(uintptr_t ra, size_t size, int delta);
 
 /****************************************************************************
  * Public Functions
@@ -48,8 +52,30 @@
  *
  ****************************************************************************/
 
+/* [V764] Mirror of the allocation-side hook: without this a task whose
+ * stack is freed on exit stays on the ledger forever and the dump would point
+ * at the wrong owner.  kmm_free() has no size argument, so the ledger is told
+ * only the amount to give back - which is all vox3_kmm_note() needs. */
+
+/* [V813] Declared here so the guard below can reach it. */
+bool v813_tcb_is_static(FAR const void *p);
+void v813_tcb_static_free(FAR void *p);
+
 void kmm_free(FAR void *mem)
 {
+  /* [V813] A pool block must never reach the heap allocator.
+   *
+   * kmm_free() is the single release point for kernel-heap memory, and a TCB is
+   * released from more than one place (a failed task init, a failed exec, and
+   * the task-exit path).  Guarding here covers all of them at once; guarding
+   * each call site would work until a fourth is added. */
+  if (v813_tcb_is_static(mem))
+    {
+      v813_tcb_static_free(mem);
+      return;
+    }
+
+  vox3_kmm_note((uintptr_t)__builtin_return_address(0), 4096, -1);
   mm_free(KNR_HEAP, mem);
 }
 

@@ -1432,6 +1432,28 @@ static ssize_t uart_write(FAR struct file *filep, FAR const char *buffer,
    */
 
   oktoblock = ((filep->f_oflags & O_NONBLOCK) == 0);
+#ifdef CONFIG_ESP32S3_USBSERIAL
+  /* [V961] Do not let a console write sleep forever.
+   *
+   * On this board /dev/console is the built-in USB Serial/JTAG peripheral,
+   * a USB gadget: nothing leaves its TX ring unless a host actually issues
+   * bulk-IN reads.  With no PC reader attached, uart_putxmitchar(..., true)
+   * below parks on nxsem_wait(&dev->xmitsem) with no timeout -- NuttX's own
+   * comment in that function already calls out "USB CDC/ACM" -- so whichever
+   * thread emitted the most recent log line simply stops dead.
+   *
+   * board_lcd_initialize() is almost entirely syslog() calls (LCDDIAG is an
+   * unconditional syslog), so on a cold boot with nobody listening it froze
+   * part way through and never got as far as SLPOUT/DISPON.  The panel stayed
+   * in Sleep-In and the screen stayed black -- until somebody opened COM32,
+   * which drained the ring and let the same code finish in three seconds.
+   * That is why every "must open the serial port or nothing lights" capture
+   * looked like a panel bug.
+   *
+   * Dropping bytes nobody can receive is strictly better than hanging the
+   * whole bring-up.  While a host IS reading, this costs almost nothing. */
+  oktoblock = false;
+#endif
 
   /* Loop while we still have data to copy to the transmit buffer.
    * we add data to the head of the buffer; uart_xmitchars takes the

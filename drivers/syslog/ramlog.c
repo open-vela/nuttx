@@ -162,14 +162,24 @@ static const struct file_operations g_ramlogfops =
 
 /* This is the pre-allocated buffer used for the console RAM log and/or
  * for the syslogging function.
+ *
+ * [V633] This array is static, so it lands in .dram0.bss, which on this board
+ * is the very same internal DRAM that backs the DMA-capable heap the WiFi
+ * blob needs for its TX descriptors.  The default 32 KB was buying log depth
+ * with radio headroom: association fails outright once that heap runs dry
+ * (see esp32s3_allocateheap.c and the v619/v629-v632 bisection).  Trading
+ * 24 KB of scrollback for it is a good deal - the serial console is the real
+ * log transport here.
  */
+
+#define V633_RAMLOG_BUFSIZE 8192
 
 #ifdef CONFIG_RAMLOG_SYSLOG
 #  ifdef RAMLOG_BUFFER_SECTION
-static uint32_t g_sysbuffer[CONFIG_RAMLOG_BUFSIZE / 4]
+static uint32_t g_sysbuffer[V633_RAMLOG_BUFSIZE / 4]
                        locate_data(CONFIG_RAMLOG_BUFFER_SECTION);
 #  else
-static uint32_t g_sysbuffer[CONFIG_RAMLOG_BUFSIZE / 4];
+static uint32_t g_sysbuffer[V633_RAMLOG_BUFSIZE / 4];
 #  endif
 
 /* This is the device structure for the console or syslogging function.  It

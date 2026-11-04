@@ -1082,11 +1082,51 @@ static uint32_t esp32s3_spi_send(struct spi_dev_s *dev, uint32_t wd)
  *
  ****************************************************************************/
 
+/* [V769] SPI3 传输层取证计数器 —— 「字节是否真出了芯片」的独立口径。
+ *
+ * 为什么需要它：面板这条路上 MISO=-1（CONFIG_ESP32S3_SPI3_MISOPIN=-1），
+ * 所以 esp32s3_spi_poll_exchange() 里 rp == NULL —— 纯发送分支，硬件
+ * **不回传任何东西**。而 st7789_wrram() 把 SPI_SNDBLOCK() 的返回值直接
+ * 丢弃，v765 的「putarea=0」只代表 NuttX 上层接受了请求，**不代表字节
+ * 真的被硬件取走**。此前所有「软件侧全绿」都建立在一个没人验证过的
+ * 假设上（铁律 10 的变体：一个从不失败的返回值不能当因果证据）。
+ *
+ *   calls  —— poll_exchange 被调了几次
+ *   words  —— 累计要发多少 word
+ *   chunks —— 硬件实际完成的 transaction 数（两个 busy-wait 都退出才 +1）
+ *   stall  —— busy-wait 超过计步上界的次数
+ *
+ * 判读：chunks>0 且 words 累积与刷帧量吻合 => 传输层可证是通的，
+ * 黑屏的责任在协议/面板侧；chunks==0 或 stall>0 => 责任在传输层。
+ */
+uint32_t g_v769_spi_calls;
+uint32_t g_v769_spi_words;
+uint32_t g_v769_spi_chunks;
+uint32_t g_v769_spi_stall;
+
+void esp32s3_v769_spi_dump(uint32_t id);
+void
+esp32s3_v769_spi_dump(uint32_t id)
+{
+  syslog(LOG_ERR,
+         "[V769] SPI%u poll_exchange calls=%u words=%u chunks=%u stall=%u"
+         " | USER=0x%08x CMD=0x%08x MS_DLEN=0x%08x\n",
+         (unsigned)id, (unsigned)g_v769_spi_calls,
+         (unsigned)g_v769_spi_words, (unsigned)g_v769_spi_chunks,
+         (unsigned)g_v769_spi_stall,
+         (unsigned)getreg32(SPI_USER_REG(id)),
+         (unsigned)getreg32(SPI_CMD_REG(id)),
+         (unsigned)getreg32(SPI_MS_DLEN_REG(id)));
+}
+
 static void esp32s3_spi_poll_exchange(struct esp32s3_spi_priv_s *priv,
                                       const void *txbuffer,
                                       void *rxbuffer,
                                       size_t nwords)
 {
+  /* [V769] 入场记账：只记本次「声称要发多少」 */
+  g_v769_spi_calls++;
+  g_v769_spi_words += (uint32_t)nwords;
 #ifdef CONFIG_ESP32S3_SPI_DMA
   esp32s3_spi_clr_regbits(SPI_DMA_CONF_REG(priv->config->id),
                           SPI_DMA_TX_ENA_M);
@@ -1162,19 +1202,44 @@ static void esp32s3_spi_poll_exchange(struct esp32s3_spi_priv_s *priv,
       esp32s3_spi_set_regbits(SPI_CMD_REG(priv->config->id),
                               SPI_UPDATE_M);
 
-      while ((getreg32(SPI_CMD_REG(priv->config->id)) & SPI_UPDATE_M) != 0)
-        {
-          ;
-        }
+      /* [V769] UPDATE busy-wait 加有界计步。这是面板这条路上唯一可能无限
+       * 挂住的地方，原版是裸 `while (...) ;`。计步后既能观测是否卡死，
+       * 也顺手给它加了个上界（纯防御，不改正常路径的行为）。 */
+      {
+        uint32_t v769_spin = 2000000u;
+
+        while ((getreg32(SPI_CMD_REG(priv->config->id)) & SPI_UPDATE_M) != 0)
+          {
+            if (--v769_spin == 0)
+              {
+                g_v769_spi_stall++;
+                break;
+              }
+          }
+      }
 
       esp32s3_spi_set_regbits(SPI_CMD_REG(priv->config->id), SPI_USR_M);
 
       /* Wait for the user-defined transaction to finish. */
 
-      while ((getreg32(SPI_CMD_REG(priv->config->id)) & SPI_USR_M) != 0)
-        {
-          ;
-        }
+      /* [V769] USR busy-wait 加有界计步。这是面板这条路上唯一可能无限
+       * 挂住的地方，原版是裸 `while (...) ;`。计步后既能观测是否卡死，
+       * 也顺手给它加了个上界（纯防御，不改正常路径的行为）。 */
+      {
+        uint32_t v769_spin = 2000000u;
+
+        while ((getreg32(SPI_CMD_REG(priv->config->id)) & SPI_USR_M) != 0)
+          {
+            if (--v769_spin == 0)
+              {
+                g_v769_spi_stall++;
+                break;
+              }
+          }
+      }
+
+      /* [V769] 只有两个 busy-wait 都正常退出，硬件才算取走了这一段 */
+      g_v769_spi_chunks++;
 
       if (rp != NULL)
         {

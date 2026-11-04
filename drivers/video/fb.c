@@ -119,7 +119,47 @@ static int     fb_add_paninfo(FAR struct fb_chardev_s *fb,
                               int overlay);
 static int     fb_clear_paninfo(FAR struct fb_chardev_s *fb,
                                 int overlay);
-static int     fb_open(FAR struct file *filep);
+static int     fb_open(FAR struct file *filep);static int     fb_open(FAR struct file *filep);
+
+/* [V801] How often the UI actually asks for a frame push, and how often that
+ * push succeeded.
+ *
+ * The V679 "fb beat" probe stopped printing while the screen was white, which
+ * left two readings indistinguishable:
+ *
+ *   a) the UI built its page but never pushed a frame, and GRAM stayed on the
+ *      0xffff placeholder that lcdinitialize() writes before DISPON;
+ *   b) the pushes were happening all along and only the probe had gone quiet.
+ *
+ * Reading a probe that may itself be broken is how this went wrong earlier, so
+ * the counter lives on the success path of the ioctl the UI actually calls, and
+ * it is reported against the SPI byte count from st7789.c rather than on its
+ * own.  If updates rises and spi_bytes does not, the frame is not reaching the
+ * panel; if both rise and the panel stays white, the panel is not showing GRAM
+ * and the GRAM window or offset is the thing to look at.
+ */
+static volatile uint32_t g_v801_updates;
+static volatile uint32_t g_v801_update_err;
+static volatile uint32_t g_v801_last_err;
+
+void fb_v801_stats(uint32_t *updates, uint32_t *errs, uint32_t *last_err)
+{
+  if (updates != NULL)
+    {
+      *updates = g_v801_updates;
+    }
+
+  if (errs != NULL)
+    {
+      *errs = g_v801_update_err;
+    }
+
+  if (last_err != NULL)
+    {
+      *last_err = g_v801_last_err;
+    }
+}
+
 static int     fb_close(FAR struct file *filep);
 static ssize_t fb_read(FAR struct file *filep, FAR char *buffer,
                        size_t buflen);
@@ -714,6 +754,18 @@ static int fb_ioctl(FAR struct file *filep, int cmd, unsigned long arg)
             }
 
           ret = fb->vtable->updatearea(fb->vtable, area);
+
+          /* [V801] Count on the return value, so a failing push is visible as
+           * a failure rather than as silence. */
+          if (ret == 0)
+            {
+              g_v801_updates++;
+            }
+          else
+            {
+              g_v801_update_err++;
+              g_v801_last_err = (uint32_t)(-ret);
+            }
         }
         break;
 #endif

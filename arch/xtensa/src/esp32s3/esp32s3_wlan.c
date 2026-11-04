@@ -30,6 +30,8 @@
 #include <errno.h>
 #include <debug.h>
 #include <arpa/inet.h>
+#include <syslog.h>   /* [V613] */
+#include <nuttx/clock.h>   /* [V616] */
 
 #include <nuttx/crc64.h>
 #include <nuttx/nuttx.h>
@@ -524,6 +526,16 @@ static void wlan_transmit(struct wlan_priv_s *priv)
   while ((pktbuf = wlan_txframe(priv)))
     {
       ret = priv->ops->send(pktbuf->buffer, pktbuf->len);
+      {
+        static volatile int s_txcnt;
+        if (s_txcnt < 60)
+          {
+            const uint8_t *b = (const uint8_t *)pktbuf->buffer;
+            s_txcnt++;
+            
+          }
+      }
+
       if (ret == -ENOMEM)
         {
           wlan_add_txpkt_head(priv, pktbuf);
@@ -589,6 +601,16 @@ static int wlan_rx_done(struct wlan_priv_s *priv, void *buffer,
   struct wlan_pktbuf *pktbuf;
   irqstate_t flags;
   int ret = 0;
+
+  {
+    static volatile int s_rxcnt;
+    if (s_rxcnt < 60)
+      {
+        const uint8_t *b = (const uint8_t *)buffer;
+        s_rxcnt++;
+        
+      }
+  }
 
   if (!priv->ifup)
     {
@@ -1116,6 +1138,8 @@ static int wlan_ifdown(struct net_driver_s *dev)
   int ret;
   struct wlan_priv_s *priv = (struct wlan_priv_s *)dev->d_private;
 
+  
+
   net_lock();
 
   if (!priv->ifup)
@@ -1552,6 +1576,14 @@ static int wlan_sta_rx_done(void *buffer, uint16_t len, void *eb)
 
 static void wlan_sta_tx_done(uint8_t *data, uint16_t *len, bool status)
 {
+  {
+    static volatile int s_wdn;
+    if (s_wdn < 24)
+      {
+        s_wdn++;
+        
+      }
+  }
   struct wlan_priv_s *priv = &g_wlan_priv[ESP32S3_WLAN_STA_DEVNO];
 
   wlan_tx_done(priv);
@@ -1698,6 +1730,7 @@ int esp32s3_wlan_sta_initialize(void)
     }
 
   esp_wifi_sta_register_txdone_cb(wlan_sta_tx_done);
+  
 
   ninfo("INFO: Initialize Wi-Fi station success net\n");
 

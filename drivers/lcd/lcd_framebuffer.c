@@ -34,8 +34,30 @@
 
 #include <nuttx/board.h>
 #include <nuttx/kmalloc.h>
+#include <syslog.h>
 #include <nuttx/lcd/lcd.h>
 #include <nuttx/video/fb.h>
+
+/* [LCDDIAG] Framebuffer->panel update-path tracing (black-screen hunt). */
+
+#include <syslog.h>
+
+#define LCDDIAG_VERBOSE_LIMIT 0   /* [QUIET] 屏幕每秒重绘，会淹没 NSH */
+
+static unsigned long g_lcdfb_diag_n;
+
+#define LCDDIAG(fmt, ...) do { } while (0)  /* [QUIET] flooded NSH */
+
+#define LCDDIAG_V(fmt, ...) \
+  do \
+    { \
+      if (g_lcdfb_diag_n < LCDDIAG_VERBOSE_LIMIT) \
+        { \
+          syslog(LOG_ERR, "[LCDDIAG] lcdfb: " fmt "\n", ##__VA_ARGS__); \
+        } \
+      g_lcdfb_diag_n++; \
+    } \
+  while (0)
 
 #ifdef CONFIG_LCD_FRAMEBUFFER
 
@@ -220,6 +242,13 @@ static int lcdfb_updateearea(FAR struct fb_vtable_s *vtable,
       run += (startx * pinfo->bpp + 7) >> 3;
     }
 
+  LCDDIAG_V("updateearea: vt=%p fbmem=%p stride=%d xres=%d yres=%d area=%p",
+            (FAR void *)vtable, (FAR void *)priv->fbmem, (int)priv->stride,
+            (int)priv->xres, (int)priv->yres, (FAR const void *)area);
+  LCDDIAG_V("updateearea: rect=(%d,%d)..(%d,%d) run=%p op=%s",
+            (int)startx, (int)starty, (int)endx, (int)endy, (FAR void *)run,
+            (pinfo->putarea != NULL) ? "putarea" : "putrun-loop");
+
   if (pinfo->putarea != NULL)
     {
       /* Each Driver's callback function putarea may be optimized by checking
@@ -234,6 +263,7 @@ static int lcdfb_updateearea(FAR struct fb_vtable_s *vtable,
 
       ret = pinfo->putarea(pinfo->dev, starty, endy, startx, endx,
                            run, priv->stride);
+      LCDDIAG_V("updateearea: putarea() ret=%d", ret);
       if (ret < 0)
         {
           lcderr("Failed to update area");
@@ -255,6 +285,9 @@ static int lcdfb_updateearea(FAR struct fb_vtable_s *vtable,
 
           run += priv->stride;
         }
+
+      LCDDIAG_V("updateearea: putrun-loop done rows=%d",
+                (int)(endy - starty + 1));
     }
 
   if (pinfo->redraw != NULL)
@@ -262,6 +295,7 @@ static int lcdfb_updateearea(FAR struct fb_vtable_s *vtable,
       pinfo->redraw(pinfo->dev);
     }
 
+  LCDDIAG_V("updateearea: RETURN OK");
   return OK;
 }
 
@@ -699,7 +733,63 @@ int up_fbinitialize(int display)
   priv->stride = ((size_t)priv->xres * priv->pinfo.bpp + 7) >> 3;
   priv->fblen  = priv->stride * priv->yres;
 
+  /* [V757] *** 115200 bytes out of the 197 KiB internal-DRAM heap. ***
+   *
+   * priv->fblen is 480*240 = 115200 B here (240x240 RGB565), i.e. 58%
+   * of the internal-DRAM kernel heap -- and with CONFIG_MM_KERNEL_HEAP=y
+   * kmm_malloc() targets exactly the heap the WiFi blob draws its DHCP
+   * and TX buffers from (see the [V636] note in esp32s3_allocateheap.c).
+   *
+   * Measured on this board after a real power-on reset:
+   *
+   *     [V633] t=64 intram_max=0 totfree=8233712 ip=NO NET
+   *     [V58]  probe gw:80 = -12        (ENOMEM)
+   *     [agent] Failed to create agent_loop task
+   *     [XZUI] [V678] open fb0 failed
+   *
+   * An EN reset of the same image is healthy with intram_max=16384 --
+   * 16 KiB of headroom is all that separates "works" from "black
+   * screen", and a cold boot spends it.
+   *
+   * So put the framebuffer in PSRAM instead.  This is safe here because
+   * CONFIG_ESP32S3_SPI_DMA is NOT set: the ST7789 is pushed by polled
+   * PIO (st7789_wrram -> SPI_SEND), the CPU reads fbmem, and no DMA
+   * coherency problem exists -- unlike the I2S path, which is why that
+   * one still needs its internal-SRAM bounce slots.
+   *
+   * CONFIG_ESP32S3_SPIRAM_COMMON_HEAP puts the application heap in the
+   * 8 MB PSRAM, which measured 154912 B used out of 8388608. */
+
+#ifdef CONFIG_ESP32S3_SPIRAM_COMMON_HEAP
+  priv->fbmem  = kumm_zalloc(priv->fblen);
+
+  if (priv->fbmem == NULL)
+    {
+      /* PSRAM gone: fall back to the internal-DRAM kernel heap.  That is
+       * the crowded region, but losing it is still better than losing
+       * the panel. */
+
+      priv->fbmem = kmm_zalloc(priv->fblen);
+    }
+#else
   priv->fbmem  = kmm_zalloc(priv->fblen);
+#endif
+
+  /* Print where it landed: internal DRAM is 0x3fc00000..0x3fcfffff on
+   * ESP32-S3, PSRAM maps far below that.  This is the verification hook
+   * for the whole change -- if the log says "internal DRAM", the fix did
+   * not take effect. */
+
+  if (priv->fbmem != NULL)
+    {
+      uintptr_t fbaddr = (uintptr_t)priv->fbmem;
+      int      fbintram = (fbaddr >= 0x3fc00000u && fbaddr < 0x3fd00000u);
+
+      syslog(LOG_ERR, "[V757] fbmem=%p len=%zu -> %s\n",
+             priv->fbmem, priv->fblen,
+             fbintram ? "internal DRAM (!! expected PSRAM)" : "PSRAM");
+    }
+
   if (priv->fbmem == NULL)
     {
       lcderr("ERROR: Failed to allocate frame buffer memory\n");

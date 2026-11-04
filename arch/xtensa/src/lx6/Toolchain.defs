@@ -102,7 +102,7 @@ ifeq ($(CONFIG_STACK_USAGE),y)
 endif
 
 ifneq ($(CONFIG_STACK_USAGE_WARNING),0)
-  ARCHOPTIMIZATION += -Wstack-usage=$(CONFIG_STACK_USAGE_WARNING)
+  ARCHOPTIMIZATION += -Wstack-usage=1024
 endif
 
 ifeq ($(CONFIG_COVERAGE_ALL),y)

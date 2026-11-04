@@ -23,6 +23,7 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+extern int ets_printf(const char *fmt, ...);
 
 #include <stdint.h>
 #include <string.h>
@@ -393,6 +394,7 @@ noinstrument_function void noreturn_function IRAM_ATTR __esp32s3_start(void)
 
   esp32s3_spi_timing_set_mspi_flash_tuning();
 #if defined(CONFIG_ESP32S3_SPIRAM_BOOT_INIT)
+  ets_printf("[CHK] pre-spiram\n");
   if (esp_spiram_init() != OK)
     {
 #  if defined(ESP32S3_SPIRAM_IGNORE_NOTFOUND)
@@ -405,6 +407,7 @@ noinstrument_function void noreturn_function IRAM_ATTR __esp32s3_start(void)
     {
       esp_spiram_init_cache();
       esp_spiram_test();
+      ets_printf("[CHK] spiram-ok\n");
     }
 #endif
 
@@ -415,12 +418,16 @@ noinstrument_function void noreturn_function IRAM_ATTR __esp32s3_start(void)
 #if defined(CONFIG_ESP32S3_DMA)
   /* Initialize GDMA controller */
 
+  ets_printf("[CHK] pre-dma\n");
   esp32s3_dma_init();
+  ets_printf("[CHK] dma-ok\n");
 #endif
 
   /* Initialize onboard resources */
 
+  ets_printf("[CHK] pre-board\n");
   esp32s3_board_initialize();
+  ets_printf("[CHK] board-ok\n");
 
   showprogress('B');
 
@@ -437,6 +444,7 @@ noinstrument_function void noreturn_function IRAM_ATTR __esp32s3_start(void)
 
   /* Bring up NuttX */
 
+  ets_printf("[CHK] pre-nxstart\n");
   nx_start();
   for (; ; ); /* Should not return */
 }
@@ -488,7 +496,9 @@ noinstrument_function void IRAM_ATTR __start(void)
     }
 #endif
 
+  ets_printf("[CHK] pre-cache\n");
   configure_cpu_caches();
+  ets_printf("[CHK] cache-ok\n");
 
   __esp32s3_start();
 
