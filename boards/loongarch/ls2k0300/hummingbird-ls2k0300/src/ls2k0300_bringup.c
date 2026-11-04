@@ -37,6 +37,7 @@
 #include <errno.h>
 
 #include <nuttx/board.h>
+#include <nuttx/clock.h>
 #include <nuttx/analog/adc.h>
 #include <nuttx/timers/rtc.h>
 #include <nuttx/i2c/i2c_master.h>
@@ -63,6 +64,7 @@ extern struct adc_dev_s *ls2k0300_adc_initialize(void);
 
 #ifdef CONFIG_LS2K0300_RTC
 extern int ls2k0300_rtc_initialize(void);
+extern void ls2k0300_rtc_hw_reinit(void);
 #endif
 
 #ifdef CONFIG_LS2K0300_I2C
@@ -441,6 +443,22 @@ int ls2k0300_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_FS_TMPFS
+  /* RAM-backed scratch space.  The PTT capture is written here instead
+   * of the SD card: the recording only lives for the few seconds until
+   * ASR has read it, and keeping the SDIO DMA off the bus while the I2S
+   * DMA is running removes one source of the short capture dropouts.
+   */
+
+  _info("bringup: mounting tmpfs at /tmp\n");
+  mkdir("/tmp", 0777);
+  ret = mount(NULL, "/tmp", "tmpfs", 0, NULL);
+  if (ret < 0)
+    {
+      serr("ERROR: Failed to mount tmpfs at /tmp: %d\n", ret);
+    }
+#endif
+
 #ifdef CONFIG_LS2K0300_ADC
   _info("bringup: ADC\n");
     {
@@ -759,6 +777,24 @@ int ls2k0300_bringup(void)
 #endif
         }
     }
+#endif
+
+#ifdef CONFIG_LS2K0300_RTC
+  /* The RTC driver is brought up from clock_initialize(), long before the
+   * board clocks settle.  Its TOY load is dropped if the 32.768 kHz
+   * oscillator is not running yet, so repeat the enable/load here while
+   * the time is still easy to fix.
+   */
+
+  _info("bringup: RTC reinit\n");
+  ls2k0300_rtc_hw_reinit();
+
+  /* clock_initialize() already seeded the system time from the RTC; redo
+   * it now that the counter actually runs, otherwise time() stays at the
+   * bogus value read during early boot.
+   */
+
+  clock_synchronize(NULL);
 #endif
 
   _info("bringup: done\n");

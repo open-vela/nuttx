@@ -166,6 +166,15 @@
 
 #define LS_DC_BKL_PIN          43
 
+/* Panel reset.  The schematic (G2K03Z1) wires the FPC's LCD_RESET through
+ * a 22R series resistor to CPU_GPIO55 -- net GPIO_LCD_RESET.  Nothing
+ * ever drove that pin, so the panel powered up with a floating reset
+ * input and only sometimes latched cleanly.  Active low.
+ */
+
+#define LS_DC_RST_PIN          55
+#define LS_PINMUX_GPIO48_63    0x1600049c
+
 /* LCD data pinmux (U-Boot dtsi "dc_pins"): GPIO0-27 must be MAIN_FUNC to
  * carry CLK/VSYNC/HSYNC/DE plus the 24 RGB data lines.  2 bits per pin.
  *
@@ -427,6 +436,40 @@ static void ls_dc_backlight_on(void)
   putreg8(1, LS2K0300_GPIO_BASE + LS2K0300_GPIO_OUT + LS_DC_BKL_PIN);
 }
 
+/* Release the panel from reset once the pixel clock is running.  GPIO55
+ * is muxed to plain GPIO first; GPIO48-53 stay on their main functions
+ * (I2C0/I2C1/I2C2), and the rest of the bank is left as read.
+ */
+
+static void ls_dc_panel_reset(void)
+{
+  uintptr_t pinmux = PHYS_TO_UNCACHED(LS_PINMUX_GPIO48_63);
+  uint32_t val;
+
+  val = getreg32(pinmux);
+  if (val == 0 || val == 0xffffffff)
+    {
+      /* Unreliable readback: keep the three I2C pairs, everything else
+       * plain GPIO.
+       */
+
+      val = 0x00000fff;
+    }
+  else
+    {
+      val |= 0x00000fff;
+    }
+
+  val &= ~(3u << ((LS_DC_RST_PIN - 48) * 2));
+  putreg32(val, pinmux);
+
+  putreg8(0, LS2K0300_GPIO_BASE + LS2K0300_GPIO_DIR + LS_DC_RST_PIN);
+  putreg8(0, LS2K0300_GPIO_BASE + LS2K0300_GPIO_OUT + LS_DC_RST_PIN);
+  up_mdelay(10);
+  putreg8(1, LS2K0300_GPIO_BASE + LS2K0300_GPIO_OUT + LS_DC_RST_PIN);
+  up_mdelay(50);
+}
+
 /* Dump the DC registers and pixel PLL to syslog.  Called once at boot so
  * that a working configuration can be diffed against U-Boot's, and from
  * the "lcd dump" subcommand so it can be re-run without reflashing.
@@ -613,6 +656,9 @@ int ls2k0300_dc_initialize(void)
       return ret;
     }
 
+  /* The pixel clock is up: reset the panel before the first frame. */
+
+  ls_dc_panel_reset();
 
   ls_dc_config_fb(LS_DC_FB_PA);
   ls_dc_backlight_on();

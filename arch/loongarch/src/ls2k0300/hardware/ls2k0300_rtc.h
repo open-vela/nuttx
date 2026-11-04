@@ -68,5 +68,6 @@
 #define RTC_CTRL_RTC_ENABLE_BIT        (1 << 13)
 #define RTC_CTRL_TOY_ENABLE_BIT        (1 << 11)
 #define RTC_CTRL_OSC_ENABLE_BIT        (1 << 8)
+#define RTC_CTRL_OSC_READY_BIT         (1 << 5)  /* 32S: crystal is running */
 
 #endif
