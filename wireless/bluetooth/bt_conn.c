@@ -442,7 +442,7 @@ void bt_conn_send(FAR struct bt_conn_s *conn, FAR struct bt_buf_s *buf)
       buf = bt_l2cap_create_pdu(conn);
 
       len = remaining;
-      if (len < g_btdev.le_mtu)
+      if (len > g_btdev.le_mtu)
         {
           len = g_btdev.le_mtu;
         }
@@ -604,8 +604,26 @@ void bt_conn_set_state(FAR struct bt_conn_s *conn,
         if (old_state == BT_CONN_CONNECTED ||
            old_state == BT_CONN_DISCONNECT)
           {
-            bt_queue_send(&conn->tx_queue, bt_buf_alloc(BT_DUMMY, NULL, 0),
-                          BT_NORMAL_PRIO);
+            FAR struct bt_buf_s *buf;
+            int ret;
+
+            buf = bt_buf_alloc(BT_DUMMY, NULL, 0);
+            if (buf == NULL)
+              {
+                wlerr("ERROR: Failed to allocate disconnect dummy\n");
+              }
+            else
+              {
+                ret = bt_queue_send(&conn->tx_queue, buf, BT_NORMAL_PRIO);
+                if (ret < 0)
+                  {
+                    wlerr("ERROR: Failed to queue disconnect dummy: %d\n",
+                          ret);
+                    bt_buf_release(buf);
+                  }
+              }
+
+            nxsem_post(&g_btdev.le_pkts_sem);
           }
 
         /* Release the reference we took for the very first state

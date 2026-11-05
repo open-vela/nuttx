@@ -56,6 +56,7 @@
 
 static struct spi_dev_s *g_spidev;
 static struct lcd_dev_s *g_lcd;
+static bool g_lcd_initialized;
 
 /****************************************************************************
  * Public Functions
@@ -76,14 +77,27 @@ static struct lcd_dev_s *g_lcd;
 
 int board_lcd_initialize(void)
 {
+  if (g_lcd_initialized)
+    {
+      return OK;
+    }
+
   /* Initialize non-SPI GPIOs */
 
   esp32s3_configgpio(ESP32S3_EYE_DISPLAY_DC, OUTPUT);
   esp32s3_configgpio(ESP32S3_EYE_DISPLAY_BCKL, OUTPUT);
+  esp32s3_configgpio(ESP32S3_EYE_DISPLAY_RST, OUTPUT);
+
+  /* Reset LCD panel */
+
+  esp32s3_gpiowrite(ESP32S3_EYE_DISPLAY_RST, false);
+  up_mdelay(10);
+  esp32s3_gpiowrite(ESP32S3_EYE_DISPLAY_RST, true);
+  up_mdelay(120);
 
   /* Turn on LCD backlight */
 
-  esp32s3_gpiowrite(ESP32S3_EYE_DISPLAY_BCKL, false);
+  esp32s3_gpiowrite(ESP32S3_EYE_DISPLAY_BCKL, true);
 
   g_spidev = esp32s3_spibus_initialize(ESP32S3_EYE_DISPLAY_SPI);
   if (!g_spidev)
@@ -99,6 +113,10 @@ int board_lcd_initialize(void)
       lcderr("ERROR: st7789_lcdinitialize() failed\n");
       return -ENODEV;
     }
+
+  g_lcd->setpower(g_lcd, CONFIG_LCD_MAXPOWER);
+
+  g_lcd_initialized = true;
 
   return OK;
 }

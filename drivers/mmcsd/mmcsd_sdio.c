@@ -43,6 +43,7 @@
 #include <assert.h>
 #include <debug.h>
 #include <errno.h>
+#include <syslog.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
@@ -3987,14 +3988,17 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
        * CMD8 Response: R7
        */
 
-      ret = mmcsd_sendcmdpoll(priv, SD_CMD8,
-                              MMCSD_CMD8CHECKPATTERN | MMCSD_CMD8VOLTAGE_27);
-      if (ret == OK)
-        {
+  ret = mmcsd_sendcmdpoll(priv, SD_CMD8,
+                          MMCSD_CMD8CHECKPATTERN | MMCSD_CMD8VOLTAGE_27);
+  if (ret == OK)
+    {
           /* CMD8 was sent successfully... Get the R7 response */
 
-          ret = SDIO_RECVR7(priv->dev, SD_CMD8, &response);
-        }
+      ret = SDIO_RECVR7(priv->dev, SD_CMD8, &response);
+    }
+
+  syslog(LOG_INFO, "MMCSD: CMD8 ret=%d response=%08" PRIx32 "\n",
+         ret, response);
 
       /* Were both the command sent and response received correctly? */
 
@@ -4068,6 +4072,7 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
                    */
 
                   ferr("ERROR: ACMD41 RECVR3: %d\n", ret);
+                  syslog(LOG_WARNING, "MMCSD: ACMD41 failed: %d\n", ret);
                 }
               else
                 {
@@ -4212,6 +4217,9 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
     {
       priv->type = MMCSD_CARDTYPE_UNKNOWN;
       ferr("ERROR: Failed to identify card\n");
+      syslog(LOG_ERR,
+             "MMCSD: failed to identify card elapsed=%ld ret=%d type=%d\n",
+             (long)elapsed, ret, priv->type);
       return -EIO;
     }
 
@@ -4271,6 +4279,7 @@ static int mmcsd_probe(FAR struct mmcsd_state_s *priv)
       if (ret != OK)
         {
           ferr("ERROR: Failed to initialize card: %d\n", ret);
+          syslog(LOG_ERR, "MMCSD: card identify failed: %d\n", ret);
         }
       else
         {

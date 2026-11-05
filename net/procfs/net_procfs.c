@@ -34,14 +34,12 @@
 #include <string.h>
 #include <fcntl.h>
 #include <fnmatch.h>
-#include <libgen.h>
 #include <assert.h>
 #include <errno.h>
 #include <debug.h>
 
 #include <sys/param.h>
 
-#include <nuttx/lib/lib.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/fs/procfs.h>
@@ -228,23 +226,15 @@ static int netprocfs_open(FAR struct file *filep, FAR const char *relpath,
 
   if (i == nitems(g_net_entries) - 1)
     {
-      FAR char *devname;
-      FAR char *copy;
+      FAR const char *devname;
 
       /* Otherwise, we need to search the list of registered network devices
        * to determine if the name corresponds to a network device.
        */
 
-      copy = strdup(relpath);
-      if (copy == NULL)
-        {
-          ferr("ERROR: strdup failed\n");
-          return -ENOMEM;
-        }
-
-      devname = basename(copy);
+      devname = strrchr(relpath, '/');
+      devname = devname == NULL ? relpath : devname + 1;
       dev     = netdev_findbyname(devname);
-      lib_free(copy);
 
       if (dev == NULL)
         {
@@ -614,23 +604,15 @@ static int netprocfs_stat(FAR const char *relpath, FAR struct stat *buf)
   if (buf->st_mode == 0)
     {
       FAR struct net_driver_s *dev;
-      FAR char *devname;
-      FAR char *copy;
+      FAR const char *devname;
 
       /* Otherwise, we need to search the list of registered network devices
        * to determine if the name corresponds to a network device.
        */
 
-      copy = strdup(relpath);
-      if (copy == NULL)
-        {
-          ferr("ERROR: strdup failed\n");
-          return -ENOMEM;
-        }
-
-      devname = basename(copy);
+      devname = strrchr(relpath, '/');
+      devname = devname == NULL ? relpath : devname + 1;
       dev     = netdev_findbyname(devname);
-      lib_free(copy);
 
       if (dev == NULL)
         {
