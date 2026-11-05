@@ -302,7 +302,10 @@ struct stm32h7_sai_s
   unsigned int capture_next_half;
   uint8_t *capture_ring;       /* Client ring the DMA fills */
   size_t capture_bytes;        /* Ring length */
-  stm32_sai_capture_cb_t capture_cb; /* Client notification, or NULL */
+
+  /* Client notification, or NULL */
+
+  stm32_sai_capture_cb_t capture_cb;
   void *capture_arg;           /* Passed to capture_cb */
   struct stm32_sai_capture_stats capture_stats;
 #endif

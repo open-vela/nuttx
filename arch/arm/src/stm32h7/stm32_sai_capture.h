@@ -50,6 +50,10 @@
 #ifndef __ARCH_ARM_SRC_STM32H7_STM32_SAI_CAPTURE_H
 #define __ARCH_ARM_SRC_STM32H7_STM32_SAI_CAPTURE_H
 
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <nuttx/config.h>
 
 #include <stdbool.h>

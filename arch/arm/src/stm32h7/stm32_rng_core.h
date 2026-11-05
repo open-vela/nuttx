@@ -23,6 +23,10 @@
 #ifndef __ARCH_ARM_SRC_STM32H7_STM32_RNG_CORE_H
 #define __ARCH_ARM_SRC_STM32H7_STM32_RNG_CORE_H
 
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
