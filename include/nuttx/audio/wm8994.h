@@ -160,6 +160,14 @@ struct wm8994_lower_s
   CODE int  (*attach)(FAR const struct wm8994_lower_s *lower,
                       wm8994_handler_t isr, FAR void *arg);
   CODE bool (*enable)(FAR const struct wm8994_lower_s *lower, bool enable);
+
+  /* Optional MCLK lifecycle hook.  The codec requires a running MCLK before
+   * enabling AIF1CLK, including during analogue startup.  Disable only after
+   * AIF1CLK has been gated and all audio transfers have completed.
+   */
+
+  CODE int (*mclk_enable)(FAR const struct wm8994_lower_s *lower,
+                          bool enable);
 };
 
 /****************************************************************************

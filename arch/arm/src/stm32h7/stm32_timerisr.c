@@ -115,6 +115,7 @@ static int stm32_timerisr(int irq, uint32_t *regs, void *arg)
   /* Process timer interrupt */
 
   nxsched_process_timer();
+
   return 0;
 }
 

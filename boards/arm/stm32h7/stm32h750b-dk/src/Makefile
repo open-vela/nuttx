@@ -28,6 +28,10 @@ else
 CSRCS += stm32_userleds.c
 endif
 
+ifeq ($(CONFIG_ARCH_BUTTONS),y)
+CSRCS += stm32_buttons.c
+endif
+
 ifeq ($(CONFIG_STM32H7_OTGFS),y)
 CSRCS += stm32_usb.c
 endif
@@ -48,8 +52,20 @@ ifeq ($(CONFIG_INPUT_FT5X06),y)
 CSRCS += stm32_ft5x06.c
 endif
 
+ifeq ($(CONFIG_AUDIO_WM8994),y)
+CSRCS += stm32_audio.c
+endif
+
 ifeq ($(CONFIG_STM32H7_LTDC),y)
 CSRCS += stm32_lcd.c
+endif
+
+ifeq ($(CONFIG_PWM),y)
+CSRCS += stm32_pwm.c
+endif
+
+ifeq ($(CONFIG_STM32H7_SDMMC),y)
+CSRCS += stm32_sdmmc.c
 endif
 
 include $(TOPDIR)/boards/Board.mk

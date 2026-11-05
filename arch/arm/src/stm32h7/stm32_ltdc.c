@@ -37,6 +37,7 @@
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/semaphore.h>
+#include <nuttx/spinlock.h>
 #include <nuttx/video/fb.h>
 
 #include <arch/board/board.h>
@@ -823,6 +824,22 @@ static sem_t g_lock;
 
 static sem_t g_semirq;
 
+/* Read-only SWD diagnostics, also usable when LCD logging is disabled.
+ * Layout: magic, version, FIFO underruns, transfer errors, last error ISR,
+ * framebuffer address, scan position, completed register reloads.
+ * Error IRQs must not release a framebuffer or signal a completed reload.
+ */
+
+static volatile uint32_t g_ltdc_diag[8] =
+{
+  0x4c544443,
+  1
+};
+
+#if defined(CONFIG_STM32H7_LTDC_FB_DOUBLE_BUFFER)
+static volatile bool g_flip_pending;
+#endif
+
 /* This structure provides irq handling */
 
 static struct stm32_interrupt_s g_interrupt =
@@ -1482,6 +1499,29 @@ static int stm32_ltdcirq(int irq, void *context, void *arg)
 
   reginfo("irq = %d, regval = %08x\n", irq, regval);
 
+  /* H7 routes FIFO/transfer errors through LTDCER, separately from LTDC.
+   * Handle every error bit before the reload path, which may return early
+   * after completing a queued pan.  No per-error console output here.
+   */
+
+  if (regval & (LTDC_ISR_FUIF | LTDC_ISR_TERRIF))
+    {
+      g_ltdc_diag[4] = regval;
+      g_ltdc_diag[5] = getreg32(STM32_LTDC_L1CFBAR);
+      g_ltdc_diag[6] = getreg32(STM32_LTDC_CPSR);
+      if (regval & LTDC_ISR_FUIF)
+        {
+          g_ltdc_diag[2]++;
+        }
+
+      if (regval & LTDC_ISR_TERRIF)
+        {
+          g_ltdc_diag[3]++;
+        }
+
+      putreg32(regval & (LTDC_ISR_FUIF | LTDC_ISR_TERRIF), STM32_LTDC_ICR);
+    }
+
   if (regval & LTDC_ISR_RRIF)
     {
       /* Register reload interrupt */
@@ -1491,9 +1531,15 @@ static int stm32_ltdcirq(int irq, void *context, void *arg)
       reginfo("Register reloaded\n");
       putreg32(LTDC_ICR_CRRIF, STM32_LTDC_ICR);
       priv->error = OK;
+      g_ltdc_diag[7]++;
 
 #if defined(CONFIG_STM32H7_LTDC_FB_DOUBLE_BUFFER)
-      fb_remove_paninfo(&g_vtable.vtable, FB_NO_OVERLAY);
+      if (g_flip_pending)
+        {
+          g_flip_pending = false;
+          fb_remove_paninfo(&g_vtable.vtable, FB_NO_OVERLAY);
+          return OK;
+        }
 #endif
     }
   else if (regval & LTDC_IER_LIE)
@@ -1506,29 +1552,11 @@ static int stm32_ltdcirq(int irq, void *context, void *arg)
       putreg32(LTDC_ICR_CLIF, STM32_LTDC_ICR);
       priv->error = OK;
     }
-  else if (regval & LTDC_IER_TERRIE)
-    {
-      /* Transfer error interrupt */
-
-      /* Clear the interrupt status register */
-
-      reginfo("Error transfer\n");
-      putreg32(LTDC_ICR_CTERRIF, STM32_LTDC_ICR);
-      priv->error = -ECANCELED;
-    }
-  else if (regval & LTDC_IER_FUIE)
-    {
-      /* Fifo underrun error interrupt */
-
-      /* Clear the interrupt status register */
-
-      reginfo("Error fifo underrun\n");
-      putreg32(LTDC_ICR_CFUIF, STM32_LTDC_ICR);
-      priv->error = -ECANCELED;
-    }
   else
     {
-      DEBUGASSERT("Unknown interrupt");
+      /* An error alone does not mean a register reload has completed. */
+
+      return OK;
     }
 
   /* Unlock the semaphore if locked */
@@ -1641,10 +1669,12 @@ static void stm32_ltdc_irqconfig(void)
   /* Attach LTDC interrupt vector */
 
   irq_attach(g_interrupt.irq, stm32_ltdcirq, NULL);
+  irq_attach(STM32_IRQ_LTDCER, stm32_ltdcirq, NULL);
 
   /* Enable the IRQ at the NVIC */
 
   up_enable_irq(g_interrupt.irq);
+  up_enable_irq(STM32_IRQ_LTDCER);
 
   /* Enable interrupts expect line interrupt */
 
@@ -2564,24 +2594,28 @@ static int stm32_waitforvsync(struct fb_vtable_s *vtable)
 static int stm32_pandisplay(struct fb_vtable_s *vtable,
                             struct fb_planeinfo_s *pinfo)
 {
-  int ret = 0;
+  irqstate_t flags;
+  uint32_t new_fb_start;
 
   DEBUGASSERT(vtable != NULL && vtable == &g_vtable.vtable);
   DEBUGASSERT(pinfo != NULL);
 
-  uint32_t new_fb_start = (uint32_t)pinfo->fbmem +
-                         pinfo->yoffset * pinfo->stride +
-                         pinfo->xoffset * (pinfo->bpp / 8);
+  new_fb_start = (uint32_t)pinfo->fbmem +
+                 pinfo->yoffset * pinfo->stride +
+                 pinfo->xoffset * (pinfo->bpp / 8);
 
-  putreg32(new_fb_start, stm32_cfbar_layer_t[0]);
-  ret = stm32_ltdc_reload(LTDC_SRCR_VBR, true);
-  if (ret < 0)
+  flags = enter_critical_section();
+  if (g_flip_pending)
     {
-      lcderr("ERROR: stm32_ltdc_reload failed: %d\n", ret);
-      return ret;
+      leave_critical_section(flags);
+      return -EBUSY;
     }
 
-  return ret;
+  g_flip_pending = true;
+  putreg32(new_fb_start, stm32_cfbar_layer_t[0]);
+  putreg32(LTDC_SRCR_VBR, STM32_LTDC_SRCR);
+  leave_critical_section(flags);
+  return OK;
 }
 #endif
 
@@ -3152,6 +3186,8 @@ void stm32_ltdcuninitialize(void)
 
   up_disable_irq(g_interrupt.irq);
   irq_detach(g_interrupt.irq);
+  up_disable_irq(STM32_IRQ_LTDCER);
+  irq_detach(STM32_IRQ_LTDCER);
 
   /* Disable the LCD controller */
 

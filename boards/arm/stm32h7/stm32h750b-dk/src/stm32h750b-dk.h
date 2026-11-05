@@ -101,6 +101,22 @@
                            GPIO_PUSHPULL|GPIO_PORTG|GPIO_PIN7)
 #endif
 
+/* Button definitions *******************************************************/
+
+/* B1 USER is PC13 on MB1381 B-01.  ST BSP v3.3.4 configures it as
+ * GPIO_PULLDOWN with GPIO_MODE_IT_RISING (BUTTON_USER_GPIO_PORT GPIOC,
+ * BUTTON_USER_PIN GPIO_PIN_13, BUTTON_USER_EXTI_LINE EXTI_LINE_13), so the
+ * pin reads low when released and high while pressed.  Measured on the board
+ * on 2026-10-21 (BVO-01 M-05), matching that configuration.
+ *
+ * PC13 is also the RTC wake-up pin.  This configuration does not enable RTC
+ * wake-up and does not load the LSE/RTC clock for it, so nothing else drives
+ * the pin; keep it that way if RTC wake-up is ever enabled here.
+ */
+
+#define GPIO_BTN_USER  (GPIO_INPUT | GPIO_PULLDOWN | GPIO_EXTI | \
+                        GPIO_SPEED_100MHz | GPIO_PORTC | GPIO_PIN13)
+
 /* Touchscreen definitions **************************************************/
 
 /* The STM32H743I-DISCO have connectors for the LCD model RK043FN48H-CT672B.
@@ -114,7 +130,7 @@
 
 /* Touchscreen Interrupt line: PG2 */
 
-#define GPIO_FT5X06_INT    (GPIO_INPUT|GPIO_FLOAT|GPIO_SPEED_100MHz| \
+#define GPIO_FT5X06_INT    (GPIO_INPUT|GPIO_PULLUP|GPIO_SPEED_100MHz| \
                             GPIO_PUSHPULL|GPIO_PORTG|GPIO_PIN2)
 
 /* The reset line is active low: PB12 */
@@ -142,10 +158,10 @@
                             GPIO_OUTPUT_CLEAR|GPIO_PORTJ|GPIO_PIN1)
 
 #define GPIO_LCD_G0        (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
-                            GPIO_OUTPUT_CLEAR|GPIO_PORTG|GPIO_PIN0)
+                            GPIO_OUTPUT_CLEAR|GPIO_PORTJ|GPIO_PIN7)
 
 #define GPIO_LCD_G1        (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
-                            GPIO_OUTPUT_CLEAR|GPIO_PORTG|GPIO_PIN1)
+                            GPIO_OUTPUT_CLEAR|GPIO_PORTJ|GPIO_PIN8)
 
 #define GPIO_LCD_B0        (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
                             GPIO_OUTPUT_CLEAR|GPIO_PORTJ|GPIO_PIN12)
@@ -155,6 +171,19 @@
 
 #define GPIO_LCD_B2        (GPIO_OUTPUT|GPIO_PUSHPULL|GPIO_SPEED_50MHz|\
                             GPIO_OUTPUT_CLEAR|GPIO_PORTJ|GPIO_PIN14)
+
+/* SDMMC / on-board eMMC ****************************************************/
+
+#if defined(CONFIG_STM32H7_SDMMC1)
+#  define HAVE_SDIO
+#endif
+
+#if defined(CONFIG_DISABLE_MOUNTPOINT) || !defined(CONFIG_MMCSD_SDIO)
+#  undef HAVE_SDIO
+#endif
+
+#define SDIO_SLOTNO        0
+#define SDIO_MINOR         0
 
 /****************************************************************************
  * Public Function Prototypes
@@ -181,6 +210,8 @@ int stm32_bringup(void);
  *   USB-related GPIO pins for the stm32h750b-dk board.
  *
  ****************************************************************************/
+
+int stm32_pwm_setup(void);
 
 #ifdef CONFIG_STM32H7_OTGFS
 void weak_function stm32_usbinitialize(void);
@@ -212,6 +243,32 @@ int stm32_usbhost_initialize(void);
 
 #ifdef CONFIG_INPUT_FT5X06
 int stm32_tsc_setup(int minor);
+#endif
+
+/****************************************************************************
+ * Name: stm32_sdio_initialize
+ *
+ * Description:
+ *   Initialize SDIO-based MMC/SD card support (on-board eMMC).
+ *
+ ****************************************************************************/
+
+#ifdef HAVE_SDIO
+int stm32_sdio_initialize(void);
+#endif
+
+/****************************************************************************
+ * Name: stm32_audio_initialize
+ *
+ * Description:
+ *   Initialize the WM8994 audio output path and register it as
+ *   /dev/audio/pcm0p.  SAI2 block A drives the codec; HPOUT1 drives the
+ *   green 3.5 mm jack.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_AUDIO_WM8994
+int stm32_audio_initialize(void);
 #endif
 
 #endif /* __BOARDS_ARM_STM32H7_STM32H750B_DK_SRC_STM32H750B_DK_H */

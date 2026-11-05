@@ -3537,6 +3537,12 @@ static int mmcsd_iocmd(FAR struct mmcsd_part_s *part,
                priv->cid, sizeof(priv->cid));
       }
       break;
+    case MMCSD_CMDIDX9: /* Get csd reg data */
+      {
+        memcpy((FAR void *)(uintptr_t)ic_ptr->data_ptr,
+               priv->csd, sizeof(priv->csd));
+      }
+      break;
     case MMCSD_CMDIDX6: /* Switch commands */
       {
         ret = mmcsd_switch(priv, ic_ptr->arg);

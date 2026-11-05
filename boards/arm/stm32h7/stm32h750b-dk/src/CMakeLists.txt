@@ -26,6 +26,10 @@ else()
   list(APPEND SRCS stm32_userleds.c)
 endif()
 
+if(CONFIG_ARCH_BUTTONS)
+  list(APPEND SRCS stm32_buttons.c)
+endif()
+
 if(CONFIG_STM32H7_OTGFS)
   list(APPEND SRCS stm32_usb.c)
 endif()
@@ -46,14 +50,32 @@ if(CONFIG_INPUT_FT5X06)
   list(APPEND SRCS stm32_ft5x06.c)
 endif()
 
+if(CONFIG_AUDIO_WM8994)
+  list(APPEND SRCS stm32_audio.c)
+endif()
+
 if(CONFIG_STM32H7_LTDC)
   list(APPEND SRCS stm32_lcd.c)
+endif()
+
+if(CONFIG_PWM)
+  list(APPEND SRCS stm32_pwm.c)
+endif()
+
+if(CONFIG_STM32H7_SDMMC)
+  list(APPEND SRCS stm32_sdmmc.c)
 endif()
 
 target_sources(board PRIVATE ${SRCS})
 
 if(CONFIG_ARCH_CHIP_STM32H7_CORTEXM7)
-  set_property(GLOBAL PROPERTY LD_SCRIPT "${NUTTX_BOARD_DIR}/scripts/flash.ld")
+  if(CONFIG_STM32H750B_DK_QSPI_BOOT)
+    set_property(GLOBAL PROPERTY LD_SCRIPT
+                                 "${NUTTX_BOARD_DIR}/scripts/qspi_flash.ld")
+  else()
+    set_property(GLOBAL PROPERTY LD_SCRIPT
+                                 "${NUTTX_BOARD_DIR}/scripts/flash.ld")
+  endif()
 else()
   set_property(GLOBAL PROPERTY LD_SCRIPT
                                "${NUTTX_BOARD_DIR}/scripts/flash_m4.ld")

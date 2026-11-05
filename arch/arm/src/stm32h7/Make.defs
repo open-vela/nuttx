@@ -25,6 +25,10 @@
 
 include armv7-m/Make.defs
 
+ifeq ($(CONFIG_STM32H7_RNG),y)
+CHIP_CSRCS += stm32_rng.c
+endif
+
 ifeq ($(CONFIG_STM32H7_PROGMEM),y)
 CHIP_CSRCS += stm32_flash.c
 endif
@@ -120,6 +124,10 @@ endif
 ifeq ($(CONFIG_RTC_DRIVER),y)
 CHIP_CSRCS += stm32_rtc_lowerhalf.c
 endif
+endif
+
+ifeq ($(CONFIG_STM32H7_SAI),y)
+CHIP_CSRCS += stm32_sai.c
 endif
 
 ifeq ($(CONFIG_STM32H7_SPI),y)

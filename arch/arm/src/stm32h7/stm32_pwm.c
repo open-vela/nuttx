@@ -1363,7 +1363,7 @@ static struct stm32_pwmchan_s g_pwm15channels[] =
   {
     .channel = 2,
     .mode    = CONFIG_STM32H7_TIM15_CH2MODE,
-#ifdef CONFIG_STM32H7_TIM12_CH2OUT
+#ifdef CONFIG_STM32H7_TIM15_CH2OUT
     .out1    =
     {
       .in_use  = 1,

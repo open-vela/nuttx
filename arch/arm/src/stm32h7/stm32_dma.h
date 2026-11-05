@@ -182,6 +182,12 @@ void stm32_dmastart(DMA_HANDLE handle, dma_callback_t callback, void *arg,
 
 void stm32_dmastop(DMA_HANDLE handle);
 
+/* Read DMA1/DMA2 stream enable acknowledgement: 1 running, 0 disabled,
+ * -ENOSYS for other controllers.  Does not change the stream.
+ */
+
+int stm32_dma_stream_status(DMA_HANDLE handle);
+
 /****************************************************************************
  * Name: stm32_dmaresidual
  ****************************************************************************/
