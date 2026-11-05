@@ -127,6 +127,7 @@ struct ft5x06_dev_s
   struct wdog_s polltimer;                  /* Poll timer */
 #endif
   uint8_t touchbuf[FT5X06_TOUCH_DATA_LEN];  /* Raw touch data */
+
   /* The following is a list if poll structures of threads waiting for
    * driver events. The 'struct pollfd' reference for each open is also
    * retained in the f_priv field of the 'struct file'.

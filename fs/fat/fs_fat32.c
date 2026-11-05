@@ -900,8 +900,8 @@ fat_read_restart:
 
               if ((ret == -EFAULT || ret == -ENOMEM) && !force_indirect)
                 {
-                  ferr("ERROR: DMA read fallback, ret=%d restarting indirect\n",
-                       ret);
+                  ferr("ERROR: DMA read fallback, ret=%d"
+                       " restarting indirect\n", ret);
                   force_indirect = true;
                   goto fat_read_restart;
                 }
@@ -1100,8 +1100,8 @@ fat_write_restart:
 
               if ((ret == -EFAULT || ret == -ENOMEM) && !force_indirect)
                 {
-                  ferr("ERROR: DMA write fallback, ret=%d restarting indirect\n",
-                        ret);
+                  ferr("ERROR: DMA write fallback, ret=%d"
+                       " restarting indirect\n", ret);
                   force_indirect = true;
                   goto fat_write_restart;
                 }
