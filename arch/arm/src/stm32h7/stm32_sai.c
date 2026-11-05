@@ -91,8 +91,8 @@
 #endif
 
 /* The kernel clock is derived from PLL2P.  The board header must state what
- * that frequency is; inferring it from the raw divider fields would duplicate
- * the PLL arithmetic that board.h already performs.
+ * that frequency is; inferring it from the raw divider fields would
+ * duplicate the PLL arithmetic that board.h already performs.
  */
 
 #ifdef CONFIG_STM32H7_SAI
@@ -175,12 +175,12 @@
  *
  *                 FS = CK / (MCKDIV * FRL)
  *
- * PDM uses the NODIV = 1 form.  Its reference configuration asks for a frame
- * rate of eight times the sample rate because the frame is 32 bits wide, so
- * the product is 256 * FS in either case and the divider expression collapses
- * to the same number.  What differs is which register field the divider
- * lands in, and getting that wrong leaves the microphone with no bit clock
- * at all.
+ * PDM uses the NODIV = 1 form.  Its reference configuration asks for a
+ * frame rate of eight times the sample rate because the frame is 32 bits
+ * wide, so the product is 256 * FS in either case and the divider
+ * expression collapses to the same number.  What differs is which register
+ * field the divider lands in, and getting that wrong leaves the microphone
+ * with no bit clock at all.
  *
  * Rounding is done in tenths of a hertz to keep the significant digits, the
  * same technique the ST HAL uses.  A divider below 1 is clamped to 1: the
@@ -193,9 +193,10 @@
 
 /* PDM frame geometry, taken from the reference configuration ST ships for
  * this board's microphone path: frame length 32, two slots, one active,
- * 16-bit data.  The PDM interface derives its bitstream clock from the master
- * clock, so a 32-bit frame turns MCLK into the 1.024 MHz sample stream the
- * microphone produces, and 64 decimation steps bring that back to 16 kHz.
+ * 16-bit data.  The PDM interface derives its bitstream clock from the
+ * master clock, so a 32-bit frame turns MCLK into the 1.024 MHz sample
+ * stream the microphone produces, and 64 decimation steps bring that back
+ * to 16 kHz.
  */
 
 #define SAI_PDM_FRAME_LENGTH      (32)
@@ -728,9 +729,9 @@ static int sai_dma_setup(struct stm32h7_sai_s *priv)
 
   samp = (uintptr_t)&apb->samp[apb->curbyte];
 
-  /* The transfer width follows the configured data width.  For RX the driver
-   * fills the buffer, so the length comes from the buffer capacity; for TX it
-   * comes from the number of valid bytes.
+  /* The transfer width follows the configured data width.  For RX the
+   * driver fills the buffer, so the length comes from the buffer capacity;
+   * for TX it comes from the number of valid bytes.
    */
 
   if (priv->txenab)
@@ -956,6 +957,7 @@ static void sai_worker(void *arg)
           bfcontainer->result = -EIO;
           sq_addlast((sq_entry_t *)bfcontainer, &priv->done);
         }
+
 #endif
       leave_critical_section(flags);
     }
@@ -1094,8 +1096,8 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
   /* Record why the transfer ended, together with the block's status register
    * at that moment.  SAI reports overrun and wrong-clock-configuration
    * separately from the DMA error flags, and only the SAI bits distinguish a
-   * misconfigured clock from a bus fault.  The value is read here rather than
-   * later because CLRFR and the next transfer both overwrite it.
+   * misconfigured clock from a bus fault.  The value is read here rather
+   * than later because CLRFR and the next transfer both overwrite it.
    */
 
   priv->completed++;
@@ -1127,6 +1129,7 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
     {
       priv->clockerrors++;
     }
+
   priv->last_cr1  = sai_getreg(priv, STM32H7_SAI_CR1_OFFSET);
   priv->last_frcr = sai_getreg(priv, STM32H7_SAI_FRCR_OFFSET);
   priv->last_slotr = sai_getreg(priv, STM32H7_SAI_SLOTR_OFFSET);
@@ -1174,7 +1177,8 @@ static void sai_dma_callback(DMA_HANDLE handle, uint8_t isr, void *arg)
               unit = (priv->datalen > 16) ? 4 : 2;
             }
 
-          samp = (uintptr_t)&bfcontainer->apb->samp[bfcontainer->apb->curbyte];
+          samp = (uintptr_t)
+                 &bfcontainer->apb->samp[bfcontainer->apb->curbyte];
           end  = samp + ((bfcontainer->apb->nmaxbytes -
                           bfcontainer->apb->curbyte) / unit * unit);
           up_invalidate_dcache(samp, end);
@@ -1243,11 +1247,13 @@ static void sai_capture_dma_callback(DMA_HANDLE handle, uint8_t isr,
       priv->capture_stats.overruns++;
       sai_putreg(priv, STM32H7_SAI_CLRFR_OFFSET, SAI_INT_OVRUDR);
     }
+
   if (sr & SAI_INT_WCKCFG)
     {
       priv->capture_stats.clockerrors++;
       sai_putreg(priv, STM32H7_SAI_CLRFR_OFFSET, SAI_INT_WCKCFG);
     }
+
   if (isr & (DMA_STATUS_TEIF | DMA_STATUS_DMEIF))
     {
       priv->capture_stats.dmaerrors++;
@@ -1524,6 +1530,9 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
 {
   struct stm32h7_sai_s *priv = (struct stm32h7_sai_s *)dev;
   struct sai_buffer_s *bfcontainer;
+  uintptr_t addr;
+  size_t bytes;
+  size_t unit;
   irqstate_t flags;
   int ret;
 
@@ -1537,27 +1546,25 @@ static int sai_send(struct i2s_dev_s *dev, struct ap_buffer_s *apb,
       return -EINVAL;
     }
 
-  {
-    size_t unit = priv->datalen > 16 ? 4 : 2;
-    size_t bytes = apb->nbytes - apb->curbyte;
-    uintptr_t addr = (uintptr_t)&apb->samp[apb->curbyte];
+  unit  = priv->datalen > 16 ? 4 : 2;
+  bytes = apb->nbytes - apb->curbyte;
+  addr  = (uintptr_t)&apb->samp[apb->curbyte];
 
-    if (bytes == 0 || bytes % unit != 0 || addr % unit != 0)
-      {
-        return -EINVAL;
-      }
+  if (bytes == 0 || bytes % unit != 0 || addr % unit != 0)
+    {
+      return -EINVAL;
+    }
 
-    if (bytes / unit > DMA_SNDTR_NDT_MASK)
-      {
-        return -E2BIG;
-      }
+  if (bytes / unit > DMA_SNDTR_NDT_MASK)
+    {
+      return -E2BIG;
+    }
 
-    if (addr < STM32_DTCRAM_BASE + 0x20000 &&
-        addr + bytes > STM32_DTCRAM_BASE)
-      {
-        return -EFAULT;
-      }
-  }
+  if (addr < STM32_DTCRAM_BASE + 0x20000 &&
+      addr + bytes > STM32_DTCRAM_BASE)
+    {
+      return -EFAULT;
+    }
 
   /* Allocate a buffer container in advance */
 
@@ -1819,10 +1826,10 @@ static void sai_pdmconfig(struct stm32h7_sai_s *priv)
   regval &= ~SAI_PDMCR_PDMEN;
   putreg32(regval, priv->pdmbase + STM32H7_SAI_PDMCR_OFFSET);
 
-  /* The reference configuration enables the clock of bitstream 2 only, since
-   * that is the clock line the board's microphone is wired to.  MICNBR counts
-   * microphone pairs and is encoded one-based; the reference value of two
-   * covers a stereo pair even though only one microphone is fitted.
+  /* The reference configuration enables the clock of bitstream 2 only,
+   * since that is the clock line the board's microphone is wired to.  MICNBR
+   * counts microphone pairs and is encoded one-based; the reference value
+   * of two covers a stereo pair even though only one microphone is fitted.
    */
 
   regval &= ~(SAI_PDMCR_MICNBR_MASK | SAI_PDMCR_CKEN1 | SAI_PDMCR_CKEN2 |
@@ -1940,11 +1947,11 @@ static void sai_portinitialize(struct stm32h7_sai_s *priv)
    *
    * PCM: the peer is a WM8994 configured for the I2S protocol
    * (AIF1_FMT_I2S, AIF1 word length 16).  I2S does not use a start-of-frame
-   * pulse; it needs a channel-identification half-frame, active low, starting
-   * one bit before the first bit of the slot, which is what the F7 driver
-   * programs for the same codec.  A start-of-frame pulse active high leaves
-   * the codec's LRCLK decoder without the edge it expects, so it never
-   * latches a sample even though the clocks look present.
+   * pulse; it needs a channel-identification half-frame, active low,
+   * starting one bit before the first bit of the slot, which is what the F7
+   * driver programs for the same codec.  A start-of-frame pulse active high
+   * leaves the codec's LRCLK decoder without the edge it expects, so it
+   * never latches a sample even though the clocks look present.
    */
 
   if (priv->pdm)
@@ -2256,7 +2263,8 @@ int stm32_sai_staterecord(struct i2s_dev_s *dev, uint32_t *regs, int nregs)
 
   if (nregs >= 20)
     {
-      regs[17] = TICK2MSEC((uint32_t)(priv->stream_end - priv->stream_start));
+      regs[17] =
+        TICK2MSEC((uint32_t)(priv->stream_end - priv->stream_start));
       regs[18] = priv->stream_bytes;
       regs[19] = CONFIG_USEC_PER_TICK;
     }
@@ -2531,7 +2539,8 @@ int stm32_sai_capture_stop(struct i2s_dev_s *dev, unsigned int wait_ms)
       (offset == halfbytes && position < halfbytes))
     {
       up_invalidate_dcache((uintptr_t)priv->capture_ring + offset,
-                          (uintptr_t)priv->capture_ring + offset + halfbytes);
+                           (uintptr_t)priv->capture_ring + offset +
+                           halfbytes);
       if (cb) cb(arg, priv->capture_next_half,
                  priv->capture_ring + offset, halfbytes);
       priv->capture_stats.halves++;

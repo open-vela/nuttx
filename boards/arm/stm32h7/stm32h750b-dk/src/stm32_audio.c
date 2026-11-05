@@ -83,8 +83,9 @@ static int wm8994_attach(const struct wm8994_lower_s *lower,
                          wm8994_handler_t isr, void *arg)
 {
   /* The driver only uses this hook for its FLL-lock interrupt, which is
-   * disabled (WM8994_USE_FFLOCK_INT is not defined).  The board Audio_Int net is PG7; this playback path does not
-   * configure that optional interrupt.
+   * disabled (WM8994_USE_FFLOCK_INT is not defined).  The board Audio_Int
+   * net is PG7; this playback path does not configure that optional
+   * interrupt.
    */
 
   audinfo("WM8994 interrupt not used on this board\n");
@@ -233,15 +234,15 @@ int stm32_audio_codec_readreg(uint16_t offset, FAR uint16_t *val)
   int ret;
 
   if (val == NULL)
-  {
-    return -EINVAL;
-  }
+    {
+      return -EINVAL;
+    }
 
   i2c = stm32_i2cbus_initialize(WM8994_I2C_BUS);
   if (i2c == NULL)
-  {
-    return -ENODEV;
-  }
+    {
+      return -ENODEV;
+    }
 
   /* The WM8994 takes a 16-bit register subaddress, not an 8-bit one.  The
    * driver in drivers/audio/wm8994.c builds it by byte-swapping the offset,
@@ -270,9 +271,9 @@ int stm32_audio_codec_readreg(uint16_t offset, FAR uint16_t *val)
   ret = I2C_TRANSFER(i2c, msg, 2);
   stm32_i2cbus_uninitialize(i2c);
   if (ret < 0)
-  {
-    return ret;
-  }
+    {
+      return ret;
+    }
 
   *val = ((uint16_t)buf[0] << 8) | buf[1];
   return OK;
@@ -291,6 +292,7 @@ static void audio_rejected(FAR struct i2s_dev_s *dev,
                            int result)
 {
   /* Invalid requests must return synchronously, never complete later. */
+
   *(volatile bool *)arg = true;
 }
 

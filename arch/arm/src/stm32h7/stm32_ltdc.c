@@ -830,7 +830,11 @@ static sem_t g_semirq;
  * Error IRQs must not release a framebuffer or signal a completed reload.
  */
 
-static volatile uint32_t g_ltdc_diag[8] = {0x4c544443, 1};
+static volatile uint32_t g_ltdc_diag[8] =
+{
+  0x4c544443,
+  1
+};
 
 #if defined(CONFIG_STM32H7_LTDC_FB_DOUBLE_BUFFER)
 static volatile bool g_flip_pending;

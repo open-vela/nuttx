@@ -37,7 +37,8 @@
 /* The global block (GCR, PDMCR, PDMDLY) starts at the peripheral base.  The
  * sub-blocks A and B follow at fixed offsets.  Note that the sub-block CR1
  * sits at offset 0x04, not 0x00: the first word of the region belongs to
- * GCR.  This differs from the STM32F7 layout only in that PDMCR/PDMDLY exist.
+ * GCR.  This differs from the STM32F7 layout only in that PDMCR/PDMDLY
+ * exist.
  */
 
 #define STM32H7_SAI_GCR_OFFSET     0x0000 /* SAI Global Configuration Register */
@@ -255,13 +256,12 @@
 #define SAI_PDMCR_CKEN3            (1 << 10) /* Bit 10: Clock enable, bitstream 3 */
 #define SAI_PDMCR_CKEN4            (1 << 11) /* Bit 11: Clock enable, bitstream 4 */
 
-/* SAI PDM Delay Register (H7 only).  Kept as a name for the "no delay"
- * value so the driver states its intent instead of writing a bare zero.
+/* SAI PDM Delay Register (H7 only): bits 0-30 hold the per-microphone
+ * delays and bit 31 is reserved.  Kept as a name for the "no delay" value so
+ * the driver states its intent instead of writing a bare zero.
  */
 
 #define SAI_PDMDLY_NODELAY         (0)
-                                             /* Bits 0-30: per-mic delays */
-                                             /* Bit 31: Reserved */
 
 /* SAI Data Register (32-bit data) */
 

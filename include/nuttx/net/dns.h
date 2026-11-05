@@ -185,8 +185,8 @@ typedef CODE int (*dns_callback_t)(FAR void *arg,
 
 /* Optional synchronous query control. budget_ms returns the remaining
  * monotonic budget (>0), zero on expiry, or a negated errno on cancellation.
- * It must not block. The resolver polls it at most every 100 ms while waiting
- * for network I/O; no helper thread or abandoned request is created.
+ * It must not block. The resolver polls it at most every 100 ms while
+ * waiting for network I/O; no helper thread or abandoned request is created.
  * A non-NULL server overrides the nameserver for this query only, bypassing
  * the shared cache. The caller owns all pointers until the query returns.
  */
@@ -258,7 +258,6 @@ int dns_query_controlled(FAR const char *hostname,
                          FAR struct sockaddr_storage *addr,
                          FAR int *naddr,
                          FAR const struct dns_query_control_s *control);
-
 
 /**
  * @brief

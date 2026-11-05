@@ -1211,7 +1211,6 @@ static void stm32_datadisable(struct stm32_dev_s *priv)
 
 #define STM32_SDMMC_XIP_WINDOW  (256 * 1024 * 1024)  /* FMC bank 4, QUADSPI */
 
-
 static bool stm32_sdmmc_userbuf_ok(FAR const void *p, size_t n)
 {
   const uintptr_t a = (uintptr_t)p;
@@ -1399,7 +1398,8 @@ static void stm32_recvfifo(struct stm32_dev_s *priv)
 
           if (!stm32_sdmmc_userbuf_ok(priv->buffer, sizeof(uint32_t)))
             {
-              syslog(LOG_ERR, "ERROR: RX buf %p rem %zu outside SRAM, drop\n",
+              syslog(LOG_ERR,
+                     "ERROR: RX buf %p rem %zu outside SRAM, drop\n",
                      priv->buffer, priv->remaining);
               priv->remaining = 0;
               break;
@@ -1419,7 +1419,8 @@ static void stm32_recvfifo(struct stm32_dev_s *priv)
 
           if (!stm32_sdmmc_userbuf_ok(ptr, priv->remaining))
             {
-              syslog(LOG_ERR, "ERROR: RX tail %p rem %zu outside SRAM, drop\n",
+              syslog(LOG_ERR,
+                     "ERROR: RX tail %p rem %zu outside SRAM, drop\n",
                      ptr, priv->remaining);
               priv->remaining = 0;
               break;

@@ -166,7 +166,8 @@ struct wm8994_lower_s
    * AIF1CLK has been gated and all audio transfers have completed.
    */
 
-  CODE int (*mclk_enable)(FAR const struct wm8994_lower_s *lower, bool enable);
+  CODE int (*mclk_enable)(FAR const struct wm8994_lower_s *lower,
+                          bool enable);
 };
 
 /****************************************************************************

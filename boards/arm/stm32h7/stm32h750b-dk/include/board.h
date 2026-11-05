@@ -143,9 +143,9 @@
 #define STM32_PLLCFG_PLL2N       RCC_PLL2DIVR_N2(344)
 #define STM32_PLLCFG_PLL2P       RCC_PLL2DIVR_P2(7)
 
-/* PLL2Q/PLL2R keep their previous values.  Neither output is enabled, because
- * DIVQ2EN and DIVR2EN are absent from PLL2CFG above, so these two only pad
- * the divider register and generate nothing.
+/* PLL2Q/PLL2R keep their previous values.  Neither output is enabled,
+ * because DIVQ2EN and DIVR2EN are absent from PLL2CFG above, so these two
+ * only pad the divider register and generate nothing.
  */
 
 #define STM32_PLLCFG_PLL2Q       4
@@ -701,8 +701,9 @@ extern "C"
  *   Return the I2S device that stm32_bringup() created for the on-board PDM
  *   microphone (U34), or NULL when that path was not initialized.
  *
- *   The bring-up capture tool needs the device itself rather than a character
- *   device: the i2schar shim releases its buffer inside its own callback, so
+ *   The bring-up capture tool needs the device itself rather than a
+ *   character device: the i2schar shim releases its buffer inside its own
+ *   callback, so
  *   the data never reaches the caller.  Product audio code uses the
  *   registered audio device instead and does not call this.
  *
@@ -718,8 +719,9 @@ FAR struct i2s_dev_s *stm32_sai_pdm_device(void);
  * Name: stm32_pdm_staterecord
  *
  * Description:
- *   Copy the driver's end-of-transfer register snapshot into regs, which must
- *   hold six words: DMA interrupt status, then SAI SR, CR1, FRCR, SLOTR and
+ *   Copy the driver's end-of-transfer register snapshot into regs, which
+ *   must hold six words: DMA interrupt status, then SAI SR, CR1, FRCR, SLOTR
+ *   and
  *   PDMCR.  Returns a negated errno when the PDM path was not initialized.
  *
  ****************************************************************************/

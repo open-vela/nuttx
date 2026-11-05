@@ -69,8 +69,9 @@
 #    include "stm32_sai_capture.h"
 #  endif
 
-/* Set once by stm32_bringup() and served to the bring-up capture tool through
- * the accessor below.  There is exactly one PDM microphone on the board.
+/* Set once by stm32_bringup() and served to the bring-up capture tool
+ * through the accessor below.  There is exactly one PDM microphone on the
+ * board.
  */
 
 static FAR struct i2s_dev_s *g_pdm_i2s;
@@ -447,10 +448,10 @@ int stm32_bringup(void)
 #ifdef CONFIG_STM32H7_SAI1_A
   /* Bring up the on-board PDM microphone path as a raw I2S capture device.
    *
-   * SAI1 block A drives the microphone clock on PE5 (SAI1_CK2, AF2) and reads
-   * its bitstream on PE4 (SAI1_D2, AF2).  Those are the same two pins SAI4
-   * uses for the same purpose at AF10, so this is a straight route choice
-   * rather than a wiring difference.
+   * SAI1 block A drives the microphone clock on PE5 (SAI1_CK2, AF2) and
+   * reads its bitstream on PE4 (SAI1_D2, AF2).  Those are the same two pins
+   * SAI4 uses for the same purpose at AF10, so this is a straight route
+   * choice rather than a wiring difference.
    *
    * SAI1 was chosen over SAI4 for this first bring-up because its data
    * register sits in the D2 domain and is served by DMA1/DMA2, which can

@@ -101,8 +101,8 @@ struct i2s_dev_s *stm32_sai_initialize(int intf,
  *   ended into the caller's array.
  *
  *   SAI reports overrun and a wrong clock configuration through status bits
- *   that the DMA controller does not expose, so a failed transfer surfaces as
- *   a bare -EIO without saying why.  This accessor hands back what the
+ *   that the DMA controller does not expose, so a failed transfer surfaces
+ *   as a bare -EIO without saying why.  This accessor hands back what the
  *   hardware was showing at that moment.
  *
  * Input Parameters:
@@ -119,7 +119,6 @@ struct i2s_dev_s *stm32_sai_initialize(int intf,
 #define STM32H7_SAI_DIAG_NALL   11
 
 int stm32_sai_staterecord(struct i2s_dev_s *dev, uint32_t *regs, int nregs);
-
 
 #undef EXTERN
 #ifdef __cplusplus

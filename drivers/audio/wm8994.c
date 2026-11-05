@@ -1194,7 +1194,8 @@ static int wm8994_sendbuffer(FAR struct wm8994_dev_s *priv)
     }
 
   while (priv->inflight < CONFIG_WM8994_INFLIGHT &&
-         dq_peek(&priv->pendq) != NULL && !priv->paused && !priv->terminating)
+         dq_peek(&priv->pendq) != NULL && !priv->paused &&
+         !priv->terminating)
     {
       /* Take next buffer from the queue of pending transfers */
 
@@ -1912,7 +1913,8 @@ static void *wm8994_workerthread(pthread_addr_t pvarg)
   /* Send an AUDIO_MSG_COMPLETE message to the client */
 
 #ifdef CONFIG_AUDIO_MULTI_SESSION
-  priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_COMPLETE, NULL, result, NULL);
+  priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_COMPLETE, NULL, result,
+                  NULL);
 #else
   priv->dev.upper(priv->dev.priv, AUDIO_CALLBACK_COMPLETE, NULL, result);
 #endif

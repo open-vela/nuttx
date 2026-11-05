@@ -131,7 +131,11 @@ static int dns_control_budget(
 static int dns_wait_io(int sd, short events,
                        FAR const struct dns_query_control_s *control)
 {
-  struct pollfd pfd = {sd, events, 0};
+  struct pollfd pfd =
+  {
+    sd, events, 0
+  };
+
   int remaining;
   int ret;
 
@@ -140,7 +144,7 @@ static int dns_wait_io(int sd, short events,
       return OK;
     }
 
-  for (;;)
+  while (1)
     {
       remaining = dns_control_budget(control);
       if (remaining < 0)
@@ -195,9 +199,15 @@ static void dns_close_controlled(int sd, bool stream, int result,
 #ifdef CONFIG_NET_SOLINGER
   if (control != NULL && stream && result < 0)
     {
-      struct linger abort = {1, 0};
+      struct linger abort =
+      {
+        1, 0
+      };
+
       /* A partial controlled reply is discarded. Abort this socket only;
-       * retaining FIN-wait connections can exhaust a fixed TCP pool. */
+       * retaining FIN-wait connections can exhaust a fixed TCP pool.
+       */
+
       setsockopt(sd, SOL_SOCKET, SO_LINGER, &abort, sizeof(abort));
     }
 #else
@@ -247,6 +257,7 @@ static ssize_t stream_send(int fd, FAR const void *buf, size_t len,
         {
           continue;
         }
+
       if (ret == -1)
         {
           if (total == 0)
@@ -297,6 +308,7 @@ static ssize_t stream_recv(int fd, FAR void *buf, size_t len,
         {
           continue;
         }
+
       if (ret == 0)
         {
           /* the peer closed the connection */
@@ -1030,6 +1042,7 @@ try_stream:
           query->result = ret;
           return ret;
         }
+
 #ifdef CONFIG_NET_IPv6
       if (dns_is_queryfamily(AF_INET6))
         {
@@ -1061,7 +1074,8 @@ try_stream:
                                       CONFIG_NETDB_MAX_IPv6ADDR,
                                       &qdata->qinfo,
                                       &query->ttl, qdata->buffer,
-                                      stream, &should_try_stream, query->control);
+                                      stream, &should_try_stream,
+                                      query->control);
               if (ret >= 0)
                 {
                   next += ret;
@@ -1121,7 +1135,8 @@ try_stream:
                                       CONFIG_NETDB_MAX_IPv4ADDR,
                                       &qdata->qinfo,
                                       &query->ttl, qdata->buffer,
-                                      stream, &should_try_stream, query->control);
+                                      stream, &should_try_stream,
+                                      query->control);
               if (ret >= 0)
                 {
                   next += ret;
@@ -1152,8 +1167,10 @@ try_stream:
 
           if (query->control == NULL || query->control->server == NULL)
             {
-              dns_save_answer(query->hostname, query->addr, next, query->ttl);
+              dns_save_answer(query->hostname, query->addr, next,
+                              query->ttl);
             }
+
 #endif
           /* Return 1 to indicate to (1) stop the traversal, and (2)
            * indicate that the address was found.
@@ -1232,6 +1249,7 @@ static int dns_query_with_control(FAR const char *hostname,
     {
       ret = dns_foreach_nameserver(dns_query_callback, qdata);
     }
+
   if (ret > 0)
     {
       /* The lookup was successful */
@@ -1249,7 +1267,6 @@ static int dns_query_with_control(FAR const char *hostname,
 
   return ret;
 }
-
 
 int dns_query(FAR const char *hostname, FAR union dns_addr_u *addr,
               FAR int *naddr)

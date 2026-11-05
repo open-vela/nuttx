@@ -91,7 +91,8 @@ typedef void (*stm32_sai_capture_cb_t)(void *arg, int half,
                                        const uint8_t *data, size_t bytes);
 
 /* Capture statistics.  Every field is a counter, so a client can subtract
- * two snapshots; none of them is ever cleared by the driver. */
+ * two snapshots; none of them is ever cleared by the driver.
+ */
 
 struct stm32_sai_capture_stats
 {
@@ -120,8 +121,9 @@ struct stm32_sai_capture_stats
  * stm32_sai_capture_stop() is called.
  *
  * @param  dev         SAI device from stm32_sai_initialize().
- * @param  samplerate  Output sample rate the decimation targets (e.g. 16000).
- *                     This programs the divider.  Delivered memory bytes
+ * @param  samplerate  Output sample rate the decimation targets
+ *                     (e.g. 16000).  This programs the divider.
+ *                     Delivered memory bytes
  *                     were measured 3x faster at the 48 kHz default than
  *                     at 16 kHz.  It is not a wire-clock measurement.
  * @param  ring   DMA-reachable buffer, aligned to 32 bytes.
@@ -138,6 +140,7 @@ struct stm32_sai_capture_stats
  * @retval -EBUSY  a capture is already running on this block.
  * @retval -ENODEV dev is not a capture-capable SAI block.
  */
+
 int stm32_sai_capture_start(struct i2s_dev_s *dev, uint32_t samplerate,
                             uint8_t *ring, size_t bytes,
                             stm32_sai_capture_cb_t cb, void *arg);
@@ -157,9 +160,12 @@ int stm32_sai_capture_start(struct i2s_dev_s *dev, uint32_t samplerate,
  *         caller must not reuse the ring; treat the block as unusable until
  *         it is reinitialized.
  */
+
 int stm32_sai_capture_stop(struct i2s_dev_s *dev, unsigned int wait_ms);
 
-/** @brief  Read the counters.  Safe from any thread. */
+/** @brief  Read the counters.  Safe from any thread.
+ */
+
 void stm32_sai_capture_stats(struct i2s_dev_s *dev,
                              struct stm32_sai_capture_stats *out);
 
@@ -173,6 +179,7 @@ void stm32_sai_capture_stats(struct i2s_dev_s *dev,
  * @param  dev  SAI device.
  * @retval >=0 elapsed bytes in the current pass, or -ENODEV.
  */
+
 int stm32_sai_capture_position(struct i2s_dev_s *dev);
 
 #endif /* CONFIG_STM32H7_SAI_CAPTURE */
