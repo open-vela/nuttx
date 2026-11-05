@@ -116,8 +116,8 @@ CONFIG_NETUTILS_ESP8266=y
 CONFIG_NETUTILS_ESP8266_DEV_PATH="/dev/ttyS1"
 CONFIG_NETUTILS_ESP8266_BAUDRATE=115200
 CONFIG_VG_NET_FAILOVER=y
-# Wi-Fi 与 MQTT 的凭据不写进仓库。板级配置里的真实值保存在本地未提交的
-# nuttx 板级 defconfig 中，取值来源是 connect_info。
+# Wi-Fi and MQTT credentials are not committed.  The real values live in the
+# local, uncommitted board defconfig and come from connect_info.
 CONFIG_VG_WIFI_SSID=""
 CONFIG_VG_WIFI_PASSWORD=""
 CONFIG_VG_MQTT_BROKER_HOST=""
@@ -125,8 +125,9 @@ CONFIG_VG_MQTT_BROKER_PORT=1883
 CONFIG_VG_MQTT_USERNAME=""
 CONFIG_VG_MQTT_PASSWORD=""
 CONFIG_VG_MQTT_KEEPALIVE=60
-# TCP 接收窗口由 IOB 数量决定（net/tcp/tcp_recvwindow.c）。24 个缓冲只有约
-# 4.7 KB 窗口，TLS 大文件传输会退化成 KB/s 级；128 个缓冲把窗口提到约 25 KB。
+# The TCP receive window follows the IOB count (net/tcp/tcp_recvwindow.c).
+# 24 buffers give only about a 4.7 KB window, which degrades TLS transfers to
+# KB/s; 128 buffers raise it to about 25 KB.
 CONFIG_MM_IOB=y
 CONFIG_IOB_NBUFFERS=128
 CONFIG_IOB_NCHAINS=128
@@ -257,7 +258,7 @@ CONFIG_VG_AUDIO_PROBE=y
 CONFIG_VG_VOICE_PRIORITY=110
 CONFIG_VG_VOICE_ASR_MODEL="mimo-v2.5-asr"
 CONFIG_VG_VOICE_TTS_MODEL="mimo-v2.5-tts"
-CONFIG_VG_VOICE_TTS_VOICE="冰糖"
+# TTS voice name is left at the app Kconfig default and is not committed here.
 
 # CONFIG_VG_VOICE_DIRECT_TOOL is not set
 
