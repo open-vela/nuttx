@@ -3090,6 +3090,13 @@ config ARCH_BOARD_XMC4800RELAX
 	---help---
 		Infineon XMC4800 Relax
 
+config ARCH_BOARD_OK8MP_M7
+	bool "Forlinx OK8MP Cortex-M7"
+	depends on ARCH_CHIP_MX8MP
+	---help---
+		Forlinx OK8MP development board, using the i.MX8M Plus Cortex-M7
+		auxiliary core.  U-Boot initializes DDR and loads the M7 image.
+
 config ARCH_BOARD_VERDIN_MX8MP
 	bool "Toradex Verdin i.MX8MP"
 	depends on ARCH_CHIP_MX8MP
@@ -3621,6 +3628,7 @@ config ARCH_BOARD
 	default "xmc4500-relax"             if ARCH_BOARD_XMC4500RELAX
 	default "xmc4700-relax"             if ARCH_BOARD_XMC4700RELAX
 	default "xmc4800-relax"             if ARCH_BOARD_XMC4800RELAX
+	default "ok8mp-m7"                  if ARCH_BOARD_OK8MP_M7
 	default "verdin-mx8mp"              if ARCH_BOARD_VERDIN_MX8MP
 	default "z16f2800100zcog"           if ARCH_BOARD_Z16F2800100ZCOG
 	default "z20x"                      if ARCH_BOARD_Z20X
