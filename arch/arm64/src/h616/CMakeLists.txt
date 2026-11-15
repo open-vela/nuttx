@@ -23,6 +23,10 @@ if(CONFIG_H616_SDHCI)
   list(APPEND SRCS h616_sdhci.c)
 endif()
 
+if(CONFIG_H616_DMA)
+  list(APPEND SRCS h616_dma.c)
+endif()
+
 if(CONFIG_ARCH_EARLY_PRINT)
   list(APPEND SRCS h616_lowputc.S)
 endif()
