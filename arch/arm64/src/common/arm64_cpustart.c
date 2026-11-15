@@ -51,6 +51,21 @@
 #endif
 
 /****************************************************************************
+ * External data
+ ****************************************************************************/
+
+#ifdef CONFIG_ARM64_PSCI
+
+/* AArch64 entry point of the kernel image.  __start is the A32 boot stub in
+ * arm64_head.S, which is only valid for the primary CPU when it is entered
+ * from a 32-bit boot loader.  A secondary CPU released by PSCI is already
+ * running in AArch64, so it must enter at real_start instead.
+ */
+
+extern char real_start[];
+#endif
+
+/****************************************************************************
  * Public data
  ****************************************************************************/
 
@@ -165,7 +180,7 @@ static void arm64_start_cpu(int cpu_num)
 #endif
 
 #ifdef CONFIG_ARM64_PSCI
-  if (psci_cpu_on(cpu_mpid, (uint64_t)__start))
+  if (psci_cpu_on(cpu_mpid, (uint64_t)real_start))
     {
       serr("Failed to boot secondary CPU core %d (MPID:%#lx)\n", cpu_num,
            cpu_mpid);
