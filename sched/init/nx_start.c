@@ -821,6 +821,13 @@ void nx_start(void)
   g_nx_initstate = OSINIT_OSREADY;
   sched_trace_mark("OSREADY");
 
+  /* Ensure that the secondary CPUs see the updated g_nx_initstate.
+   * Without a cache flush here, CPUs started through PSCI may spin
+   * forever waiting for OSINIT_OSREADY.
+   */
+
+  up_flush_dcache_all();
+
   /* Create initial tasks and bring-up the system */
 
   nx_bringup();
