@@ -19,6 +19,10 @@
 # ##############################################################################
 set(SRCS h616_boot.c h616_serial.c)
 
+if(CONFIG_H616_SDHCI)
+  list(APPEND SRCS h616_sdhci.c)
+endif()
+
 if(CONFIG_ARCH_EARLY_PRINT)
   list(APPEND SRCS h616_lowputc.S)
 endif()

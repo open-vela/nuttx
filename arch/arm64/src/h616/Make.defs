@@ -23,6 +23,10 @@ include common/Make.defs
 # Allwinner H616 specific C source files
 CHIP_CSRCS  = h616_boot.c h616_serial.c
 
+ifeq ($(CONFIG_H616_SDHCI),y)
+CHIP_CSRCS += h616_sdhci.c
+endif
+
 ifeq ($(CONFIG_ARCH_EARLY_PRINT),y)
 CHIP_ASRCS  = h616_lowputc.S
 endif
