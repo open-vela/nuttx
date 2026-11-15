@@ -196,6 +196,72 @@ int bchlib_readsector(FAR struct bchlib_s *bch, size_t sector)
           return (int)ret;
         }
 
+#if defined(CONFIG_BCH_READAHEAD) && CONFIG_BCH_READAHEAD > 0
+      /* Sequential read-ahead: when the requested sector is not already
+       * in the window, refill the window starting at the requested sector
+       * with one multiblock read (capped at the end of the device).  The
+       * single-sector read below is kept as a fallback for block drivers
+       * that cannot satisfy a large transfer.
+       */
+
+      if (bch->ran > 0 && sector >= bch->rastart &&
+          sector <  bch->rastart + bch->ran)
+        {
+          /* Window hit: copy the sector out of the window. */
+
+          size_t rasec = sector - bch->rastart;
+
+          memcpy(bch->buffer, &bch->rabuffer[rasec * bch->sectsize],
+                 bch->sectsize);
+          bch->sector = sector;
+#if defined(CONFIG_BCH_ENCRYPTION)
+          bch_cypher(bch, CYPHER_DECRYPT);
+#endif
+          return OK;
+        }
+      else
+        {
+          size_t nreq = (size_t)CONFIG_BCH_READAHEAD;
+
+          if (sector + nreq > bch->nsectors)
+            {
+              nreq = bch->nsectors - sector;
+            }
+
+          if (nreq > 1)
+            {
+              if (bch->rabuffer == NULL)
+                {
+                  bch->rabuffer = kmm_malloc((size_t)CONFIG_BCH_READAHEAD *
+                                             bch->sectsize);
+                }
+
+              if (bch->rabuffer != NULL)
+                {
+                  ret = inode->u.i_bops->read(inode, bch->rabuffer, sector,
+                                              nreq);
+                  if (ret == (ssize_t)nreq)
+                    {
+                      bch->rastart = sector;
+                      bch->ran     = nreq;
+
+                      memcpy(bch->buffer, bch->rabuffer, bch->sectsize);
+                      bch->sector = sector;
+#if defined(CONFIG_BCH_ENCRYPTION)
+                      bch_cypher(bch, CYPHER_DECRYPT);
+#endif
+                      return OK;
+                    }
+
+                  /* Fall back to the single sector read below (some
+                   * block drivers cap the transfer size or reject
+                   * large reads).
+                   */
+                }
+            }
+        }
+#endif
+
       ret = inode->u.i_bops->read(inode, bch->buffer, sector, 1);
       if (ret < 0)
         {
@@ -211,3 +277,81 @@ int bchlib_readsector(FAR struct bchlib_s *bch, size_t sector)
 
   return (int)ret;
 }
+
+#if defined(CONFIG_BCH_READAHEAD) && CONFIG_BCH_READAHEAD > 0
+/****************************************************************************
+ * Name: bchlib_readahead
+ *
+ * Description:
+ *   Ensure the read-ahead window covers [sector, sector + nsectors) and
+ *   report whether it does.  Called from bchlib_read()'s full-sector path
+ *   so that small aligned reads (e.g. dd with a small bs=) are served from
+ *   one multiblock window fill instead of one single-sector read each.
+ *
+ * Returned Value:
+ *   1  the range is covered by the window (copy from bch->rabuffer)
+ *   0  the range cannot be covered (caller performs a direct read)
+ *  <0 on error
+ *
+ * Assumptions:
+ *   Caller must assume mutual exclusion
+ *
+ ****************************************************************************/
+
+int bchlib_readahead(FAR struct bchlib_s *bch, size_t sector,
+                     size_t nsectors)
+{
+  FAR struct inode *inode;
+  size_t nreq;
+  ssize_t ret;
+
+  /* A range that is bigger than the window can never be covered. */
+
+  if (nsectors >= (size_t)CONFIG_BCH_READAHEAD)
+    {
+      return 0;
+    }
+
+  /* Already covered? */
+
+  if (bch->ran > 0 && sector >= bch->rastart &&
+      sector + nsectors <= bch->rastart + bch->ran)
+    {
+      return 1;
+    }
+
+  /* Refill the window starting at the requested sector. */
+
+  nreq = (size_t)CONFIG_BCH_READAHEAD;
+  if (sector + nreq > bch->nsectors)
+    {
+      nreq = bch->nsectors - sector;
+    }
+
+  if (nreq <= nsectors)
+    {
+      return 0;  /* Device tail: window cannot cover more than the read */
+    }
+
+  if (bch->rabuffer == NULL)
+    {
+      bch->rabuffer = kmm_malloc((size_t)CONFIG_BCH_READAHEAD *
+                                 bch->sectsize);
+      if (bch->rabuffer == NULL)
+        {
+          return 0;  /* Fall back to the direct read */
+        }
+    }
+
+  inode = bch->inode;
+  ret = inode->u.i_bops->read(inode, bch->rabuffer, sector, nreq);
+  if (ret != (ssize_t)nreq)
+    {
+      return 0;  /* Fall back to the direct read */
+    }
+
+  bch->rastart = sector;
+  bch->ran     = nreq;
+  return 1;
+}
+#endif

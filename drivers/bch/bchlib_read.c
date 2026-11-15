@@ -148,6 +148,44 @@ ssize_t bchlib_read(FAR void *handle, FAR char *buffer, off_t offset,
           nsectors = bch->nsectors - sector;
         }
 
+#if defined(CONFIG_BCH_READAHEAD) && CONFIG_BCH_READAHEAD > 0 && \
+    !defined(CONFIG_BCH_ENCRYPTION)
+      /* Small aligned reads: try to serve them from the read-ahead window
+       * (one multiblock fill per window instead of one transfer per read).
+       * The window holds raw media bytes, hence the encryption exclusion.
+       */
+
+      if (nsectors > 0)
+        {
+          ret = bchlib_readahead(bch, sector, nsectors);
+          if (ret < 0)
+            {
+              return ret;
+            }
+
+          if (ret == 1)
+            {
+              size_t rasec = sector - bch->rastart;
+
+              memcpy(buffer, &bch->rabuffer[rasec * bch->sectsize],
+                     nsectors * bch->sectsize);
+
+              sector    += nsectors;
+              nbytes     = nsectors * bch->sectsize;
+              bytesread += nbytes;
+
+              if (sector >= bch->nsectors)
+                {
+                  return bytesread;
+                }
+
+              buffer    += nbytes;
+              len       -= nbytes;
+              goto tail;
+            }
+        }
+#endif
+
       ret = bch->inode->u.i_bops->read(bch->inode, (FAR uint8_t *)buffer,
                                        sector, nsectors);
       if (ret < 0)
@@ -173,6 +211,10 @@ ssize_t bchlib_read(FAR void *handle, FAR char *buffer, off_t offset,
 
   /* Then read any partial final sector */
 
+#if defined(CONFIG_BCH_READAHEAD) && CONFIG_BCH_READAHEAD > 0 && \
+    !defined(CONFIG_BCH_ENCRYPTION)
+tail:
+#endif
   if (len > 0)
     {
       /* Read the sector into the sector buffer */
