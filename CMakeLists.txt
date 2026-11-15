@@ -722,7 +722,7 @@ if(NOT CONFIG_ARCH_SIM)
 
   else()
     get_property(NUTTX_EXTRA_FLAGS GLOBAL PROPERTY NUTTX_EXTRA_FLAGS)
-    target_link_options(nuttx PRIVATE ${NUTTX_EXTRA_FLAGS}
+    target_link_options(nuttx PRIVATE ${NUTTX_EXTRA_FLAGS} -Wl,--build-id=none
                         ${LINK_OPTION_FLAG}${ldscript})
     target_link_libraries(
       nuttx
