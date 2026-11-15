@@ -2227,6 +2227,14 @@ config ARCH_BOARD_PINEPHONE
 		This options selects support for NuttX on PINE64 PinePhone based
 		on Allwinner A64 SoC with ARM Cortex-A53.
 
+config ARCH_BOARD_YUZUKI_H616
+	bool "Yuzuki H616"
+	depends on ARCH_CHIP_H616
+	---help---
+		This options selects support for NuttX/openvela on Yuzuki
+		(Yuzuki Chameleon) H616 board based on Allwinner H616 SoC with
+		ARM Cortex-A53.
+
 config ARCH_BOARD_PINEPHONE_PRO
 	bool "PINE64 PinePhonePro"
 	depends on ARCH_CHIP_RK3399
@@ -3529,6 +3537,7 @@ config ARCH_BOARD
 	default "qemu-armv8a"               if ARCH_BOARD_QEMU_ARMV8A
 	default "qemu-armv8r-aarch32"       if ARCH_BOARD_QEMU_ARMV8R_AARCH32
 	default "pinephone"                 if ARCH_BOARD_PINEPHONE
+	default "yuzuki-h616"               if ARCH_BOARD_YUZUKI_H616
 	default "pinephonepro"              if ARCH_BOARD_PINEPHONE_PRO
 	default "nanopi_m4"                 if ARCH_BOARD_NANOPI_M4
 	default "fvp-armv8r"                if ARCH_BOARD_FVP_ARMV8R

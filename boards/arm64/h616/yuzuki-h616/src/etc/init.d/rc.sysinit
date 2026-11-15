@@ -1,0 +1,48 @@
+# ############################################################################
+# boards/arm64/h616/yuzuki-h616/src/etc/init.d/rc.sysinit
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+# ############################################################################
+
+# rc.sysinit - openvela H616 system init (NSH executes line by line)
+# '#' lines are ignored by NSH. This file goes into romfs verbatim.
+
+set +e
+set TZ Asia/Shanghai
+
+# /proc is mounted by the board bringup and /etc by NSH itself; only the
+# pseudo file systems the kernel does not provide are mounted here.
+mount -t tmpfs none /tmp
+mount -t binfs none /bin
+
+# Mount the eMMC vfat partition registered by the board bringup.  The volume
+# spans the whole eMMC above the raw boot regions; on the very first boot
+# (or after a partition layout change) it has no file system yet, so format
+# it once and retry the mount.
+mkdir /mnt
+mount -t vfat /dev/mmcsd0p1 /mnt
+if [ $? -ne 0 ]
+then
+  mkfatfs -F 32 /dev/mmcsd0p1
+  mount -t vfat /dev/mmcsd0p1 /mnt
+fi
+
+# Self check: listing the volume is what tells a working bus from a
+# silently broken one.
+ls /mnt
