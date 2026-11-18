@@ -2219,18 +2219,20 @@ static void *es8388_workerthread(pthread_addr_t pvarg)
 
 static void es8388_reset(FAR struct es8388_dev_s *priv)
 {
-  /* Put audio back to its initial configuration */
+  /* Software reset of the ES8388 hardware: put every register back into
+   * its default state (power-down, muted, default 16-bit format etc.).
+   *
+   * This is a hardware-only reset. It deliberately does NOT touch the
+   * software state in the priv structure (samprate/nchannels/bpsamp/etc):
+   * initializing those fields is the responsibility of the driver setup
+   * (es8388_initialize) and configuration (es8388_configure) paths.
+   *
+   * Callers that need the current stream format to survive must re-apply
+   * it via es8388_setsamplerate()/es8388_setbitspersample() after the
+   * reset, as es8388_configure() does.
+   */
 
   audinfo("ES8388 reset triggered.\n");
-
-  priv->dac_output = CONFIG_ES8388_OUTPUT_CHANNEL;
-  priv->adc_input  = CONFIG_ES8388_INPUT_CHANNEL;
-  priv->samprate   = ES8388_DEFAULT_SAMPRATE;
-  priv->nchannels  = ES8388_DEFAULT_NCHANNELS;
-  priv->bpsamp     = ES8388_DEFAULT_BPSAMP;
-#if !defined(CONFIG_AUDIO_EXCLUDE_VOLUME) && !defined(CONFIG_AUDIO_EXCLUDE_BALANCE)
-  priv->balance    = 500;            /* Center balance */
-#endif
 
   /* Software reset. This puts all ES8388 registers back in their
    * default state.
@@ -2549,6 +2551,22 @@ FAR struct audio_lowerhalf_s *
       dq_init(&priv->pendq);
       dq_init(&priv->doneq);
 
+      /* Initialize the software state in the priv structure. This is the
+       * proper place to establish the default stream configuration, so
+       * that es8388_reset() (which only resets the hardware registers) can
+       * never discard a just-configured stream in es8388_configure().
+       */
+
+      priv->audio_mode = ES_MODULE_DAC;
+      priv->dac_output = CONFIG_ES8388_OUTPUT_CHANNEL;
+      priv->adc_input  = CONFIG_ES8388_INPUT_CHANNEL;
+      priv->samprate   = ES8388_DEFAULT_SAMPRATE;
+      priv->nchannels  = ES8388_DEFAULT_NCHANNELS;
+      priv->bpsamp     = ES8388_DEFAULT_BPSAMP;
+#if !defined(CONFIG_AUDIO_EXCLUDE_VOLUME) && !defined(CONFIG_AUDIO_EXCLUDE_BALANCE)
+      priv->balance    = 500;            /* Center balance */
+#endif
+
       audinfo("ES8388: address=%02x frequency=%" PRId32 "\n",
               lower->address, lower->frequency);
 
@@ -2556,7 +2574,6 @@ FAR struct audio_lowerhalf_s *
 
       es8388_dump_registers(&priv->dev, "Before reset");
 
-      es8388_audio_output(priv);
       es8388_reset(priv);
       return &priv->dev;
     }
