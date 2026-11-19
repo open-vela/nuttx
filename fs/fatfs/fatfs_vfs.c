@@ -1771,7 +1771,8 @@ DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count)
 
           for (i = 0; i < count; i++)
             {
-              retry = drv->u.i_bops->read(drv, buff + (i * geo.geo_sectorsize),
+              retry = drv->u.i_bops->read(drv,
+                                          buff + (i * geo.geo_sectorsize),
                                           sector * g_drv[pdrv].ratio + i, 1);
               if (retry != 1)
                 {
@@ -1839,8 +1840,10 @@ DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count)
 
           for (i = 0; i < count; i++)
             {
-              retry = drv->u.i_bops->write(drv, buff + (i * geo.geo_sectorsize),
-                                           sector * g_drv[pdrv].ratio + i, 1);
+              retry = drv->u.i_bops->write(drv,
+                                           buff + (i * geo.geo_sectorsize),
+                                           sector * g_drv[pdrv].ratio + i,
+                                           1);
               if (retry != 1)
                 {
                   ferr("Write fallback failed: ret=%zd sector=%" PRIu32 "\n",

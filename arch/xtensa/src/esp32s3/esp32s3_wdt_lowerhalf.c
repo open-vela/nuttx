@@ -614,7 +614,8 @@ static xcpt_t wdt_lh_capture(struct watchdog_lowerhalf_s *lower,
 
   /* Reconfigure an active watchdog only while it is stopped.  Otherwise a
    * stage that has already expired may retain its previous action until the
-   * next watchdog cycle. */
+   * next watchdog cycle.
+   */
 
   if (was_started)
     {
@@ -754,7 +755,8 @@ static int wdt_handler(int irq, void *context, void *arg)
   struct esp32s3_wdt_lowerhalf_s *priv = arg;
 
   /* Clear the interrupt before invoking the callback.  The callback may
-   * wake a task that immediately changes or stops the watchdog. */
+   * wake a task that immediately changes or stops the watchdog.
+   */
 
   ESP32S3_WDT_UNLOCK(priv->wdt);
 
