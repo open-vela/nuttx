@@ -35,10 +35,14 @@
 #include <sys/types.h>
 #include <syslog.h>
 #include <debug.h>
-#include <stdio.h>
 
 #include <errno.h>
 #include <nuttx/fs/fs.h>
+
+#ifdef CONFIG_AUDIO_ES8311
+#  include <arch/board/board.h>
+#  include "esp32s3_gpio.h"
+#endif
 
 #ifdef CONFIG_ESP32S3_TIMER
 #  include "esp32s3_board_tim.h"
@@ -72,6 +76,14 @@
 #  include <nuttx/input/buttons.h>
 #endif
 
+#ifdef CONFIG_RTC_DRIVER
+#  include "esp32s3_rtc_lowerhalf.h"
+#endif
+
+#ifdef CONFIG_ESP32S3_EYE_QMI8658
+#  include <nuttx/sensors/qmi8658.h>
+#endif
+
 #ifdef CONFIG_ESP32S3_SPI
 #  include "esp32s3_spi.h"
 #endif
@@ -81,11 +93,31 @@
 #  include <nuttx/lcd/lcd_dev.h>
 #endif
 
+#ifdef CONFIG_VIDEO_FB
+#  include <nuttx/video/fb.h>
+#endif
+
 #ifdef CONFIG_ESP32S3_SDMMC
 #include "esp32s3_board_sdmmc.h"
 #endif
 
+#ifdef CONFIG_ESP32S3_ADC
+#  include "esp32s3_board_adc.h"
+#endif
+
+#ifdef CONFIG_ESP32S3_EYE_TOUCHSCREEN
+#  include <nuttx/input/ft5x06.h>
+#endif
+
 #include "esp32s3-eye.h"
+
+#ifdef CONFIG_TESTING_MTD_CONFIG_NVS
+#  include <nuttx/mtd/configdata.h>
+#endif
+
+#ifdef CONFIG_MEDIA_SERVER
+extern int mediad_main(int argc, FAR char *argv[]);
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -107,6 +139,9 @@
 
 int esp32s3_bringup(void)
 {
+#ifdef CONFIG_ESP32S3_EYE_QMI8658
+  struct i2c_master_s *i2c;
+#endif
   int ret;
 
 #ifdef CONFIG_FS_PROCFS
@@ -130,6 +165,30 @@ int esp32s3_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_TESTING_MTD_CONFIG_NVS
+  ret = board_mtdconfig_test_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize MTD config test: %d\n",
+             ret);
+    }
+#endif
+
+#ifdef CONFIG_NET_LOCAL
+  ret = mkdir("/var", 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to create /var: %d\n", errno);
+    }
+
+  ret = mkdir(CONFIG_NET_LOCAL_VFS_PATH, 0755);
+  if (ret < 0 && errno != EEXIST)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to create %s: %d\n",
+             CONFIG_NET_LOCAL_VFS_PATH, errno);
+    }
+#endif
+
 #ifdef CONFIG_ESP32S3_TIMER
   /* Configure general purpose timers */
 
@@ -145,6 +204,17 @@ int esp32s3_bringup(void)
   if (ret < 0)
     {
       syslog(LOG_ERR, "Failed to initialize RT timer: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_RTC_DRIVER
+  /* Instantiate the ESP32-S3 RTC driver */
+
+  ret = esp32s3_rtc_driverinit();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "ERROR: Failed to Instantiate the RTC driver: %d\n", ret);
     }
 #endif
 
@@ -168,6 +238,35 @@ int esp32s3_bringup(void)
     }
 #endif
 
+#ifdef CONFIG_ESP32S3_EYE_QMI8658
+  /* Register the QMI8658C IMU as the legacy accelerometer test node. */
+
+  i2c = esp32s3_i2cbus_initialize(ESP32S3_I2C0);
+  if (i2c == NULL)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize QMI8658 I2C bus\n");
+    }
+  else
+    {
+#ifdef CONFIG_UORB
+      ret = qmi8658_register_uorb(0, i2c);
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: Failed to register QMI8658 UORB: %d\n",
+                 ret);
+        }
+
+      ret = qmi8658_register("/dev/accel0", i2c);
+#else
+      ret = qmi8658_register("/dev/accel0", i2c);
+#endif
+      if (ret < 0)
+        {
+          syslog(LOG_ERR, "ERROR: Failed to register QMI8658: %d\n", ret);
+        }
+    }
+#endif
+
 #ifdef CONFIG_INPUT_BUTTONS
   /* Register the BUTTON driver */
 
@@ -183,6 +282,14 @@ int esp32s3_bringup(void)
   if (ret)
     {
       syslog(LOG_ERR, "ERROR: Failed to initialize SPI Flash\n");
+    }
+#endif
+
+#ifdef CONFIG_ESP32S3_SDMMC
+  ret = board_sdmmc_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize SDMMC: %d\n", ret);
     }
 #endif
 
@@ -225,35 +332,70 @@ int esp32s3_bringup(void)
 
 #ifdef CONFIG_ESP32S3_EYE_LCD
 
-#ifdef CONFIG_VIDEO_FB
-  ret = fb_register(0, 0);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "Failed to initialize Frame Buffer Driver.\n");
-      return ret;
-    }
-#elif defined(CONFIG_LCD)
+#ifdef CONFIG_LCD
   ret = board_lcd_initialize();
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: Failed to initialize LCD.\n");
-      return ret;
     }
 
+#ifdef CONFIG_LCD_DEV
   ret = lcddev_register(0);
   if (ret < 0)
     {
       syslog(LOG_ERR, "ERROR: lcddev_register() failed: %d\n", ret);
     }
 #endif
+#endif
+
+#ifdef CONFIG_VIDEO_FB
+  ret = fb_register(0, 0);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize Frame Buffer Driver: %d\n",
+             ret);
+    }
+#endif
 
 #endif
 
-#ifdef CONFIG_ESP32S3_SDMMC
-  ret = board_sdmmc_initialize();
+#ifdef CONFIG_ESP32S3_ADC
+  ret = board_adc_init();
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ERROR: Failed to initialize SDMMC: %d\n", ret);
+      syslog(LOG_ERR, "ERROR: board_adc_init() failed: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_ESP32S3_EYE_AUDIO
+  esp32s3_configgpio(ES8311_PA_CTRL, OUTPUT);
+  esp32s3_gpiowrite(ES8311_PA_CTRL, true);
+
+  ret = esp32s3_es8311_initialize(ES8311_I2C_PORT, ES8311_I2C_ADDR,
+                                  ES8311_I2C_FREQ, ES8311_I2S_PORT);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize ES8311 audio: %d\n",
+             ret);
+    }
+#endif
+
+#ifdef CONFIG_ESP32S3_EYE_TOUCHSCREEN
+  ret = board_touchscreen_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize touch: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_MEDIA_SERVER
+  ret = task_create(CONFIG_MEDIA_SERVER_PROGNAME,
+                    CONFIG_MEDIA_SERVER_PRIORITY,
+                    CONFIG_MEDIA_SERVER_STACKSIZE,
+                    mediad_main, NULL);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to start media server: %d\n", errno);
     }
 #endif
 

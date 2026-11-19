@@ -766,6 +766,16 @@ config LCD_ST7789_BPP
 	int "Bit Per Pixel (12 or 16)"
 	default 16
 
+config LCD_ST7789_SWAP_BYTES
+	bool "ST7789 swap RGB565 data bytes"
+	default n
+	depends on LCD_ST7789_BPP = 16 && !LCD_ST7789_3WIRE
+	---help---
+		Swap the two bytes of each RGB565 pixel before sending it over
+		the SPI bus. Enable this when the SPI controller sends 16-bit
+		memory words in little-endian byte order but the ST7789 expects
+		RGB565 data most-significant byte first.
+
 config LCD_ST7789_SPIMODE
 	int "SPI Mode"
 	default 0

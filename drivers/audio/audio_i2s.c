@@ -42,6 +42,9 @@ struct audio_i2s_s
   struct audio_lowerhalf_s dev;
   FAR struct i2s_dev_s *i2s;
   bool playback;
+#ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
+  struct ap_buffer_info_s binfo;
+#endif
 };
 
 /****************************************************************************
@@ -174,8 +177,15 @@ static int audio_i2s_getcaps(FAR struct audio_lowerhalf_s *dev, int type,
               break;
           }
 
-         caps->ac_controls.b[0] = AUDIO_SUBFMT_END;
-         break;
+        if (caps->ac_subtype == AUDIO_FMT_PCM)
+          {
+            caps->ac_controls.b[0] = AUDIO_SUBFMT_PCM_S16_LE;
+            caps->ac_controls.b[1] = AUDIO_SUBFMT_END;
+            break;
+          }
+
+        caps->ac_controls.b[0] = AUDIO_SUBFMT_END;
+        break;
 
         /* Provide capabilities of our OUTPUT unit */
 
@@ -361,6 +371,27 @@ static int audio_i2s_ioctl(FAR struct audio_lowerhalf_s *dev, int cmd,
   FAR struct audio_i2s_s *audio_i2s = (FAR struct audio_i2s_s *)dev;
   FAR struct i2s_dev_s *i2s = audio_i2s->i2s;
 
+#ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
+  if (cmd == AUDIOIOC_GETBUFFERINFO)
+    {
+      FAR struct ap_buffer_info_s *binfo =
+        (FAR struct ap_buffer_info_s *)arg;
+
+      binfo->buffer_size = audio_i2s->binfo.buffer_size;
+      binfo->nbuffers = audio_i2s->binfo.nbuffers;
+      return OK;
+    }
+  else if (cmd == AUDIOIOC_SETBUFFERINFO)
+    {
+      FAR const struct ap_buffer_info_s *binfo =
+        (FAR const struct ap_buffer_info_s *)arg;
+
+      audio_i2s->binfo.buffer_size = binfo->buffer_size;
+      audio_i2s->binfo.nbuffers = binfo->nbuffers;
+      return OK;
+    }
+#endif
+
   return I2S_IOCTL(i2s, cmd, arg);
 }
 
@@ -401,19 +432,19 @@ static void audio_i2s_callback(FAR struct i2s_dev_s *dev,
 
 #ifdef CONFIG_AUDIO_MULTI_SESSION
   audio_i2s->dev.upper(audio_i2s->dev.priv, AUDIO_CALLBACK_DEQUEUE, apb,
-                       OK, NULL);
+                       result, NULL);
 #else
   audio_i2s->dev.upper(audio_i2s->dev.priv, AUDIO_CALLBACK_DEQUEUE, apb,
-                       OK);
+                       result);
 #endif
   if (final)
     {
 #ifdef CONFIG_AUDIO_MULTI_SESSION
       audio_i2s->dev.upper(audio_i2s->dev.priv, AUDIO_CALLBACK_COMPLETE,
-                           NULL, OK, NULL);
+                           NULL, result, NULL);
 #else
       audio_i2s->dev.upper(audio_i2s->dev.priv, AUDIO_CALLBACK_COMPLETE,
-                           NULL, OK);
+                           NULL, result);
 #endif
     }
 }
@@ -440,6 +471,10 @@ FAR struct audio_lowerhalf_s *audio_i2s_initialize(FAR struct i2s_dev_s *i2s,
 
   audio_i2s->playback = playback;
   audio_i2s->i2s = i2s;
+#ifdef CONFIG_AUDIO_DRIVER_SPECIFIC_BUFFERS
+  audio_i2s->binfo.buffer_size = CONFIG_AUDIO_BUFFER_NUMBYTES;
+  audio_i2s->binfo.nbuffers = CONFIG_AUDIO_NUM_BUFFERS;
+#endif
   audio_i2s->dev.ops = &g_audio_i2s_ops;
 
   return &audio_i2s->dev;

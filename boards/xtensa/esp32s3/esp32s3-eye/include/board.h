@@ -51,4 +51,25 @@
 #define BOARD_NGPIOIN     0
 #define BOARD_NGPIOINT    1
 
+/* Oneshot timer resolution *************************************************/
+
+#define ONESHOT_RESOLUTION_US 1
+
+/* Audio codec definitions **************************************************/
+
+#ifdef CONFIG_AUDIO_ES8311
+#  define ES8311_I2C_FREQ       100000
+#  define ES8311_I2C_ADDR       0x18
+#  define ES8311_I2C_PORT       0
+#  define ES8311_I2S_PORT       0
+#  define ES8311_PA_CTRL        46
+#endif
+
+#ifdef CONFIG_AUDIO_ES7210
+#  define ES7210_I2C_FREQ       100000
+#  define ES7210_I2C_ADDR       0x43
+#  define ES7210_I2C_PORT       0
+#  define ES7210_I2S_PORT       0
+#endif
+
 #endif /* __BOARDS_XTENSA_ESP32S3_ESP32S3_EYE_INCLUDE_BOARD_H */

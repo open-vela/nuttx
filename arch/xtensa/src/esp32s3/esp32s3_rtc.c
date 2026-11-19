@@ -406,7 +406,9 @@ static void IRAM_ATTR esp32s3_rt_cb_handler(void *arg);
  * Public Data
  ****************************************************************************/
 
+#ifndef CONFIG_RTC_ARCH
 volatile bool g_rtc_enabled = false;
+#endif
 
 /****************************************************************************
  * Private Functions
@@ -2926,6 +2928,9 @@ int up_rtc_setalarm(struct alm_setalarm_s *alminfo)
 {
   struct rt_timer_args_s rt_timer_args;
   struct alm_cbinfo_s *cbinfo;
+  uint64_t target_us;
+  uint64_t timeout_us;
+  uint64_t now_us;
   irqstate_t flags;
   int ret = -EBUSY;
   int id;
@@ -2961,8 +2966,21 @@ int up_rtc_setalarm(struct alm_setalarm_s *alminfo)
 
       cbinfo->ac_cb  = alminfo->as_cb;
       cbinfo->ac_arg = alminfo->as_arg;
-      cbinfo->deadline_us = alminfo->as_time.tv_sec * USEC_PER_SEC +
-                            alminfo->as_time.tv_nsec / NSEC_PER_USEC;
+      target_us = (uint64_t)alminfo->as_time.tv_sec * USEC_PER_SEC +
+                  alminfo->as_time.tv_nsec / NSEC_PER_USEC;
+
+      if (g_rt_timer_enabled == true)
+        {
+          now_us = esp32s3_rt_timer_time_us() + g_rtc_save->offset +
+                   esp32s3_rtc_get_boot_time();
+        }
+      else
+        {
+          now_us = esp32s3_rtc_get_time_us() + esp32s3_rtc_get_boot_time();
+        }
+
+      timeout_us = target_us > now_us ? target_us - now_us : 1;
+      cbinfo->deadline_us = target_us;
 
       if (cbinfo->alarm_hdl == NULL)
         {
@@ -2972,7 +2990,7 @@ int up_rtc_setalarm(struct alm_setalarm_s *alminfo)
         {
           rtcinfo("Start RTC alarm.\n");
           esp32s3_rt_timer_start(cbinfo->alarm_hdl,
-                                 cbinfo->deadline_us, false);
+                                 timeout_us, false);
           ret = OK;
         }
 
@@ -3059,10 +3077,8 @@ int up_rtc_rdalarm(struct timespec *tp, uint32_t alarmid)
 
   cbinfo = &g_alarmcb[alarmid];
 
-  tp->tv_sec = (esp32s3_rt_timer_time_us() + g_rtc_save->offset +
-              cbinfo->deadline_us) / USEC_PER_SEC;
-  tp->tv_nsec = ((esp32s3_rt_timer_time_us() + g_rtc_save->offset +
-              cbinfo->deadline_us) % USEC_PER_SEC) * NSEC_PER_USEC;
+  tp->tv_sec = cbinfo->deadline_us / USEC_PER_SEC;
+  tp->tv_nsec = (cbinfo->deadline_us % USEC_PER_SEC) * NSEC_PER_USEC;
 
   spin_unlock_irqrestore(&g_rtc_lock, flags);
 

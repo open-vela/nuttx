@@ -186,6 +186,10 @@ if(CONFIG_SENSORS)
       endif()
     endif()
 
+    if(CONFIG_SENSORS_QMI8658)
+      list(APPEND SRCS qmi8658.c)
+    endif()
+
     if(CONFIG_SENSORS_BMP180)
       list(APPEND SRCS bmp180_base.c)
       if(CONFIG_SENSORS_BMP180_UORB)

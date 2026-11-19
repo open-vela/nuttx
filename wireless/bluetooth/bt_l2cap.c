@@ -61,7 +61,7 @@
 #define LE_CONN_MIN_INTERVAL         0x0028
 #define LE_CONN_MAX_INTERVAL         0x0038
 #define LE_CONN_LATENCY              0x0000
-#define LE_CONN_TIMEOUT              0x002a
+#define LE_CONN_TIMEOUT              0x07d0
 
 #define BT_L2CAP_CONN_PARAM_ACCEPTED 0
 #define BT_L2CAP_CONN_PARAM_REJECTED 1

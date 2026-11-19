@@ -76,6 +76,11 @@ class connectNuttx(object):
         ci,
         method,
         target,
+        enable_gdb=False,
+        enable_timestamp=False,
+        device_id=None,
+        toolchain="",
+        code_root_path="",
     ):
         self.board = board
         self.path = vela_path
@@ -88,6 +93,11 @@ class connectNuttx(object):
         self.core = core
         self.method = method
         self.target = target
+        self.enable_gdb = enable_gdb
+        self.enable_timestamp = enable_timestamp
+        self.device_id = device_id
+        self.toolchain = toolchain
+        self.code_root_path = code_root_path
         self.enter = "\r"
         self.debug_flag = 0
         self.format_str_len = 105
@@ -98,6 +108,8 @@ class connectNuttx(object):
         self.rate = getConfigValue(
             self.path, self.board, core=self.core, flag="UART0_BAUD"
         )
+        if not self.rate:
+            self.rate = "115200"
 
         if not os.path.exists(self.log_path):
             os.makedirs(self.log_path)
@@ -311,6 +323,14 @@ class connectNuttx(object):
         if self.target == "qemu":
             self.sendControlCmd("a", self.PROMPT)
             self.process.sendline("x")
+        if self.target in ["target", "module"]:
+            if getattr(self, "method", "") == "minicom":
+                self.sendControlCmd("a")
+                self.process.sendline("x")
+            elif hasattr(self, "ser"):
+                self.ser.close()
+            if hasattr(self, "process") and self.process.isalive():
+                self.process.close(force=True)
 
 
 class start:
@@ -320,7 +340,7 @@ class start:
             r"sudo minicom -D {} -b {} -o -C {}".format(dev, rate, self.log),
             maxread=200000,
         )
-        self.process.expect("Welcome to minicom")
+        self.process.expect("minicom")
         self.switch_to_original_core()
 
     def startSerial(self, dev, board, log_path, core, rate):
@@ -418,7 +438,6 @@ def findFile(path, flag, board, core=None, match=True):
                 fList.append(os.path.join(root, name))
     if len(fList) != 1:
         fList = [x for x in fList if board in x and core + "/" in x]
-    print(fList)
     return fList
 
 
@@ -426,17 +445,13 @@ def findFile(path, flag, board, core=None, match=True):
 def getConfigValue(path, board, core, flag):
     value = ""
     l1 = findFile(path, ".config", board, core=core)
-    with open(l1[0], "r+") as f:
+    with open(l1[0], "r") as f:
         lines = f.readlines()
-    f.close()
-    print(lines)
-    print(flag)
     for line in lines:
         if flag + "=" in line:
-            value = line.split("=")[1]
-        if '"' in value:
-            value = value.strip('"').strip()
-    print(value)
+            value = line.split("=", 1)[1].strip()
+            if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+                value = value[1:-1]
     return value
 
 
