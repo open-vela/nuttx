@@ -33,4 +33,12 @@ CSRCS += yuzuki-h616_reset.c
 endif
 endif
 
+# rcS/rc.sysinit are NSH scripts, NOT C sources: they go into romfs verbatim
+# via RCRAWS (RCSRCS would run them through the C preprocessor, and '#'
+# comment lines then break the build). Keep them NSH-clean.
+
+ifeq ($(CONFIG_ETC_ROMFS),y)
+RCRAWS = etc/init.d/rcS etc/init.d/rc.sysinit
+endif
+
 include $(TOPDIR)/boards/Board.mk
