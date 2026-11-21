@@ -821,6 +821,18 @@ static void arm_gic0_initialize(void)
 #endif
 
 #ifdef CONFIG_SMP
+  /* H616 fix: explicitly enable SGIs used for SMP IPIs. The H616 GICv2
+   * does NOT treat SGIs as "always enabled" (unlike Cortex-A9 MPCore),
+   * so without this the scheduler IPI (GIC_SMP_SCHED) is never delivered
+   * to secondary CPUs and cross-CPU task delivery hangs.
+   */
+
+  up_enable_irq(GIC_SMP_SCHED);
+  up_enable_irq(GIC_SMP_CALL);
+  up_enable_irq(GIC_SMP_CPUSTART);
+#endif
+
+#ifdef CONFIG_SMP
   /* Attach SGI interrupt handlers. This attaches the handler to all CPUs. */
 
   DEBUGVERIFY(irq_attach(GIC_SMP_SCHED, arm64_smp_sched_handler, NULL));
@@ -865,9 +877,17 @@ static void arm_gic_initialize(void)
 
   putreg32(0x000000ff, GIC_ICDISR(0));
 #else
-  putreg32(0x00000000, GIC_ICDISR(0));      /* SGIs and PPIs secure */
+  /* H616 fix: set SGIs (0-15) as Group 1 (non-secure) so that the
+   * non-secure CPU interfaces can receive SGI-based IPIs (SMP sched).
+   * On H616, ATF leaves SGIs in Group 0 by default, which the non-secure
+   * CPU interface (ENABLEGRP1 only) cannot receive.
+   * PPIs (16-31) are left as configured by ATF (Group 1 for the timer).
+   */
+
+  putreg32(0x0000ffff, GIC_ICDISR(0));      /* SGIs group 1, PPIs as-is */
 #endif
-  putreg32(0xfe000000, GIC_ICDICER(0));     /* PPIs disabled */
+  putreg32(0xfe000000, GIC_ICDICER(0));     /* PPIs disabled (SGIs always enabled) */
+  putreg32(0x0000ffff, GIC_ICDISER(0));     /* SGIs enabled */
 
   /* Registers with 8-bits per interrupt */
 
@@ -1114,9 +1134,13 @@ void up_enable_irq(int irq)
   /* Ignore invalid interrupt IDs.  Also, in the Cortex-A9 MPCore, SGIs are
    * always enabled. The corresponding bits in the ICDISERn are read as
    * one, write ignored.
+   *
+   * H616 note: unlike Cortex-A9 MPCore, the H616 GICv2 requires SGIs to be
+   * explicitly enabled via ICDISER. Without this, SGI-based IPIs (SMP
+   * scheduler) are never delivered. So we DO enable SGIs here.
    */
 
-  if (irq > GIC_IRQ_SGI15 && irq < NR_IRQS)
+  if (irq >= 0 && irq < NR_IRQS)
     {
       uintptr_t regaddr;
 

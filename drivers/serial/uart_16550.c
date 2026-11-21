@@ -1369,7 +1369,7 @@ static void u16550_dmasend(FAR struct uart_dev_s *dev)
 
   up_clean_dcache((uintptr_t)buffer, (uintptr_t)buffer + length);
   DMA_START(priv->chantx, u16550_dmasend_done, dev,
-            up_addrenv_va_to_pa((FAR void *)priv->uartbase),
+            up_addrenv_va_to_pa((FAR void *)(uintptr_t)priv->uartbase),
             up_addrenv_va_to_pa(buffer), length);
 }
 
@@ -1482,7 +1482,7 @@ static void u16550_dmarxfree(FAR struct uart_dev_s *dev)
 
   if (priv->chanrx == NULL)
     {
-      priv->chanrx = priv->ops->dmachan(priv, priv->dmarx)
+      priv->chanrx = priv->ops->dmachan(priv, priv->dmarx);
       if (priv->chanrx == NULL)
         {
           return; /* Fail to get DMA channel */
@@ -1492,10 +1492,11 @@ static void u16550_dmarxfree(FAR struct uart_dev_s *dev)
 
       /* Start a never stop DMA cyclic transfer in the background */
 
-      DMA_START_CYCLIC(priv->chanrx, u16550_dmareceive_done, dev,
-                       up_addrenv_va_to_pa(priv->dmarxbuf),
-                       up_addrenv_va_to_pa((FAR void *)priv->uartbase),
-                       priv->dmarxsize, priv->dmarxsize / 4);
+      DMA_START_CYCLIC(
+        priv->chanrx, u16550_dmareceive_done, dev,
+        up_addrenv_va_to_pa(priv->dmarxbuf),
+        up_addrenv_va_to_pa((FAR void *)(uintptr_t)priv->uartbase),
+        priv->dmarxsize, priv->dmarxsize / 4);
     }
 
   /* The receive isn't in the process? */

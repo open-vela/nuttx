@@ -42,6 +42,20 @@ config ARCH_CHIP_A64
 	---help---
 		Allwinner A64 SoC
 
+config ARCH_CHIP_H616
+	bool "Allwinner H616"
+	select ARCH_CORTEX_A53
+	select ARCH_HAVE_ADDRENV
+	select ARCH_HAVE_RESET
+	select ARCH_HAVE_IRQTRIGGER
+	select ARCH_HAVE_MULTICPU
+	select ARCH_NEED_ADDRENV_MAPPING
+	select ARM64_HAVE_PSCI
+	select ARCH_HAVE_IRQPRIO
+	select ARMV8A_HAVE_GICv2
+	---help---
+		Allwinner H616 SoC
+
 config ARCH_CHIP_RK3399
 	bool "Rockchip RK3399"
 	select ARCH_CORTEX_A53
@@ -346,6 +360,7 @@ config ARCH_FAMILY
 config ARCH_CHIP
 	string
 	default "a64"       if ARCH_CHIP_A64
+	default "h616"      if ARCH_CHIP_H616
 	default "rk3399"    if ARCH_CHIP_RK3399
 	default "zynq-mpsoc" if ARCH_CHIP_ZYNQ_MPSOC
 	default "qemu"      if ARCH_CHIP_QEMU_ARM64
@@ -394,6 +409,7 @@ config ARM64_DECODEFIQ
 config ARM64_GIC_VERSION
 	int "GIC version"
 	default 2           if ARCH_CHIP_A64
+	default 2           if ARCH_CHIP_H616
 	default 3
 	range 2 4
 	---help---
@@ -539,6 +555,10 @@ endif
 
 if ARCH_CHIP_ZYNQ_MPSOC
 source "arch/arm64/src/zynq-mpsoc/Kconfig"
+endif
+
+if ARCH_CHIP_H616
+source "arch/arm64/src/h616/Kconfig"
 endif
 
 endif # ARCH_ARM64

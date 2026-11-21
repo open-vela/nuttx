@@ -63,6 +63,15 @@ ssize_t bchlib_write(FAR void *handle, FAR const char *buffer, off_t offset,
   size_t   byteswritten;
   int      ret;
 
+#if defined(CONFIG_BCH_READAHEAD) && CONFIG_BCH_READAHEAD > 0
+  /* Any write invalidates the read-ahead window: it may hold stale
+   * copies of sectors this write touches (both the single-sector
+   * buffered path and the direct multiblock write below).
+   */
+
+  bch->ran = 0;
+#endif
+
   /* Get rid of this special case right away */
 
   if (len < 1)

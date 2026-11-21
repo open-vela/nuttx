@@ -77,6 +77,13 @@ int bchlib_teardown(FAR void *handle)
       kmm_free(bch->buffer);
     }
 
+#if defined(CONFIG_BCH_READAHEAD) && CONFIG_BCH_READAHEAD > 0
+  if (bch->rabuffer)
+    {
+      kmm_free(bch->rabuffer);
+    }
+#endif
+
   nxmutex_destroy(&bch->lock);
   kmm_free(bch);
   return OK;

@@ -1,0 +1,58 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_H616
+
+menu "Allwinner H616 Peripheral Selection"
+
+config H616_DMA
+	bool "DMA Controller (DMAC)"
+	default n
+	---help---
+		Select to enable support for the H616 DMA controller (sun6i/
+		A100 compatible design, 16 channels, LLI descriptors).
+		Implements the generic struct dma_chan_s vtable (see
+		include/nuttx/dma/dma.h).  Currently used by the 16550 UART
+		serial driver for DMA TX (CONFIG_16550_UARTx_DMA).
+
+config H616_SDMMC_IRQ
+	bool "SD/MMC interrupt-driven waiting"
+	default n
+	---help---
+		Select to attach the SDMMC2 (eMMC) controller interrupt
+		(GIC SPI 37) and let the command/data wait loops sleep on a
+		semaphore instead of hot-spinning.  The wait loops keep
+		polling the raw status register as a fallback, so a lost
+		interrupt costs latency, never correctness.
+
+config H616_SDHCI
+	bool "SD/MMC Host Controller (sdc2, eMMC)"
+	default n
+	select ARCH_HAVE_SDIO
+	select ARCH_HAVE_SDIO_WRPROTECT
+	select ARCH_HAVE_SDIO_BLOCKLEN
+	select SDIO_BLOCKSETUP
+	select MMCSD_SDIO
+	---help---
+		Select to enable support for the H616 SD/MMC host controller
+		(sdc2, connected to the on-board eMMC).  Implements the NuttX
+		SDIO interface; pairs with CONFIG_MMCSD.
+
+config H616_SDHCI_INIT_AT_BOOT
+	bool "Initialize the eMMC from board bringup"
+	default y
+	depends on H616_SDHCI
+	---help---
+		Call yuzuki_h616_sdhci_initialize() from the board bringup
+		(yuzuki-h616_bringup.c).  Disable this while debugging the eMMC:
+		the boot path then issues no data command at all, which lets
+		'mmcdiag k 0' run as the very first data command after a power-on
+		reset (used to tell "card poisoned by earlier failed data
+		transfers" apart from "driver/controller initialization
+		difference").
+
+endmenu # Allwinner H616 Peripheral Selection
+
+endif # ARCH_CHIP_H616

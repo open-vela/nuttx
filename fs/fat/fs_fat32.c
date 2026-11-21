@@ -679,7 +679,22 @@ static int fat_get_sectors(FAR struct file *filep, bool read)
     {
       cluster = fat_extendchain(fs, cluster);
 
-      if (cluster < 2 || cluster >= fs->fs_nclusters + 2)
+      /* fat_extendchain returns <0 on a real I/O error, 0 when the volume
+       * has run out of free clusters (NOT an I/O error), and a valid new
+       * cluster number >= 2.  Reporting "out of space" as -EIO made every
+       * dd write on a full volume fail with EIO, which looks exactly like
+       * a hardware failure.
+       */
+
+      if (cluster < 0)
+        {
+          return (int)cluster;
+        }
+      else if (cluster == 0)
+        {
+          return -ENOSPC;
+        }
+      else if (cluster >= fs->fs_nclusters + 2)
         {
           return -EIO;
         }
@@ -702,7 +717,15 @@ static int fat_get_sectors(FAR struct file *filep, bool read)
     {
       cluster = fat_extendchain(fs, cluster);
 
-      if (cluster < 2 || cluster >= fs->fs_nclusters + 2)
+      if (cluster < 0)
+        {
+          return (int)cluster;
+        }
+      else if (cluster == 0)
+        {
+          return -ENOSPC;
+        }
+      else if (cluster >= fs->fs_nclusters + 2)
         {
           return -EIO;
         }

@@ -119,6 +119,7 @@ __start:
 
 real_start:
     /* Disable all exceptions and interrupts */
+    .globl real_start;
 
     msr    DAIFSet, 0xf
 #ifndef CONFIG_UP
@@ -184,7 +185,11 @@ real_start:
     ldr    x25, =arm64_boot_secondary_c_routine
     bl     __reset_prep_c
 
-    PRINT(second_boot, "- Ready to Boot Second CPU\r\n")
+    /* Secondary CPUs print nothing here -- they all boot concurrently and
+     * interleave on the UART (early print has no reliable multi-core lock
+     * before MMU/cache setup). Primary's "Ready to Boot Second CPU" comes
+     * from arm64_boot_secondary_c_routine C code instead.
+     */
 
     b      cpu_boot
 
@@ -233,7 +238,10 @@ switch_el:
     switch_el x0, 3f, 2f, 1f
 3:
 #ifdef CONFIG_ARCH_HAVE_EL3
-    PRINT(switch_el3, "- Boot from EL3\r\n")
+    /* "Boot from EL3" not printed -- primary and secondary CPUs all start
+     * at EL3 concurrently and interleave on the UART. Only the primary's
+     * single early message (primary_boot) is printed, under the print lock.
+     */
 
     /* EL3 init */
 
@@ -271,7 +279,11 @@ switch_el:
     eret
 
 1:
-    PRINT(switch_el1, "- Boot from EL1\r\n")
+    /* "Boot from EL1" not printed here -- primary and secondary CPUs all
+     * pass through this point concurrently and interleave on the UART.
+     * Only the primary's single early message (primary_boot, under the
+     * print lock) is printed; the rest is traced in C code instead.
+     */
 
     /* EL1 init */
 
@@ -286,7 +298,9 @@ el3_boot:
     isb
 
 jump_to_c_entry:
-    PRINT(jump_to_c_entry, "- Boot to C runtime for OS Initialize\r\n")
+    /* "Boot to C runtime" not printed -- see switch_el1 note (concurrent
+     * multi-core early print). C code (board bring-up) takes over logging.
+     */
     ret x25
 
 /* Fail-stop */
@@ -355,17 +369,39 @@ out:
 /* Print early debug messages.
  * x0: Nul-terminated string to print.
  * Clobbers x0-x1
+ *
+ * SMP-safe: multiple CPUs boot concurrently and all print via this
+ * routine; without a lock the per-char UART writes interleave into
+ * garbage. Take a spinlock (ldaxr/stlxr) for the whole string.
  */
+
+    .bss
+    .align 3
+early_print_lock:
+    .quad  0                       /* 0 = unlocked, 1 = locked */
+    .previous
 
 boot_stage_puts:
     stp   xzr, x30, [sp, #-16]!
-1:
+    /* Acquire spinlock: 1: ldaxr w2, [lock]; cbnz w2, 1b; stlxr w2, w3; cbnz w2, 1b */
+    mov   w3, #1                   /* w3 = 1 (locked value) */
+1:  ldr   x2, =early_print_lock
+    ldaxr w4, [x2]                 /* Load exclusive */
+    cbnz  w4, 1b                   /* Already locked, spin */
+    stlxr w4, w3, [x2]             /* Try to store 1 exclusive */
+    cbnz  w4, 1b                   /* Store failed, retry */
+
+2:
     ldrb  w0, [x1], #1       /* Load next char */
     cmp   w0, 0
-    beq   2f                 /* Exit on nul */
+    beq   3f                 /* Exit on nul */
     bl    arm64_lowputc
-    b     1b                 /* Loop */
-2:
+    b     2b                 /* Loop */
+
+3:
+    /* Release spinlock */
+    ldr   x2, =early_print_lock
+    stlr  wzr, [x2]              /* Store 0 (release) */
     ldp   xzr, x30, [sp], #16
     ret
 

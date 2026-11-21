@@ -59,6 +59,12 @@ struct bchlib_s
   bool unlinked;           /* true: The driver has been unlinked */
   FAR uint8_t *buffer;     /* One sector buffer */
 
+#if defined(CONFIG_BCH_READAHEAD) && CONFIG_BCH_READAHEAD > 0
+  size_t rastart;          /* First sector held in the read-ahead window */
+  size_t ran;              /* Number of valid sectors in the window */
+  FAR uint8_t *rabuffer;   /* Read-ahead window, ran <= CONFIG_BCH_READAHEAD */
+#endif
+
 #if defined(CONFIG_BCH_ENCRYPTION)
   uint8_t key[CONFIG_BCH_ENCRYPTION_KEY_SIZE];  /* Encryption key */
 #endif
@@ -85,6 +91,11 @@ EXTERN const struct file_operations g_bch_fops;
 
 EXTERN int  bchlib_flushsector(FAR struct bchlib_s *bch, bool discard);
 EXTERN int  bchlib_readsector(FAR struct bchlib_s *bch, size_t sector);
+
+#if defined(CONFIG_BCH_READAHEAD) && CONFIG_BCH_READAHEAD > 0
+EXTERN int  bchlib_readahead(FAR struct bchlib_s *bch, size_t sector,
+                             size_t nsectors);
+#endif
 
 #undef EXTERN
 #if defined(__cplusplus)

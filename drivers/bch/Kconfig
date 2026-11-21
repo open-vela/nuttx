@@ -34,4 +34,16 @@ config BCH_DEVICE_READONLY
 	---help---
 		Set bch devices read-only
 
+config BCH_READAHEAD
+	int "Sequential read-ahead sectors"
+	default 0
+	---help---
+		Number of sectors fetched in one block read when a sequential
+		access misses the single-sector cache.  0 disables read-ahead.
+		This mainly benefits character-style consumers that read the
+		device in sub-sector or single-sector chunks (e.g. dd with a
+		small bs=), converting a long run of single-sector reads into
+		one multiblock transfer.  The window is invalidated on any
+		write through the same handle.
+
 endif # BCH

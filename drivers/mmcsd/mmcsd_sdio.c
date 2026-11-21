@@ -104,6 +104,17 @@
 #  define MMCSD_MULTIBLOCK_LIMIT CONFIG_MMCSD_MULTIBLOCK_LIMIT
 #endif
 
+/* Force single block writes (multi block reads stay enabled) on controllers
+ * that cannot terminate a multi block write correctly -- see the
+ * MMCSD_NO_MULTIBLOCK_WRITE Kconfig help text.
+ */
+
+#if defined(CONFIG_MMCSD_NO_MULTIBLOCK_WRITE)
+#  define MMCSD_MULTIBLOCK_WRITE 0
+#else
+#  define MMCSD_MULTIBLOCK_WRITE 1
+#endif
+
 #define MMCSD_CAPACITY(b, s)    ((s) >= 10 ? (b) << ((s) - 10) : (b) >> (10 - (s)))
 
 #ifdef CONFIG_BOARD_COREDUMP_BLKDEV
@@ -675,24 +686,42 @@ static void mmcsd_decode_csd(FAR struct mmcsd_state_s *priv, uint32_t csd[4])
                                   ((csd[2] >> 30) & 3);
           uint8_t  csizemult    = (csd[2] >> 15) & 7;
 
+          /* mmcsd_decode_extcsd() runs *before* this call (see
+           * mmcsd_mmcinitialize()) and SEC_COUNT is the authoritative
+           * capacity for a block addressed MMC.  The legacy C_SIZE field of
+           * the CSD is only valid up to 2 GB: on this board (H616 eMMC,
+           * MMC 5.1, 29.1 GiB) it decodes to 126 MiB, and scaling it by
+           * (1 << (readbllen - 9)) turned the correct 61071360 sector
+           * SEC_COUNT into a bogus 244285440 sectors.
+           */
+
+          bool     from_extcsd  = (priv->part[0].nblocks != 0);
+
+          _info("DIAG: CSD csize=%u csizemult=%u readbllen=%u nblocks(in)=%"
+                PRIuOFF " from_extcsd=%d\n",
+                csize, csizemult, readbllen, priv->part[0].nblocks,
+                (int)from_extcsd);
+
           priv->blockshift      = readbllen;
           priv->blocksize       = (1 << readbllen);
 
-          /* For emmc densities up to 2 GB */
+          /* For emmc densities up to 2 GB.  Never overwrite (or scale) a
+           * capacity that was already derived from the extended CSD.
+           */
 
-          if (csize != MMCSD_CSD_CSIZE_THRESHOLD)
+          if (!from_extcsd && csize != MMCSD_CSD_CSIZE_THRESHOLD)
             {
               priv->part[0].nblocks = ((uint32_t)csize + 1) *
                                       (1 << (csizemult + 2));
+
+              if (priv->blocksize > 512)
+                {
+                  priv->part[0].nblocks <<= (priv->blockshift - 9);
+                }
             }
 
           if (priv->blocksize > 512)
             {
-              if (csize != MMCSD_CSD_CSIZE_THRESHOLD)
-                {
-                  priv->part[0].nblocks <<= (priv->blockshift - 9);
-                }
-
               priv->blocksize   = 512;
               priv->blockshift  = 9;
             }
@@ -2444,7 +2473,7 @@ static ssize_t mmcsd_write(FAR struct inode *inode,
         {
           /* Write this sector into the user buffer */
 
-#if MMCSD_MULTIBLOCK_LIMIT == 1
+#if MMCSD_MULTIBLOCK_LIMIT == 1 || !MMCSD_MULTIBLOCK_WRITE
           /* Write each block using only the single block transfer method */
 
           nwrite = mmcsd_writesingle(part, buffer, sector);
@@ -2902,6 +2931,10 @@ static void mmcsd_decode_extcsd(FAR struct mmcsd_state_s *priv,
 
   priv->part[0].nblocks = (extcsd[215] << 24) | (extcsd[214] << 16) |
                           (extcsd[213] << 8) | extcsd[212];
+  _info("DIAG: extcsd[212..215]=%02x %02x %02x %02x -> "
+        "SEC_COUNT=%" PRIuOFF "\n",
+        extcsd[212], extcsd[213], extcsd[214], extcsd[215],
+        priv->part[0].nblocks);
   finfo("MMC ext CSD read succsesfully, number of block %" PRIuOFF "\n",
                                                 priv->part[0].nblocks);
 
@@ -3912,7 +3945,8 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
    * then the card is definitely of MMC type
    */
 
-  mmcsd_sendcmdpoll(priv, MMC_CMD1, MMCSD_VDD_33_34 | mmccapacity);
+  mmcsd_sendcmdpoll(priv, MMC_CMD1,
+                    MMCSD_VDD_32_33 | MMCSD_VDD_33_34 | mmccapacity);
   ret = SDIO_RECVR3(priv->dev, MMC_CMD1, &response);
 
   /* Was the operating range set successfully */
@@ -4138,7 +4172,8 @@ static int mmcsd_cardidentify(FAR struct mmcsd_state_s *priv)
            * it will automatically go back to the standby state).
            */
 
-          mmcsd_sendcmdpoll(priv, MMC_CMD1, MMCSD_VDD_33_34 | mmccapacity);
+          mmcsd_sendcmdpoll(priv, MMC_CMD1,
+                    MMCSD_VDD_32_33 | MMCSD_VDD_33_34 | mmccapacity);
           ret = SDIO_RECVR3(priv->dev, MMC_CMD1, &response);
 
           /* Was the operating range set successfully */

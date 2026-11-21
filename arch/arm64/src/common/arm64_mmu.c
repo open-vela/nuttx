@@ -175,14 +175,14 @@ static const struct arm_mmu_region g_mmu_nxrt_regions[] =
   MMU_REGION_FLAT_ENTRY("nx_code",
                         (uint64_t)_stext,
                         (uint64_t)_sztext,
-                        MT_CODE | MT_SECURE),
+                        MT_CODE | MT_NS),
 
   /* Mark rodata segment cacheable, read only and execute-never */
 
   MMU_REGION_FLAT_ENTRY("nx_rodata",
                         (uint64_t)_srodata,
                         (uint64_t)_szrodata,
-                        MT_RODATA | MT_SECURE),
+                        MT_RODATA | MT_NS),
 
   /* Mark rest of the mirtos execution regions (data, bss, noinit, etc.)
    * cacheable, read-write
@@ -192,13 +192,13 @@ static const struct arm_mmu_region g_mmu_nxrt_regions[] =
   MMU_REGION_FLAT_ENTRY("nx_data",
                         (uint64_t)_sdata,
                         (uint64_t)_szdata,
-                        MT_NORMAL | MT_RW | MT_SECURE),
+                        MT_NORMAL | MT_RW | MT_NS),
 
 #ifdef CONFIG_BUILD_KERNEL
   MMU_REGION_FLAT_ENTRY("nx_pgpool",
                         (uint64_t)CONFIG_ARCH_PGPOOL_PBASE,
                         (uint64_t)CONFIG_ARCH_PGPOOL_SIZE,
-                        MT_NORMAL | MT_RW | MT_SECURE),
+                        MT_NORMAL | MT_RW | MT_NS),
 #endif
 };
 
